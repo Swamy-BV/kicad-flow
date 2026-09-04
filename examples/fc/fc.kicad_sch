@@ -1,0 +1,168 @@
+(kicad_sch
+	(version 20250114)
+	(generator "kicad_flow")
+	(generator_version "10.0")
+	(uuid "3f846f23-e27d-4ce0-a405-81b64aeb1c91")
+	(title_block
+		(title "F405 flight controller -- root")
+	)
+	(paper "A4")
+	(lib_symbols)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+		(path "/0d1ab2cb-f467-4a0e-9fa6-21aabdd59649"
+			(page "2")
+		)
+		(path "/08225647-d911-4c46-92ed-60dd9312f473"
+			(page "3")
+		)
+		(path "/01e0935a-c396-425f-a974-22b27a4b7306"
+			(page "4")
+		)
+		(path "/55eaa580-cfef-4833-b3ac-b5e8ed915bc3"
+			(page "5")
+		)
+	)
+	(sheet
+		(at 63.5 76.2)
+		(size 50.8 38.1)
+		(stroke
+			(width 0)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "0d1ab2cb-f467-4a0e-9fa6-21aabdd59649")
+		(property "Sheetname" "Power"
+			(at 63.5 74.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sheetfile" "power.kicad_sch"
+			(at 63.5 115.57 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project ""
+				(path "/3f846f23-e27d-4ce0-a405-81b64aeb1c91"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 152.4 76.2)
+		(size 50.8 38.1)
+		(stroke
+			(width 0)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "08225647-d911-4c46-92ed-60dd9312f473")
+		(property "Sheetname" "MCU"
+			(at 152.4 74.93 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sheetfile" "mcu.kicad_sch"
+			(at 152.4 115.57 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project ""
+				(path "/3f846f23-e27d-4ce0-a405-81b64aeb1c91"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 63.5 133.35)
+		(size 50.8 38.1)
+		(stroke
+			(width 0)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "01e0935a-c396-425f-a974-22b27a4b7306")
+		(property "Sheetname" "Sensors"
+			(at 63.5 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sheetfile" "sensors.kicad_sch"
+			(at 63.5 172.72 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project ""
+				(path "/3f846f23-e27d-4ce0-a405-81b64aeb1c91"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 152.4 133.35)
+		(size 50.8 38.1)
+		(stroke
+			(width 0)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "55eaa580-cfef-4833-b3ac-b5e8ed915bc3")
+		(property "Sheetname" "IO"
+			(at 152.4 132.08 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sheetfile" "io.kicad_sch"
+			(at 152.4 172.72 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(instances
+			(project ""
+				(path "/3f846f23-e27d-4ce0-a405-81b64aeb1c91"
+					(page "5")
+				)
+			)
+		)
+	)
+)

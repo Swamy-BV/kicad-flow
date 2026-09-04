@@ -1,0 +1,30 @@
+#!/bin/sh
+# Run the static half of the quality gate before every commit.
+#
+# Only the fast checks live here (~0.5 s warm) so committing stays cheap; the
+# test suite shells out to kicad-cli and takes over a minute, so it runs in the
+# pre-push hook instead. CI re-runs everything regardless.
+#
+# Note: the checks read the WORKING TREE, not just what is staged -- so an
+# unstaged edit elsewhere can fail this hook. Bypass with `git commit --no-verify`.
+
+. "$(dirname "$0")/_gate.sh"
+
+# Nothing to type-check or lint in a docs-only commit.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '\.py$'; then
+    exit 0
+fi
+
+echo "pre-commit: static gate"
+run_step "ruff check" ruff check .
+run_step "ruff format --check" ruff format --check .
+run_step "mypy (strict)" mypy
+
+if [ "$fail" -ne 0 ]; then
+    echo
+    echo "pre-commit failed. Fix the above, or:"
+    echo "  .venv/Scripts/python -m ruff check --fix .   # auto-fixable lints"
+    echo "  .venv/Scripts/python -m ruff format .        # formatting"
+    echo "  git commit --no-verify                       # bypass deliberately"
+    exit 1
+fi

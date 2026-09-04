@@ -1,0 +1,29 @@
+#!/bin/sh
+# Run the test suite before code leaves the machine.
+#
+# The suite is process-spawn-bound (most tests shell out to kicad-cli/pcbnew)
+# and takes ~45 s across cores, which is too slow per-commit but right per-push.
+# Tests needing KiCad skip themselves when it is absent. Bypass with
+# `git push --no-verify`.
+
+. "$(dirname "$0")/_gate.sh"
+
+# Deferring the suite is a deliberate, visible choice: mid-refactor it is often
+# cheaper to let the failures pile up and fix them in one pass than to be
+# blocked on every push. It is announced loudly so it is never a silent bypass.
+if _truthy "$KICAD_FLOW_SKIP_TESTS"; then
+    echo "pre-push: KICAD_FLOW_SKIP_TESTS set -- SKIPPING the test suite."
+    echo "          The suite has NOT been run; green is unverified."
+    exit 0
+fi
+
+echo "pre-push: test suite"
+run_step "pytest" pytest -q
+
+if [ "$fail" -ne 0 ]; then
+    echo
+    echo "pre-push failed: the test suite is not green."
+    echo "  KICAD_FLOW_SKIP_TESTS=1 git push   # defer the suite, keep lint/types"
+    echo "  git push --no-verify               # bypass every hook"
+    exit 1
+fi

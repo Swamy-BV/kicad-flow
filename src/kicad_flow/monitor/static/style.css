@@ -1,0 +1,316 @@
+/* kicad-flow monitor. Colour roles come from the house data-viz palette:
+   surfaces + ink for chrome, the fixed status slots for pass/fail. Status
+   colour never carries meaning alone -- every row pairs it with a glyph and
+   the outcome text, which is the documented mitigation for red/green CVD. */
+
+:root {
+  color-scheme: dark;
+  --plane: #0d0d0d;      /* page plane */
+  --surface: #1a1a19;    /* panel surface */
+  --line: #2c2c2a;       /* hairline */
+  --ink: #ffffff;        /* primary */
+  --ink-2: #c3c2b7;      /* secondary */
+  --muted: #898781;      /* labels */
+  --accent: #3987e5;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --radius: 6px;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --line: #e1e0d9;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --accent: #2a78d6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  background: var(--plane);
+  color: var(--ink-2);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+button {
+  background: var(--surface);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.3;
+}
+button:hover { border-color: var(--muted); color: var(--ink); }
+button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
+button:focus-visible,
+input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* ---- preview ----------------------------------------------------------- */
+
+#main { flex: 2; display: flex; flex-direction: column; min-width: 0; }
+#bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+#bar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
+#bar .grow { flex: 1; }
+#zoom {
+  color: var(--muted);
+  min-width: 46px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#zoomctl { display: flex; gap: 6px; align-items: center; }
+#hint { color: var(--muted); }
+#view {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--plane);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+#view.drag { cursor: grabbing; }
+#stage { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+#stage img {
+  display: block;
+  background: #f5f4ef;
+  border: 1px solid var(--line);
+  -webkit-user-drag: none;
+  user-select: none;
+}
+#spin {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: rgb(0 0 0 / 35%);
+  pointer-events: none;
+}
+#spin.on { display: flex; }
+/* ---- feed -------------------------------------------------------------- */
+
+#side {
+  flex: 1;
+  min-width: 340px;
+  max-width: 560px;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  min-height: 0;
+}
+#head {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#head b { color: var(--ink); font-weight: 600; }
+#head small {
+  color: var(--muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#head .grow { flex: 1; }
+/* Filters live in one row above the feed. */
+.filters {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+#q {
+  flex: 1;
+  min-width: 0;
+  background: var(--plane);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 4px 8px;
+  font: inherit;
+}
+#q::placeholder { color: var(--muted); }
+.tally {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#feed { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+/* One run's calls, grouped under a sticky header -- the review view. */
+.run-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding: 5px 12px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: flex;
+  gap: 8px;
+}
+.run-head .grow { flex: 1; }
+.row {
+  /* min-width:0 on the flexible cell is what makes the ellipsis work: a grid
+     item defaults to min-width:auto, which for nowrap text is the full text
+     width, so it would never shrink and the row would overflow instead. */
+  display: grid;
+  /* time · glyph · tool · summary · duration -- five, matching the five cells
+     rowFor() appends. Too few columns and the last cell wraps onto an implicit
+     second row while the others collide. */
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.row:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.row.bad { box-shadow: inset 2px 0 0 var(--critical); }
+.at {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+}
+.mark { font-weight: 700; }
+.mark.ok { color: var(--good); }
+.mark.bad { color: var(--critical); }
+.tool { color: var(--ink); }
+.sum {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+}
+.sum .k { color: var(--muted); }
+.ms {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* A duration is a VALUE, so it wears an ink token, never a status hue: the
+   warning step is 1.79:1 on the light surface and the number became unreadable.
+   Weight carries "this one was slow" instead. */
+.ms.slow { color: var(--ink); font-weight: 600; }
+.err {
+  grid-column: 4 / -1;   /* under the summary, clear of time/glyph/tool */
+  color: var(--critical);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 11.5px;
+}
+/* Expanded detail: full arguments and the tool's own answer. */
+.detail {
+  padding: 6px 12px 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--plane);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+}
+.detail dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; }
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.detail .sec { color: var(--muted); text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; margin: 6px 0 2px; }
+#empty { padding: 24px 12px; color: var(--muted); text-align: center; }
+.c-qty { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); width: 1%; }
+/* A value is a short part number; letting it wrap to win space back from
+   the stretched designators column made every other row two lines tall. */
+.c-val { color: var(--ink); white-space: nowrap; }
+/* Designators absorb the table's slack, so the columns fill the width instead
+   of packing left and leaving a dead margin. */
+.c-refs {
+  width: 100%;
+  color: var(--muted);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+/* A footprint name has no spaces, so any wrapping breaks it mid-token and the
+   row grows to three lines. Keep it on one and put the full library:name in a
+   tooltip -- the panel is never wide enough to show it all anyway. */
+.c-fp {
+  color: var(--muted);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.c-lcsc { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+/* Status wears a word, not just a colour -- the palette's status steps are
+   reserved and always ship with a label. */
+.chip {
+  display: inline-block;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.chip.none { color: var(--critical); }
+.chip.low { color: var(--warning); }
+.chip.unlisted { color: var(--critical); }
+:root[data-theme="light"] .chip.low { color: #8a5a00; }  /* warning is 1.79:1 on light */
+
+/* ---- responsive -------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  body { flex-direction: column; overflow: auto; }
+  #main { flex: none; height: 55vh; }
+  #side {
+    max-width: none;
+    min-width: 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    flex: 1;
+    min-height: 45vh;
+  }
+}
+@media (max-width: 560px) {
+  #hint { display: none; }
+  #main { height: 45vh; }
+  /* Narrow: drop the duration onto its own line under the summary rather
+     than squeezing five columns into a phone width. */
+  .row { grid-template-columns: auto auto auto minmax(0, 1fr); }
+  .ms { grid-column: 4; text-align: right; }
+  .err { grid-column: 1 / -1; }
+}
+/* Phone widths. The two things here that cannot shrink on their own are the
+   nowrap call-count and the detail list's label column, so give them an out. */
+@media (max-width: 430px) {
+  #count { display: none; }
+  #head small { display: none; }
+  .detail dl { grid-template-columns: minmax(0, 1fr); }
+  .detail dt { margin-top: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
