@@ -80,6 +80,10 @@ async def build(client: Any) -> int:
     #: `add_power`) still goes on its own, because the next coordinate depends
     #: on what comes back.
     pending: list[dict[str, Any]] = []
+    #: Power symbols waiting to go down together. Kept apart from
+    #: `pending` because their replies ARE read -- each one's pin is
+    #: where its wire has to end.
+    rails: list[dict[str, Any]] = []
 
     def pend(tool: str, **kw: Any) -> None:
         """Queue a write for the next flush."""
@@ -93,6 +97,14 @@ async def build(client: Any) -> int:
 
     async def flush() -> None:
         """Send the queue, one call per kind of thing in it."""
+        if rails:
+            got = await call("add_power", path=rails[0]["sheet"], symbols=[
+                {"x": r["x"], "y": r["y"], "net": r["net"]} for r in rails])
+            for r, sym in zip(rails, got.get("symbols", []), strict=True):
+                at = sym["pins"][0]
+                pend("add_wire", path=r["sheet"], x1=r["from"][0],
+                     y1=r["from"][1], x2=at["x"], y2=at["y"])
+            rails.clear()
         if not pending:
             return
         for kind in dict.fromkeys(op["tool"] for op in pending):
@@ -138,18 +150,20 @@ async def build(client: Any) -> int:
                    kind=kind, rotation=rotation,
                    justify="right" if dx < 0 else "left")
 
-    async def rail(sheet: str, part: dict[str, Any], number: str, name: str,
-                   length: float = 4 * G) -> None:
-        """Take a pin to a power symbol of its own."""
+    def rail(sheet: str, part: dict[str, Any], number: str, name: str,
+             length: float = 4 * G) -> None:
+        """Queue a pin's own power symbol, and the wire that will reach it.
+
+        The symbol's position is arithmetic on a pin of a part that is ALREADY
+        placed, so nothing here needs a reply -- which means every rail on a
+        sheet can go down in one call. `flush` places them, then draws the
+        wires to the pins that came back.
+        """
         p = pin(part, number)
         dx, dy = outward(p)
-        end = (p["x"] + dx * length, p["y"] + dy * length)
-        got = await call("add_power", path=sheet,
-                         symbols=[{"x": end[0], "y": end[1], "net": name}])
-        sym = got["symbols"][0] if got else {}
-        if sym:
-            pend("add_wire", path=sheet, x1=p["x"], y1=p["y"],
-                       x2=sym["pins"][0]["x"], y2=sym["pins"][0]["y"])
+        rails.append({"sheet": sheet, "from": (p["x"], p["y"]),
+                      "x": p["x"] + dx * length, "y": p["y"] + dy * length,
+                      "net": name})
 
     async def put(sheet: str, lib_id: str, ref: str, x: float, y: float,
                   value: str = "", rotation: float = 0.0,
@@ -211,8 +225,8 @@ async def build(client: Any) -> int:
                x2=pin(buck, "VIN")["x"], y2=pin(buck, "VIN")["y"])
     pend("add_label", path=power, x=pin(jb, "1")["x"] + 2 * G, y=vbat_y,
                text="VBAT", kind="global", justify="left")
-    await rail(power, jb, "2", "GND")
-    await rail(power, cb, "2", "GND")
+    rail(power, jb, "2", "GND")
+    rail(power, cb, "2", "GND")
 
     # EN pulled to VIN: the converter is on whenever the battery is.
     ren = await put(power, "Device:R", "R1", pin(buck, "EN")["x"] - 6 * G,
@@ -239,7 +253,7 @@ async def build(client: Any) -> int:
     pend("add_wire", path=power, x1=pin(cboot, "2")["x"],
                y1=pin(cboot, "2")["y"], x2=pin(cboot, "2")["x"], y2=sw["y"])
     pend("add_junction", path=power, x=pin(cboot, "2")["x"], y=sw["y"])
-    await rail(power, buck, "GND", "GND")
+    rail(power, buck, "GND", "GND")
 
     out5 = pin(ind, "2")
     cout = await put(power, "Device:C", "C3", out5["x"] + 6 * G,
@@ -248,7 +262,7 @@ async def build(client: Any) -> int:
                x2=pin(cout, "1")["x"], y2=out5["y"])
     pend("add_wire", path=power, x1=pin(cout, "1")["x"], y1=out5["y"],
                x2=pin(cout, "1")["x"], y2=pin(cout, "1")["y"])
-    await rail(power, cout, "2", "GND")
+    rail(power, cout, "2", "GND")
     got5 = await call("add_power", path=power, symbols=[{
         "x": pin(cout, "1")["x"] + 8 * G, "y": out5["y"] - 5 * G,
         "net": "+5V"}])
@@ -268,7 +282,7 @@ async def build(client: Any) -> int:
                y1=pin(rfb1, "1")["y"], x2=pin(rfb1, "1")["x"], y2=out5["y"])
     pend("add_junction", path=power, x=pin(rfb1, "1")["x"], y=out5["y"])
     await series(power, rfb1, "2", rfb2, "1")
-    await rail(power, rfb2, "2", "GND")
+    rail(power, rfb2, "2", "GND")
     fb = pin(buck, "FB")
     pend("add_wire", path=power, x1=fb["x"], y1=fb["y"],
                x2=fb["x"], y2=pin(rfb1, "2")["y"])
@@ -280,21 +294,21 @@ async def build(client: Any) -> int:
     # 3.3 V for the MCU and the sensors.
     ldo = await put(power, "Regulator_Linear:AP2112K-3.3", "U2", 170.18, 111.76,
                     "AP2112K-3.3")
-    await rail(power, ldo, "VIN", "+5V")
-    await rail(power, ldo, "EN", "+5V", length=8 * G)
-    await rail(power, ldo, "GND", "GND")
-    await rail(power, ldo, "VOUT", "+3V3")
+    rail(power, ldo, "VIN", "+5V")
+    rail(power, ldo, "EN", "+5V", length=8 * G)
+    rail(power, ldo, "GND", "GND")
+    rail(power, ldo, "VOUT", "+3V3")
     for ref, x, netname in (("C4", 152.4, "+5V"), ("C5", 190.5, "+3V3")):
         cap = await put(power, "Device:C", ref, x, 132.08, "10u")
-        await rail(power, cap, "1", netname)
-        await rail(power, cap, "2", "GND")
+        rail(power, cap, "1", netname)
+        rail(power, cap, "2", "GND")
 
     # Battery sense: 10:1 into an ADC pin on the MCU sheet.
     rs1 = await put(power, "Device:R", "R4", 76.2, 129.54, "10k")
     rs2 = await put(power, "Device:R", "R5", 76.2, 149.86, "1k")
     await net(power, rs1, "1", "VBAT")
     await series(power, rs1, "2", rs2, "1")
-    await rail(power, rs2, "2", "GND")
+    rail(power, rs2, "2", "GND")
     mid = pin(rs1, "2")
     pend("add_wire", path=power, x1=mid["x"], y1=mid["y"],
                x2=mid["x"] + 10 * G, y2=mid["y"])
@@ -353,9 +367,9 @@ async def build(client: Any) -> int:
         await net(mcu, u3, number, name, length=(8 + (index % 3) * 6) * G)
     # Supply pins: four VDD plus VBAT and VDDA, all on the top edge.
     for number in ("1", "19", "32", "48", "64", "13"):
-        await rail(mcu, u3, number, "+3V3", length=6 * G)
+        rail(mcu, u3, number, "+3V3", length=6 * G)
     for number in ("12", "18", "63"):
-        await rail(mcu, u3, number, "GND", length=6 * G)
+        rail(mcu, u3, number, "GND", length=6 * G)
 
     # Crystal on PH0/PH1.
     #
@@ -369,7 +383,7 @@ async def build(client: Any) -> int:
     await net(mcu, u3, "PH1", "OSC_OUT", kind="local")
     await net(mcu, y1, "3", "OSC_IN", length=8 * G, kind="local")
     await net(mcu, y1, "1", "OSC_OUT", length=8 * G, kind="local")
-    await rail(mcu, y1, "2", "GND", length=6 * G)
+    rail(mcu, y1, "2", "GND", length=6 * G)
     for index, (ref, number, name) in enumerate((("C6", "3", "OSC_IN"),
                                                  ("C7", "1", "OSC_OUT"))):
         # Own columns. The crystal's two pins are 7.62 mm apart and a
@@ -379,7 +393,7 @@ async def build(client: Any) -> int:
                         pin(y1, number)["x"] + (14 + index * 8) * G,
                         pin(y1, number)["y"] + 4 * G, "20p")
         await net(mcu, cap, "1", name, length=4 * G, kind="local")
-        await rail(mcu, cap, "2", "GND")
+        rail(mcu, cap, "2", "GND")
 
     # Reset and boot.
     rst = pin(u3, "NRST")
@@ -389,7 +403,7 @@ async def build(client: Any) -> int:
                x2=pin(rr, "2")["x"], y2=rst["y"])
     pend("add_wire", path=mcu, x1=pin(rr, "2")["x"], y1=rst["y"],
                x2=pin(rr, "2")["x"], y2=pin(rr, "2")["y"])
-    await rail(mcu, rr, "1", "+3V3")
+    rail(mcu, rr, "1", "+3V3")
     crst = await put(mcu, "Device:C", "C8", rst["x"] - 18 * G, rst["y"] + 6 * G,
                      "100n")
     pend("add_wire", path=mcu, x1=pin(crst, "1")["x"],
@@ -397,7 +411,7 @@ async def build(client: Any) -> int:
     pend("add_wire", path=mcu, x1=pin(crst, "1")["x"], y1=rst["y"],
                x2=pin(rr, "2")["x"], y2=rst["y"])
     pend("add_junction", path=mcu, x=pin(rr, "2")["x"], y=rst["y"])
-    await rail(mcu, crst, "2", "GND")
+    rail(mcu, crst, "2", "GND")
 
     boot = pin(u3, "BOOT0")
     rb = await put(mcu, "Device:R", "R7", boot["x"] - 10 * G, boot["y"] + 8 * G,
@@ -406,7 +420,7 @@ async def build(client: Any) -> int:
                x2=pin(rb, "1")["x"], y2=boot["y"])
     pend("add_wire", path=mcu, x1=pin(rb, "1")["x"], y1=boot["y"],
                x2=pin(rb, "1")["x"], y2=pin(rb, "1")["y"])
-    await rail(mcu, rb, "2", "GND")
+    rail(mcu, rb, "2", "GND")
 
     # VCAP: the core regulator's own capacitors.
     for index, (ref, number) in enumerate((("C9", "VCAP_1"),
@@ -420,14 +434,14 @@ async def build(client: Any) -> int:
                    x2=pin(cap, "1")["x"], y2=p["y"])
         pend("add_wire", path=mcu, x1=pin(cap, "1")["x"], y1=p["y"],
                    x2=pin(cap, "1")["x"], y2=pin(cap, "1")["y"])
-        await rail(mcu, cap, "2", "GND")
+        rail(mcu, cap, "2", "GND")
 
     # Decoupling: one per supply pin, in a bank rather than over the part.
     for index in range(5):
         cap = await put(mcu, "Device:C", f"C1{index + 1}", 254.0 + index * 8 * G,
                         88.9, "100n")
-        await rail(mcu, cap, "1", "+3V3")
-        await rail(mcu, cap, "2", "GND")
+        rail(mcu, cap, "1", "+3V3")
+        rail(mcu, cap, "2", "GND")
 
     # USB, and the SWD header.
     usb = await put(mcu, "Connector:USB_C_Receptacle_USB2.0_16P", "J2",
@@ -436,9 +450,9 @@ async def build(client: Any) -> int:
     await net(mcu, usb, "A7", "USB_DM", length=8 * G)
     await net(mcu, u3, "PA12", "USB_DP")
     await net(mcu, u3, "PA11", "USB_DM")
-    await rail(mcu, usb, "A4", "+5V", length=8 * G)
-    await rail(mcu, usb, "A1", "GND", length=6 * G)
-    await rail(mcu, usb, "SH", "GND", length=10 * G)
+    rail(mcu, usb, "A4", "+5V", length=8 * G)
+    rail(mcu, usb, "A1", "GND", length=6 * G)
+    rail(mcu, usb, "SH", "GND", length=10 * G)
     for number in ("B6", "B7", "A8", "B8"):
         p = pin(usb, number)
         pend("add_no_connect", path=mcu, x=p["x"], y=p["y"])
@@ -450,14 +464,14 @@ async def build(client: Any) -> int:
                    x2=pin(res, "1")["x"], y2=p["y"])
         pend("add_wire", path=mcu, x1=pin(res, "1")["x"], y1=p["y"],
                    x2=pin(res, "1")["x"], y2=pin(res, "1")["y"])
-        await rail(mcu, res, "2", "GND")
+        rail(mcu, res, "2", "GND")
 
     swd = await put(mcu, "Connector:Conn_01x04_Pin", "J3", 254.0, 149.86,
                     "SWD", mirror="y")
-    await rail(mcu, swd, "1", "+3V3", length=6 * G)
+    rail(mcu, swd, "1", "+3V3", length=6 * G)
     await net(mcu, swd, "2", "SWDIO", length=6 * G)
     await net(mcu, swd, "3", "SWCLK", length=6 * G)
-    await rail(mcu, swd, "4", "GND", length=6 * G)
+    rail(mcu, swd, "4", "GND", length=6 * G)
     await net(mcu, u3, "PA13", "SWDIO")
     await net(mcu, u3, "PA14", "SWCLK")
 
@@ -493,10 +507,10 @@ async def build(client: Any) -> int:
                                             ("8", "IMU_CS"),
                                             ("12", "IMU_INT"))):
         await net(sen, imu, number, name, length=(16 + (index % 3) * 9) * G)
-    await rail(sen, imu, "13", "+3V3")
-    await rail(sen, imu, "18", "GND")
+    rail(sen, imu, "13", "+3V3")
+    rail(sen, imu, "18", "GND")
     for number in ("1", "11"):                # CLKIN and FSYNC go to ground
-        await rail(sen, imu, number, "GND", length=8 * G)
+        rail(sen, imu, number, "GND", length=8 * G)
     for number in ("6", "7"):                 # the auxiliary I2C is unused
         p = pin(imu, number)
         pend("add_no_connect", path=sen, x=p["x"], y=p["y"])
@@ -511,10 +525,10 @@ async def build(client: Any) -> int:
                    x2=pin(cap, "1")["x"], y2=p["y"])
         pend("add_wire", path=sen, x1=pin(cap, "1")["x"], y1=p["y"],
                    x2=pin(cap, "1")["x"], y2=pin(cap, "1")["y"])
-        await rail(sen, cap, "2", "GND")
+        rail(sen, cap, "2", "GND")
     cimu = await put(sen, "Device:C", "C18", 63.5, 139.7, "100n")
-    await rail(sen, cimu, "1", "+3V3")
-    await rail(sen, cimu, "2", "GND")
+    rail(sen, cimu, "1", "+3V3")
+    rail(sen, cimu, "2", "GND")
 
     flash = await put(sen, "Memory_Flash:W25Q128JVS", "U5", 190.5, 96.52,
                       "W25Q128JVS")
@@ -525,8 +539,8 @@ async def build(client: Any) -> int:
                                             ("3", "FLASH_WP"),
                                             ("7", "FLASH_HOLD"))):
         await net(sen, flash, number, name, length=(16 + (index % 3) * 9) * G)
-    await rail(sen, flash, "8", "+3V3")
-    await rail(sen, flash, "4", "GND")
+    rail(sen, flash, "8", "+3V3")
+    rail(sen, flash, "4", "GND")
     # WP and HOLD held inactive through pull-ups rather than tied straight to
     # the rail: an IO pin wired directly to a regulator's output is a pin-type
     # conflict, and a resistor between them is what a real design does anyway.
@@ -538,11 +552,11 @@ async def build(client: Any) -> int:
     for ref, name, y in (("R11", "FLASH_WP", 127.0),
                          ("R12", "FLASH_HOLD", 139.7)):
         res = await put(sen, "Device:R", ref, 203.2, y, "10k", rotation=90)
-        await rail(sen, res, "1", "+3V3", length=6 * G)
+        rail(sen, res, "1", "+3V3", length=6 * G)
         await net(sen, res, "2", name, length=6 * G)
     cfl = await put(sen, "Device:C", "C19", 152.4, 139.7, "100n")
-    await rail(sen, cfl, "1", "+3V3")
-    await rail(sen, cfl, "2", "GND")
+    rail(sen, cfl, "1", "+3V3")
+    rail(sen, cfl, "2", "GND")
     await flush()
     await call("save_sheet", path=sen)
 
@@ -556,33 +570,33 @@ async def build(client: Any) -> int:
         return failures
     for index, name in enumerate(("M1", "M2", "M3", "M4")):
         await net(io, motors, str(index * 2 + 1), name, length=8 * G)
-        await rail(io, motors, str(index * 2 + 2), "GND", length=8 * G)
+        rail(io, motors, str(index * 2 + 2), "GND", length=8 * G)
 
     for ref, x, value, nets in (
             ("J5", 127.0, "RX", ("RX_TX", "RX_RX")),
             ("J6", 165.1, "VTX", ("VTX_TX", "VTX_RX")),
             ("J7", 203.2, "GPS", ("GPS_TX", "GPS_RX"))):
         conn = await put(io, "Connector:Conn_01x04_Pin", ref, x, 88.9, value)
-        await rail(io, conn, "1", "+5V", length=8 * G)
+        rail(io, conn, "1", "+5V", length=8 * G)
         await net(io, conn, "2", nets[0], length=8 * G)
         await net(io, conn, "3", nets[1], length=8 * G)
-        await rail(io, conn, "4", "GND", length=8 * G)
+        rail(io, conn, "4", "GND", length=8 * G)
 
     strip = await put(io, "Connector:Conn_01x03_Pin", "J8", 63.5, 139.7,
                       "LED STRIP")
-    await rail(io, strip, "1", "+5V", length=8 * G)
+    rail(io, strip, "1", "+5V", length=8 * G)
     await net(io, strip, "2", "LED_DATA", length=8 * G)
-    await rail(io, strip, "3", "GND", length=8 * G)
+    rail(io, strip, "3", "GND", length=8 * G)
 
     # The buzzer is switched low-side: the MCU pin cannot sink it directly.
     bz = await put(io, "Device:Buzzer", "BZ1", 152.4, 133.35, "5V")
     q1 = await put(io, "Transistor_FET:Q_NMOS_GSD", "Q1", 152.4, 158.75, "2N7002")
     if failures:
         return failures
-    await rail(io, bz, "1", "+5V", length=6 * G)
+    rail(io, bz, "1", "+5V", length=6 * G)
     pend("add_wire", path=io, x1=pin(bz, "2")["x"], y1=pin(bz, "2")["y"],
                x2=pin(q1, "D")["x"], y2=pin(q1, "D")["y"])
-    await rail(io, q1, "S", "GND", length=6 * G)
+    rail(io, q1, "S", "GND", length=6 * G)
     rg = await put(io, "Device:R", "R10", pin(q1, "G")["x"] - 10 * G,
                    pin(q1, "G")["y"], "100R", rotation=90)
     await series(io, rg, "2", q1, "G")
