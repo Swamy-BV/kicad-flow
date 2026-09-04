@@ -36,8 +36,12 @@ from .. import _library as library
 from .._sexpr import Node, Sym, dumps, loads
 
 #: Paper sizes, and the margin KiCad's title block eats on each edge.
-PAPER = {"A4": (297.0, 210.0), "A3": (420.0, 297.0), "A2": (594.0, 420.0),
-         "A1": (841.0, 594.0), "A0": (1189.0, 841.0)}
+#: A4 and A3, and nothing larger on purpose. A2 upwards is a page nobody reads
+#: -- it is printed at a size that does not exist on a desk, and on screen it
+#: is a long pan at a zoom where the pin numbers are gone. A design that will
+#: not fit A3 wants another SHEET, which costs one `add_sheets` call and gives
+#: the design a structure a reader can follow.
+PAPER = {"A4": (297.0, 210.0), "A3": (420.0, 297.0)}
 _MARGIN = 10.0
 
 _LABEL_NODE = {"local": "label", "global": "global_label",
@@ -1134,7 +1138,11 @@ def create(path: str | Path, *, paper: str = "A4", title: str = "",
     binds to the interface rather than to this backend.
     """
     if paper not in PAPER:
-        raise ValueError(f"paper must be one of {list(PAPER)}")
+        raise ValueError(
+            f"paper must be A4 or A3, not {paper!r}. There is deliberately "
+            f"nothing larger: a page too big for A3 is one nobody reads. Put "
+            f"the overflow on another sheet with add_sheets instead."
+        )
     tree = _node("kicad_sch", [
         _node("version", [20250114]),
         _node("generator", ["kicad_flow"]),

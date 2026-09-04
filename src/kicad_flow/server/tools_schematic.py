@@ -86,7 +86,9 @@ def new_sheet(path: str, title: str = "", paper: str = "A4",
     Args:
         path: Where the sheet will be written.
         title: Title-block title.
-        paper: A4, A3, A2, A1 or A0.
+        paper: ``"A4"`` (default) or ``"A3"``. There is nothing larger on
+            purpose -- a page too big for A3 is one nobody reads. Put the
+            overflow on another sheet with `add_sheets`.
         instance_path: Only for a CHILD sheet: the `instance_path` that
             `add_sheet` returned when the parent placed it. Leave empty for a
             standalone sheet or the root of a design. Get it wrong and the
