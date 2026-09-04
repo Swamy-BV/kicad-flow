@@ -33,6 +33,30 @@ _PATH_ARGS = ("schematic_path", "board_path", "path", "project_dir")
 _DIR_ARGS = ("project_dir",)
 
 
+#: Roll a log over at this size. It is append-only and nothing trimmed it:
+#: one found in use had reached 61.7 MB and 134,137 records, and the monitor
+#: had to read all of them before it could show anything.
+_MAX_LOG = 8_000_000
+
+
+def _roll(target: Path) -> None:
+    """Rename the log aside once it passes :data:`_MAX_LOG`.
+
+    One generation is kept, as ``<name>.1``, so a run that has just finished is
+    still readable. Failure is ignored: a log that cannot be rolled is a log
+    that keeps growing, which is better than a tool call that fails.
+    """
+    try:
+        if target.stat().st_size < _MAX_LOG:
+            return
+    except OSError:
+        return
+    with contextlib.suppress(OSError):
+        previous = target.with_suffix(target.suffix + ".1")
+        previous.unlink(missing_ok=True)
+        target.rename(previous)
+
+
 def activity_log_path() -> Path:
     """Where tool calls are logged (``$KICAD_FLOW_ACTIVITY`` or the default)."""
     env = os.environ.get("KICAD_FLOW_ACTIVITY")
@@ -221,6 +245,7 @@ class ActivityMiddleware(Middleware):
         for target in targets:
             try:
                 target.parent.mkdir(parents=True, exist_ok=True)
+                _roll(target)
                 with target.open("a", encoding="utf-8") as f:
                     f.write(line)
             except OSError:

@@ -203,11 +203,22 @@ def _cached_3d(board: Path) -> Path | None:
 class _State:
     """Shared state: the active design, its render, and the log read cursor."""
 
-    _CAP = 500  # keep the most recent activity records
+    _CAP = 500      # keep the most recent activity records
+    _TAIL = 512_000  # bytes of history to open with
 
     def __init__(self, log: Path) -> None:
         self.log = log
-        self.offset = 0  # bytes consumed from the activity log
+        # Start near the END of the log, not at 0. It is append-only, so
+        # starting at 0 meant parsing every line ever written before the first
+        # frame appeared -- measured 1.9 s against a 61.7 MB / 134k-line log,
+        # to keep the last 500 records and discard the rest. A window of the
+        # last _TAIL bytes holds comfortably more than _CAP records at the
+        # ~460 bytes a record runs to, so the feed still opens with history.
+        # Seeking mid-file can land inside a record; that line fails to parse
+        # and `poll` skips it.
+        size = log.stat().st_size if log.is_file() else 0
+        self.offset = max(0, size - self._TAIL)
+
         self.active: Path | None = None  # design being rendered
         self.src_mtime = 0.0
         self.png: Path | None = None
