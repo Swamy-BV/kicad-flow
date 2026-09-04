@@ -49,6 +49,14 @@ correct answer and the caller cannot compute it, it is a fact — do it for them
 worse than one that is plainly wrong half the time and takes an argument. The
 caller can see what they meant; the layer cannot.
 
+**`batch` is transport, not surface.** It runs N primitives in one request and
+adds no capability -- there is nothing expressible in it that is not
+expressible as N calls, and it decides nothing. It is the one tool that takes a
+list rather than scalars, and it earns that by being the only one: a batch
+variant of each primitive would have doubled the surface to say the same thing.
+Placement cannot share a batch with wiring, because a wire is drawn to a
+coordinate `add_component` reports.
+
 ## Hard rules
 
 **The abstraction holds, on both sides.** `schematic/api.py` and `pcb/api.py`

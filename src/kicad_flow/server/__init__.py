@@ -15,6 +15,7 @@ process -- e.g. in a cowork/Copilot config::
 from __future__ import annotations
 
 from . import (  # noqa: F401  (register)
+    tools_batch,
     tools_board,
     tools_schematic,
 )

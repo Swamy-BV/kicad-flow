@@ -2,7 +2,7 @@
 	(version 20250114)
 	(generator "kicad_flow")
 	(generator_version "10.0")
-	(uuid "f1825790-39e1-4c4c-80c9-16b2dfa4313c")
+	(uuid "34e1cc30-1849-4e89-a389-350dd50d577f")
 	(title_block
 		(title "F405 flight controller -- root")
 	)
@@ -12,16 +12,16 @@
 		(path "/"
 			(page "1")
 		)
-		(path "/dcaa9121-48dc-4d92-a699-0dbdc1a43608"
+		(path "/a7a4f428-bb33-40a2-8ac2-819c3a3acc45"
 			(page "2")
 		)
-		(path "/b3f8cf1a-8334-4e68-a21c-3e4fd40f156b"
+		(path "/84b2f6bb-d4d6-4adf-a49a-965677deba2c"
 			(page "3")
 		)
-		(path "/bbc60dd3-2a89-4231-9367-6cb7ad615740"
+		(path "/1a9ef785-2eeb-40dc-ab84-7f6c611f69ff"
 			(page "4")
 		)
-		(path "/a8b278fa-7451-498d-9a12-4bcfb059cb77"
+		(path "/500ba3c7-1f5d-41c5-86f2-7370fbf806cc"
 			(page "5")
 		)
 	)
@@ -35,7 +35,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "dcaa9121-48dc-4d92-a699-0dbdc1a43608")
+		(uuid "a7a4f428-bb33-40a2-8ac2-819c3a3acc45")
 		(property "Sheetname" "Power"
 			(at 63.5 74.93 0)
 			(effects
@@ -54,7 +54,7 @@
 		)
 		(instances
 			(project ""
-				(path "/f1825790-39e1-4c4c-80c9-16b2dfa4313c"
+				(path "/34e1cc30-1849-4e89-a389-350dd50d577f"
 					(page "2")
 				)
 			)
@@ -70,7 +70,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "b3f8cf1a-8334-4e68-a21c-3e4fd40f156b")
+		(uuid "84b2f6bb-d4d6-4adf-a49a-965677deba2c")
 		(property "Sheetname" "MCU"
 			(at 152.4 74.93 0)
 			(effects
@@ -89,7 +89,7 @@
 		)
 		(instances
 			(project ""
-				(path "/f1825790-39e1-4c4c-80c9-16b2dfa4313c"
+				(path "/34e1cc30-1849-4e89-a389-350dd50d577f"
 					(page "3")
 				)
 			)
@@ -105,7 +105,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "bbc60dd3-2a89-4231-9367-6cb7ad615740")
+		(uuid "1a9ef785-2eeb-40dc-ab84-7f6c611f69ff")
 		(property "Sheetname" "Sensors"
 			(at 63.5 132.08 0)
 			(effects
@@ -124,7 +124,7 @@
 		)
 		(instances
 			(project ""
-				(path "/f1825790-39e1-4c4c-80c9-16b2dfa4313c"
+				(path "/34e1cc30-1849-4e89-a389-350dd50d577f"
 					(page "4")
 				)
 			)
@@ -140,7 +140,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "a8b278fa-7451-498d-9a12-4bcfb059cb77")
+		(uuid "500ba3c7-1f5d-41c5-86f2-7370fbf806cc")
 		(property "Sheetname" "IO"
 			(at 152.4 132.08 0)
 			(effects
@@ -159,7 +159,7 @@
 		)
 		(instances
 			(project ""
-				(path "/f1825790-39e1-4c4c-80c9-16b2dfa4313c"
+				(path "/34e1cc30-1849-4e89-a389-350dd50d577f"
 					(page "5")
 				)
 			)

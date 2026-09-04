@@ -171,6 +171,11 @@ async def build(client: Client) -> int:
           f"(power is global, so the boxes carry no signals)")
 
     # -- 2. one child per numeral, sixteen channels each -------------------
+    #
+    # Two batches per sheet, not 144 calls. The split is forced and is the
+    # right one anyway: every wire below is drawn to a coordinate that
+    # `add_component` and `add_power` REPORT, so the parts have to land and
+    # answer before the wires can be computed.
     for digit, rows in DIGITS.items():
         child = str(OUT / f"digit_{digit}.kicad_sch")
         await call("new_sheet", path=child, paper="A3", title=f"Digit {digit}",
@@ -178,45 +183,70 @@ async def build(client: Client) -> int:
         base = list(DIGITS).index(digit) * 16
         lit = [(c, r) for r, line in enumerate(rows)
                for c, ch in enumerate(line) if ch == "#"]
-        for i, (col, row) in enumerate(lit):
-            x = COL_X[i % 8]
-            top = ROW_Y[i // 8]
-            n = base + i + 1
-            up = await call("add_power", path=child, x=x, y=top, net=VCC)
-            res = await call("add_component", path=child, lib_id="Device:R",
-                             ref=f"R{n}", x=x, y=top + R_DY, value="330R")
-            led = await call("add_component", path=child, lib_id="Device:LED",
-                             ref=f"D{n}", x=x, y=top + D_DY, value="RED",
-                             rotation=LED_ROT)
-            dn = await call("add_power", path=child, x=x, y=top + GND_DY,
-                            net=GND, rotation=180)
-            if not (up and res and led and dn):
-                continue
-            # +3V3 -> R.1, R.2 -> LED anode(2), LED cathode(1) -> GND.
-            for a, b in ((pin(up, "1"), pin(res, "1")),
-                         (pin(res, "2"), pin(led, "2")),
-                         (pin(led, "1"), pin(dn, "1"))):
-                await call("add_wire", path=child, x1=a[0], y1=a[1],
-                           x2=b[0], y2=b[1])
-            # The cell this channel lights, so the board can be read back
-            # against the schematic rather than against this file.
-            await call("add_label", path=child, x=x, y=top + D_DY - 4 * G,
-                       text=f"D{digit}_{col}{row}", kind="local")
+
+        # phase 1: everything that occupies a position
+        parts: list[dict[str, Any]] = []
+        for i in range(len(lit)):
+            x, top, n = COL_X[i % 8], ROW_Y[i // 8], base + i + 1
+            parts += [
+                {"tool": "add_power", "args": {
+                    "path": child, "x": x, "y": top, "net": VCC}},
+                {"tool": "add_component", "args": {
+                    "path": child, "lib_id": "Device:R", "ref": f"R{n}",
+                    "x": x, "y": top + R_DY, "value": "330R"}},
+                {"tool": "add_component", "args": {
+                    "path": child, "lib_id": "Device:LED", "ref": f"D{n}",
+                    "x": x, "y": top + D_DY, "value": "RED",
+                    "rotation": LED_ROT}},
+                {"tool": "add_power", "args": {
+                    "path": child, "x": x, "y": top + GND_DY, "net": GND,
+                    "rotation": 180}},
+            ]
         if digit == "0":
             # ERC has no way to know a rail is fed: every power symbol on
             # +3V3 and GND is an INPUT, and a net of only inputs reads as
             # undriven. Two flags cover the design, since both nets are global.
+            # Below the channels, not beside them: at x=8G they printed on the
+            # sheet border, which the render showed and ERC did not.
             for i, net in enumerate((VCC, GND)):
-                # Below the channels, not beside them: at x=8G they printed
-                # on the sheet border, which the render showed and ERC did not.
-                flag = await call("add_power_flag", path=child,
-                                  x=(24 + i * 30) * G, y=118 * G)
-                sym = await call("add_power", path=child, x=(24 + i * 30) * G,
-                                 y=126 * G, net=net)
-                if flag and sym:
-                    a, b = pin(flag, "1"), pin(sym, "1")
-                    await call("add_wire", path=child, x1=a[0], y1=a[1],
-                               x2=b[0], y2=b[1])
+                parts += [
+                    {"tool": "add_power_flag", "args": {
+                        "path": child, "x": (24 + i * 30) * G, "y": 118 * G}},
+                    {"tool": "add_power", "args": {
+                        "path": child, "x": (24 + i * 30) * G, "y": 126 * G,
+                        "net": net}},
+                ]
+        placed_sch = await call("batch", ops=parts)
+        if not placed_sch:
+            continue
+        got = placed_sch["results"]
+
+        # phase 2: the wires, aimed at the pins phase 1 reported
+        wires: list[dict[str, Any]] = []
+
+        def link(a: dict[str, Any], an: str, b: dict[str, Any], bn: str,
+                 sheet: str = child, into: list[dict[str, Any]] = wires) -> None:
+            """One wire between two pins the server just located."""
+            pa, pb = pin(a, an), pin(b, bn)
+            into.append({"tool": "add_wire", "args": {
+                "path": sheet, "x1": pa[0], "y1": pa[1],
+                "x2": pb[0], "y2": pb[1]}})
+
+        for i, (col, row) in enumerate(lit):
+            up, res, led, dn = got[i * 4:i * 4 + 4]
+            # +3V3 -> R.1, R.2 -> LED anode(2), LED cathode(1) -> GND.
+            link(up, "1", res, "1")
+            link(res, "2", led, "2")
+            link(led, "1", dn, "1")
+            # The cell this channel lights, so the board can be read back
+            # against the schematic rather than against this file.
+            wires.append({"tool": "add_label", "args": {
+                "path": child, "x": COL_X[i % 8],
+                "y": ROW_Y[i // 8] + D_DY - 4 * G,
+                "text": f"D{digit}_{col}{row}", "kind": "local"}})
+        for j in range(len(lit) * 4, len(got), 2):
+            link(got[j], "1", got[j + 1], "1")      # each PWR_FLAG to its rail
+        await call("batch", ops=wires)
         await call("save_sheet", path=child)
     print(f"sheets: 10 children x 16 channels = "
           f"{len(DIGITS) * 16} LEDs and as many resistors")
@@ -228,6 +258,10 @@ async def build(client: Client) -> int:
           f"{len(nets.get('nets', []))} nets")
 
     # -- 3. the board ------------------------------------------------------
+    #
+    # Three batches for the whole board, on the same two-phase shape the
+    # sheets used: place, read the pads out of the reply, then lay copper at
+    # the coordinates the server reported.
     board = str(OUT / "led_digits.kicad_pcb")
     await call("new_board", path=board, layers=2)
     await call("add_outline", path=board, points=[
@@ -235,14 +269,25 @@ async def build(client: Client) -> int:
     print(f"\nboard {BOARD_W} x {BOARD_H} mm, 2 layers")
 
     placed: list[tuple[int, str, float, float]] = []
+    puts: list[dict[str, Any]] = []
     for i, digit, col, row in channels():
         x, y = cell_xy(digit, col, row)
         n = i + 1
-        await call("place_footprint", path=board, fp_id=LED_FP, ref=f"D{n}",
-                   x=x, y=y, value="RED")
-        await call("place_footprint", path=board, fp_id=RES_FP, ref=f"R{n}",
-                   x=x, y=y, rotation=90, side="B", value="330R")
+        puts += [
+            {"tool": "place_footprint", "args": {
+                "path": board, "fp_id": LED_FP, "ref": f"D{n}",
+                "x": x, "y": y, "value": "RED"}},
+            {"tool": "place_footprint", "args": {
+                "path": board, "fp_id": RES_FP, "ref": f"R{n}", "x": x,
+                "y": y, "rotation": 90, "side": "B", "value": "330R"}},
+        ]
         placed.append((n, digit, x, y))
+    parts_out = (await call("batch", ops=puts)).get("results", [])
+    # The pads came back with the placement, already turned and already on the
+    # right side. Nothing needs asking again.
+    pads_of: dict[str, dict[str, dict[str, float]]] = {}
+    for fp in parts_out:
+        pads_of[fp["ref"]] = {p["number"]: p for p in fp["pads"]}
     print(f"placed {len(placed) * 2} footprints: "
           f"{len(placed)} LEDs front, {len(placed)} resistors back")
 
@@ -250,15 +295,16 @@ async def build(client: Client) -> int:
     #
     # A library footprint carries no nets. Which pad is on which net is a fact
     # the SCHEMATIC holds, so read it there and apply it here.
-    assigned = 0
     of: dict[str, str] = {}
+    sets: list[dict[str, Any]] = []
     for net in nets.get("nets", []):
         for p in net["pins"]:
-            got = await call("set_pad_net", path=board, ref=p["ref"],
-                             pad=p["pin"], net=net["name"])
-            if got:
-                assigned += 1
-                of[f"{p['ref']}.{p['pin']}"] = net["name"]
+            sets.append({"tool": "set_pad_net", "args": {
+                "path": board, "ref": p["ref"], "pad": p["pin"],
+                "net": net["name"]}})
+            of[f"{p['ref']}.{p['pin']}"] = net["name"]
+    applied = await call("batch", ops=sets, stop_on_error=False)
+    assigned = applied.get("ran", 0) - len(applied.get("failed", []))
     print(f"nets from the schematic: {assigned} pads assigned")
 
     # -- 5. one via and two tracks per channel -----------------------------
@@ -268,24 +314,31 @@ async def build(client: Client) -> int:
     # neither needs any copper drawn for it at all.
     vias = tracks = 0
     sizes: dict[tuple[float, float], int] = {}
+    copper: list[dict[str, Any]] = []
     for n, digit, x, y in placed:
-        anode = await call("get_pad", path=board, ref=f"D{n}", pad="2")
-        rpad = await call("get_pad", path=board, ref=f"R{n}", pad="2")
+        anode = pads_of.get(f"D{n}", {}).get("2")
+        rpad = pads_of.get(f"R{n}", {}).get("2")
         net = of.get(f"D{n}.2", "")
         if not (anode and rpad and net):
             continue
         vx, vy = round(x + VIA_DX, 3), y
         dia, drill = VIA_SIZES[list(DIGITS).index(digit)]
-        await call("add_via", path=board, x=vx, y=vy, net=net,
-                   diameter=dia, drill=drill)
+        copper += [
+            {"tool": "add_via", "args": {
+                "path": board, "x": vx, "y": vy, "net": net,
+                "diameter": dia, "drill": drill}},
+            {"tool": "add_track", "args": {
+                "path": board, "x1": anode["x"], "y1": anode["y"],
+                "x2": vx, "y2": vy, "layer": "F.Cu", "width": 0.25,
+                "net": net}},
+            {"tool": "add_track", "args": {
+                "path": board, "x1": vx, "y1": vy, "x2": rpad["x"],
+                "y2": rpad["y"], "layer": "B.Cu", "width": 0.25, "net": net}},
+        ]
         sizes[(dia, drill)] = sizes.get((dia, drill), 0) + 1
-        await call("add_track", path=board, x1=anode["x"], y1=anode["y"],
-                   x2=vx, y2=vy, layer="F.Cu", width=0.25, net=net)
-        await call("add_track", path=board, x1=vx, y1=vy,
-                   x2=rpad["x"], y2=rpad["y"], layer="B.Cu", width=0.25,
-                   net=net)
         vias += 1
         tracks += 2
+    await call("batch", ops=copper)
     print(f"routed {vias} vias and {tracks} tracks -- one anode crossing "
           f"per channel, and nothing else")
     print("  via sizes, one per digit: "
