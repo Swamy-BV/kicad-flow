@@ -31,7 +31,7 @@ Nothing here decides anything. The grid, the digit shapes and the board size
 are arithmetic in this file; the tools were asked how big each part is, where
 its pins and pads landed, and to put them where they were told.
 
-Run it: ``python examples/scripts/led_digits_via_mcp.py``
+Run it: ``python examples/scripts/led_digits.py``
 """
 
 from __future__ import annotations

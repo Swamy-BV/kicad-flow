@@ -1,26 +1,21 @@
 # CLAUDE.md
 
 An MCP server for authoring KiCad schematics and boards. `README.md` is the
-shape of it, `BUGS.md` is what is still wrong with the measurement attached.
-
-Add a bug there when you find one and do not fix it in the same sitting. Every
-entry needs a `Measured` line -- something that was run, so it can be
-re-measured rather than re-argued. Delete an entry when it is fixed; do not
-leave it ticked.
+shape of it.
 
 ## Commands
 
 ```
 python -m ruff check .                      # lint; --fix to apply
 python -m mypy                              # strict, src/ only
-python examples/scripts/fc_via_mcp.py       # build an example, end to end
+python examples/scripts/fc.py       # build an example, end to end
 python -m kicad_flow.server --http          # the server on a real socket
 ```
 
 Lint and types must pass before a commit. **There is no unit suite: the examples
-are the check.** Run the one you are working on; run all nine before a change
-lands. Every one goes through `Client(mcp)` and nothing else, so the same nine
-runs exercise the tool layer and the contracts underneath it.
+are the check.** Run both before a change lands. Each goes through
+`Client(mcp)` and nothing else, so the same runs exercise the tool layer and
+the contracts underneath it.
 
 ## The rule that matters
 
@@ -113,8 +108,7 @@ src/kicad_flow/
     kicad/pcb/          KiCadBoard(Board), library, _runner
   server/               FastMCP tools: 28 schematic + 30 board = 58
   monitor/              the live view and the tool-call log; its own process
-examples/scripts/       nine designs; every one built through MCP calls
-                        alone, none reaching past the tool layer
+examples/scripts/       fc and led_digits, both through MCP calls alone
 ```
 
 Neither contract package imports a backend -- measured: `import

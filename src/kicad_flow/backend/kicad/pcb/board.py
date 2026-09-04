@@ -72,9 +72,9 @@ def _toggle_mirror(shape: Node) -> None:
 
     Text on a back layer has to carry this flag or it reads backwards on the
     finished board -- and nothing says so: the file parses, KiCad opens it, and
-    the fab plots silkscreen you cannot read. Measured on `led_matrix_pcb`,
-    whose sixth board puts 4 parts on the back: without this, DRC reported 8
-    ``nonmirrored_text_on_back_layer`` warnings, two per part; with it, none.
+    the fab plots silkscreen you cannot read. Measured on a bare board with
+    four 0402 resistors placed ``side="B"``: without this, DRC reported 12
+    ``nonmirrored_text_on_back_layer`` warnings, three per part; with it, none.
 
     Toggled rather than set, because :meth:`KiCadBoard._mirror` runs on the way
     back to the front as well.

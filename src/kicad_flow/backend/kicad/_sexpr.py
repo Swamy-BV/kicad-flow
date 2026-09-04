@@ -1,8 +1,8 @@
 """A small S-expression parser/serializer for KiCad files.
 
-PRIVATE to the KiCad backend. Nothing outside ``backend/kicad`` should read
-or write a KiCad file directly -- see BUGS.md ARCH-1 for the four that still
-do. KiCad's ``.kicad_sch`` (and ``.kicad_sym``, ``.kicad_pcb``) files are
+PRIVATE to the KiCad backend. Nothing outside ``backend/kicad`` reads or
+writes a KiCad file directly, and nothing outside it imports this module.
+KiCad's ``.kicad_sch`` (and ``.kicad_sym``, ``.kicad_pcb``) files are
 S-expressions. To place components or wires we must read an existing file into
 a tree, modify it, and write it back in a form KiCad accepts. This module is
 that read/modify/write layer.

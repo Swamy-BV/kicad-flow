@@ -25,7 +25,7 @@ pairing, because nothing checks it while you draw.
 
 Run it::
 
-    python examples/scripts/fc_via_mcp.py
+    python examples/scripts/fc.py
 """
 
 from __future__ import annotations
