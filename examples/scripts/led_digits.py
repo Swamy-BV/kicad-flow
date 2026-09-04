@@ -478,6 +478,83 @@ async def build(client: Client) -> int:
     for w in wrong:
         print(f"  WRONG {w}")
 
+
+    # (g) the editing primitives, round-tripped like everything else. These
+    # exist because a design is not written once: a label lands on a pin, a
+    # wire goes to the wrong pad, a sheet box wants moving. Before them the
+    # only way back was to rebuild the page.
+    scratch_sch = str(OUT / "_edit.kicad_sch")
+    await call("new_sheet", path=scratch_sch, title="edit round trip")
+    made = await call("add_components", path=scratch_sch, parts=[
+        {"lib_id": "Device:R", "ref": "R1", "x": 50, "y": 50}])
+    rp = {q["number"]: q for q in made["parts"][0]["pins"]}
+    top, bot = rp["1"], rp["2"]
+    await call("add_wires", path=scratch_sch, wires=[
+        {"x1": top["x"], "y1": top["y"], "x2": top["x"], "y2": top["y"] - 10.16}])
+    await call("add_labels", path=scratch_sch, labels=[
+        {"x": top["x"], "y": top["y"] - 10.16, "text": "TOP"}])
+    await call("add_junctions", path=scratch_sch,
+               points=[{"x": bot["x"], "y": bot["y"]}])
+    await call("add_no_connects", path=scratch_sch, points=[{"x": 90, "y": 90}])
+    await call("set_fields", path=scratch_sch,
+               fields=[{"ref": "R1", "name": "MPN", "value": "TEMP"}])
+    await call("add_sheets", path=scratch_sch, sheets=[
+        {"name": "Box", "filename": "box.kicad_sch", "x": 30, "y": 120}])
+
+    # move the label, then put it back, and check it landed where it started
+    same("move_labels found one",
+         (await call("move_labels", path=scratch_sch, moves=[
+             {"x": top["x"], "y": top["y"] - 10.16, "dx": 2.54, "dy": 0}]))
+         .get("moved"), 1)
+    same("move_labels back",
+         (await call("move_labels", path=scratch_sch, moves=[
+             {"x": top["x"] + 2.54, "y": top["y"] - 10.16, "dx": -2.54, "dy": 0}]))
+         .get("moved"), 1)
+    same("rotate_labels found one",
+         (await call("rotate_labels", path=scratch_sch, turns=[
+             {"x": top["x"], "y": top["y"] - 10.16, "rotation": 90}]))
+         .get("turned"), 1)
+
+    # a sheet box moves without its identity changing -- that is the point of
+    # it, since re-creating a root to move a box orphans every child.
+    box_before = (await call("add_sheets", path=scratch_sch, sheets=[
+        {"name": "Keep", "filename": "keep.kicad_sch", "x": 90, "y": 120}]))
+    keep = box_before["sheets"][0] if box_before else {}
+    moved_box = await call("move_sheets", path=scratch_sch,
+                           moves=[{"name": "Keep", "x": 120, "y": 150}])
+    after_box = moved_box["sheets"][0] if moved_box else {}
+    same("move_sheets keeps the uuid", after_box.get("uuid"), keep.get("uuid"))
+    same("move_sheets keeps instance_path",
+         after_box.get("instance_path"), keep.get("instance_path"))
+
+    # and the removers, each reporting what it actually found
+    for tool, kw, key, want in (
+        ("remove_labels", {"points": [{"x": top["x"], "y": top["y"] - 10.16}]},
+         "removed", 1),
+        ("remove_wires", {"wires": [{"x1": top["x"], "y1": top["y"],
+                                     "x2": top["x"], "y2": top["y"] - 10.16}]},
+         "removed", 1),
+        ("remove_junctions", {"points": [{"x": bot["x"], "y": bot["y"]}]},
+         "removed", 1),
+        ("remove_no_connects", {"points": [{"x": 90, "y": 90}]}, "removed", 1),
+        ("remove_sheets", {"names": ["Box", "Keep"]}, "count", 2),
+        ("remove_fields", {"fields": [{"ref": "R1", "name": "MPN"}]},
+         "count", 1),
+    ):
+        same(f"{tool} affected", (await call(tool, path=scratch_sch, **kw))
+             .get(key), want)
+
+    # nothing at a point is not an error, and does not read as success either
+    empty = await call("remove_labels", path=scratch_sch,
+                       points=[{"x": 5, "y": 5}])
+    same("removing nothing reports 0", empty.get("removed"), 0)
+    left = await call("list_wires", path=scratch_sch)
+    same("sheet is empty of wires again", left.get("count"), 0)
+    fields_left = await call("get_fields", path=scratch_sch, ref="R1")
+    if "MPN" in fields_left.get("fields", {}):
+        wrong.append("remove_fields left MPN behind")
+    Path(scratch_sch).unlink(missing_ok=True)
+
     # -- 9. move it, turn it, flip it, and put it back ----------------------
     #
     # The mutators, round-tripped on the last LED. Each step is checked against

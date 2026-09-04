@@ -456,10 +456,15 @@ async def build(client: Any) -> int:
     for number in ("B6", "B7", "A8", "B8"):
         p = pin(usb, number)
         pend("add_no_connect", path=mcu, x=p["x"], y=p["y"])
-    for ref, number in (("R8", "CC1"), ("R9", "CC2")):
+    # CC1 and CC2 leave the USB-C symbol on the SAME x, 2.54 mm apart. Both
+    # pulldowns used to be placed at that x + 12G, so they landed in one
+    # column 2.54 apart -- and a `Device:R` body is 7.62 mm tall, so they were
+    # drawn through each other. ERC reported 0/0 on it; only the render showed
+    # it. Give each its own column.
+    for column, (ref, number) in enumerate((("R8", "CC1"), ("R9", "CC2"))):
         p = pin(usb, number)
-        res = await put(mcu, "Device:R", ref, p["x"] + 12 * G, p["y"] + 8 * G,
-                        "5k1")
+        res = await put(mcu, "Device:R", ref,
+                        p["x"] + (12 + column * 8) * G, p["y"] + 8 * G, "5k1")
         pend("add_wire", path=mcu, x1=p["x"], y1=p["y"],
                    x2=pin(res, "1")["x"], y2=p["y"])
         pend("add_wire", path=mcu, x1=pin(res, "1")["x"], y1=p["y"],

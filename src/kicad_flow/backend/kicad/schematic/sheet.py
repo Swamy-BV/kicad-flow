@@ -690,6 +690,160 @@ class KiCadSheet(Sheet):
         """Take one placed unit off the sheet."""
         self._tree.items.remove(self._require(ref, unit))
 
+    # -- editing what is already drawn --------------------------------------
+
+    def _at_point(self, kinds: tuple[str, ...], x: float,
+                  y: float) -> list[Node]:
+        """Every node of these kinds whose ``at`` is this snapped point."""
+        want = (snap(x), snap(y))
+        found = []
+        for kind in kinds:
+            for node in self._tree.get_all(kind):
+                at = node.get("at")
+                if at is not None and (_f(at, 0), _f(at, 1)) == want:
+                    found.append(node)
+        return found
+
+    def _wires_between(self, x1: float, y1: float, x2: float,
+                       y2: float) -> list[Node]:
+        """Wire nodes joining these two snapped points, either way round."""
+        a, b = (snap(x1), snap(y1)), (snap(x2), snap(y2))
+        found = []
+        for node in self._tree.get_all("wire"):
+            pts = node.get("pts")
+            xy = pts.get_all("xy") if pts is not None else []
+            if len(xy) < 2:
+                continue
+            ends = ((_f(xy[0], 0), _f(xy[0], 1)), (_f(xy[1], 0), _f(xy[1], 1)))
+            if ends == (a, b) or ends == (b, a):
+                found.append(node)
+        return found
+
+    def remove_wire(self, x1: float, y1: float, x2: float, y2: float) -> int:
+        """Delete wires running between these two points."""
+        found = self._wires_between(x1, y1, x2, y2)
+        for node in found:
+            self._tree.items.remove(node)
+        return len(found)
+
+    def move_wire(self, x1: float, y1: float, x2: float, y2: float,
+                  dx: float, dy: float) -> int:
+        """Shift wires between these points by ``(dx, dy)``."""
+        found = self._wires_between(x1, y1, x2, y2)
+        for node in found:
+            pts = node.get("pts")
+            for xy in (pts.get_all("xy") if pts is not None else []):
+                _set(xy, 0, snap(_f(xy, 0) + dx))
+                _set(xy, 1, snap(_f(xy, 1) + dy))
+        return len(found)
+
+    def remove_label(self, x: float, y: float) -> int:
+        """Delete labels at this point, of any kind."""
+        found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
+        for node in found:
+            self._tree.items.remove(node)
+        return len(found)
+
+    def move_label(self, x: float, y: float, dx: float, dy: float) -> int:
+        """Shift labels at this point by ``(dx, dy)``."""
+        found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
+        for node in found:
+            at = node.get("at")
+            if at is None:                     # _at_point cannot return one
+                continue
+            _set(at, 0, snap(_f(at, 0) + dx))
+            _set(at, 1, snap(_f(at, 1) + dy))
+        return len(found)
+
+    def rotate_label(self, x: float, y: float, rotation: float) -> int:
+        """Turn labels at this point."""
+        turn = _quarter_turn(rotation)
+        found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
+        for node in found:
+            at = node.get("at")
+            if at is None:                     # _at_point cannot return one
+                continue
+            if len(at.items) > 3:
+                _set(at, 2, turn)
+            else:
+                at.items.append(Sym(_fmt(turn)))
+        return len(found)
+
+    def remove_junction(self, x: float, y: float) -> int:
+        """Delete junctions at this point."""
+        found = self._at_point(("junction",), x, y)
+        for node in found:
+            self._tree.items.remove(node)
+        return len(found)
+
+    def remove_no_connect(self, x: float, y: float) -> int:
+        """Delete no-connect marks at this point."""
+        found = self._at_point(("no_connect",), x, y)
+        for node in found:
+            self._tree.items.remove(node)
+        return len(found)
+
+    def _sheet_node(self, name: str) -> Node:
+        """The child-sheet box called *name*."""
+        for node in self._tree.get_all("sheet"):
+            if _text(self._prop_of(node, "Sheetname"), 1) == name:
+                return node
+        have = ", ".join(
+            _text(self._prop_of(n, "Sheetname"), 1)
+            for n in self._tree.get_all("sheet")) or "none"
+        raise LookupError(f"no child sheet named {name!r}; this sheet has {have}")
+
+    def _sheet_ref(self, node: Node) -> SheetRef:
+        """Describe a child-sheet box that is already on the sheet."""
+        at = node.get("at")
+        size = node.get("size")
+        pins = tuple(
+            Pin(number=_text(p), name=_text(p), orientation=180.0,
+                kind=_text(p.get("pin")) or "passive", length=0.0,
+                at=Point(_f(p.get("at"), 0), _f(p.get("at"), 1)))
+            for p in node.get_all("pin"))
+        uid = _text(node.get("uuid"))
+        return SheetRef(
+            name=_text(self._prop_of(node, "Sheetname"), 1),
+            filename=_text(self._prop_of(node, "Sheetfile"), 1),
+            at=Point(_f(at, 0), _f(at, 1)),
+            size=(_f(size, 0), _f(size, 1)), uuid=uid,
+            instance_path=f"{self._where}/{uid}", pins=pins)
+
+    def move_sheet(self, name: str, x: float, y: float) -> SheetRef:
+        """Move a child-sheet box, and say where its ports ended up."""
+        node = self._sheet_node(name)
+        at = node.get("at")
+        if at is None:
+            raise LookupError(f"child sheet {name!r} has no position")
+        was = Point(_f(at, 0), _f(at, 1))
+        now = Point(snap(x), snap(y))
+        dx, dy = now.x - was.x, now.y - was.y
+        _set(at, 0, now.x)
+        _set(at, 1, now.y)
+        # The box's own text and every port move with it: a port is placed on
+        # the box edge, so leaving them behind detaches the page's interface.
+        for child in list(node.get_all("property")) + list(node.get_all("pin")):
+            pat = child.get("at")
+            if pat is not None:
+                _set(pat, 0, snap(_f(pat, 0) + dx))
+                _set(pat, 1, snap(_f(pat, 1) + dy))
+        return self._sheet_ref(node)
+
+    def remove_sheet(self, name: str) -> None:
+        """Take a child-sheet box off this sheet. The child FILE is left."""
+        self._tree.items.remove(self._sheet_node(name))
+
+    def remove_field(self, ref: str, name: str, *,
+                     unit: int = 1) -> dict[str, str]:
+        """Delete a field from a part and return the fields it has left."""
+        node = self._require(ref, unit)
+        prop = self._prop_of(node, name)
+        if prop is None:
+            raise LookupError(f"{ref} has no field {name!r}")
+        node.items.remove(prop)
+        return self.fields(ref)
+
     def set_field(self, ref: str, name: str, value: str) -> dict[str, str]:
         """Set one of a part's fields and return all of them."""
         node = self._require(ref)

@@ -361,5 +361,104 @@ class Sheet(ABC):
         matters while drawing -- *is this actually connected?*
         """
 
+    # -- editing what is already drawn --------------------------------------
+    #
+    # A part is named by its ref. Nothing else on a sheet has a name, so a
+    # wire, a label, a junction and a no-connect are addressed by WHERE THEY
+    # ARE -- which is what `wires`, `labels` and the reply to the call that
+    # drew them already report. Coordinates are snapped, so a point read back
+    # from this layer matches exactly; one a caller worked out itself may not.
+    # Every call below returns HOW MANY it found, so doing nothing cannot be
+    # mistaken for success.
+
+    @abstractmethod
+    def remove_wire(self, x1: float, y1: float, x2: float, y2: float) -> int:
+        """Delete wires running between these two points, and say how many.
+
+        Either direction matches: a segment does not know which end was drawn
+        first.
+        """
+
+    @abstractmethod
+    def move_wire(self, x1: float, y1: float, x2: float, y2: float,
+                  dx: float, dy: float) -> int:
+        """Shift wires between these points by ``(dx, dy)``, and say how many.
+
+        Both ends move together, so the segment keeps its length and its
+        angle. A wire moved off a pin is no longer joined to it and nothing on
+        the sheet says so -- `nets` is what says so.
+        """
+
+    @abstractmethod
+    def remove_label(self, x: float, y: float) -> int:
+        """Delete labels at this point, of any kind, and say how many."""
+
+    @abstractmethod
+    def move_label(self, x: float, y: float, dx: float, dy: float) -> int:
+        """Shift labels at this point by ``(dx, dy)``, and say how many.
+
+        A label names the net it TOUCHES. Move one off its wire and it names
+        nothing, quietly.
+        """
+
+    @abstractmethod
+    def rotate_label(self, x: float, y: float, rotation: float) -> int:
+        """Turn labels at this point, and say how many.
+
+        Rotation is meaningful at 90 and 270; a horizontal label reads the
+        same at 0 and 180. Which way a global label POINTS is its
+        justification, not its rotation.
+        """
+
+    @abstractmethod
+    def remove_junction(self, x: float, y: float) -> int:
+        """Delete junctions at this point, and say how many.
+
+        Removing one separates wires that cross there into different nets.
+        """
+
+    @abstractmethod
+    def remove_no_connect(self, x: float, y: float) -> int:
+        """Delete no-connect marks at this point, and say how many.
+
+        A no-connect suppresses an ERC error; taking one off lets a real fault
+        be reported again.
+        """
+
+    @abstractmethod
+    def move_sheet(self, name: str, x: float, y: float) -> SheetRef:
+        """Move a child-sheet box, and say where its ports ended up.
+
+        The box moves; the child file and its ``instance_path`` do not, so
+        nothing downstream has to be rebuilt.
+
+        Raises:
+            LookupError: If no child sheet is named *name*.
+        """
+
+    @abstractmethod
+    def remove_sheet(self, name: str) -> None:
+        """Take a child-sheet box off this sheet.
+
+        The child FILE is left alone. This removes the box that refers to it,
+        so the design stops walking into that page.
+
+        Raises:
+            LookupError: If no child sheet is named *name*.
+        """
+
+    @abstractmethod
+    def remove_field(self, ref: str, name: str, *,
+                     unit: int = 1) -> dict[str, str]:
+        """Delete a field from a part and return the fields it has left.
+
+        Setting a field to an empty string is a different thing: it stays
+        present and blank, KiCad keeps writing it, and a BOM still sees the
+        column.
+
+        Raises:
+            LookupError: If the part or the field is not there.
+        """
+
 
 __all__ = ["GRID", "Sheet", "snap"]

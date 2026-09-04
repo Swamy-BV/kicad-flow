@@ -953,12 +953,321 @@ def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
         out.append({"ref": m.ref, "field": m.name, **at.as_dict()})
     return {"ok": True, "count": len(out), "moved": out}
 
+
+# -- editing what is already drawn ----------------------------------------
+#
+# A part has a ref. Nothing else on a sheet does, so a wire, a label, a
+# junction and a no-connect are addressed by WHERE THEY ARE -- the coordinates
+# `list_wires`, `list_nets` and the call that drew them already reported.
+# Coordinates are snapped, so a point read back from this server matches
+# exactly; one worked out by hand may not. Every call says how many it FOUND,
+# so doing nothing cannot pass for success.
+
+
+class WireEnds(BaseModel):
+    """One wire, named by the two points it runs between."""
+
+    x1: float = Field(description="One end, in mm; snapped to the grid.")
+    y1: float = Field(description="One end, in mm.")
+    x2: float = Field(description="The other end, in mm.")
+    y2: float = Field(description="The other end, in mm.")
+
+
+class WireShift(WireEnds):
+    """One wire to shift, and by how much."""
+
+    dx: float = Field(description="Offset in mm. Both ends move together.")
+    dy: float = Field(description="Offset in mm.")
+
+
+class SpotShift(Spot):
+    """One point, and how far to move whatever is there."""
+
+    dx: float = Field(description="Offset in mm.")
+    dy: float = Field(description="Offset in mm.")
+
+
+class SpotTurn(Spot):
+    """One point, and the angle to turn whatever is there to."""
+
+    rotation: float = Field(description="Degrees. 90 or 270 for a vertical "
+                            "label; horizontal reads the same at 0 and 180.")
+
+
+class SheetMove(BaseModel):
+    """One child-sheet box to move."""
+
+    name: str = Field(description="The sheet name shown above the box.")
+    x: float = Field(description="New top-left corner, in mm.")
+    y: float = Field(description="New top-left corner, in mm.")
+
+
+class FieldRef(BaseModel):
+    """One field to delete."""
+
+    ref: str = Field(description="The part.")
+    name: str = Field(description="Field name, for example MPN.")
+    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+
+
+def _counted(sheet: Sheet, items: list[Any], each: Any,
+             key: str) -> dict[str, Any]:
+    """Run *each* over *items*, totalling how many it found."""
+    found = 0
+    for i, item in enumerate(items):
+        try:
+            found += each(sheet, item)
+        except (LookupError, ValueError) as exc:
+            return {**_fail(exc), "index": i, key: found}
+    return {"ok": True, "count": len(items), key: found}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_wires(path: str, wires: list[WireEnds]) -> dict[str, Any]:
+    """Delete wires running between the given pairs of points.
+
+    Either direction matches -- a segment does not know which end was drawn
+    first. `list_wires` reports the coordinates to pass here.
+
+    Args:
+        path: The open sheet.
+        wires: The segments to delete.
+
+    Returns:
+        `removed`, how many segments actually went. Zero means nothing was at
+        those coordinates.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(sheet, list(wires),
+                    lambda s, w: s.remove_wire(w.x1, w.y1, w.x2, w.y2),
+                    "removed")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def move_wires(path: str, wires: list[WireShift]) -> dict[str, Any]:
+    """Shift wires by an offset. Both ends move, so length and angle survive.
+
+    A wire moved off a pin is no longer joined to it and nothing on the sheet
+    says so -- `list_nets` is what says so.
+
+    Args:
+        path: The open sheet.
+        wires: The segments to shift, and by how much.
+
+    Returns:
+        `moved`, how many segments were found and shifted.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(
+        sheet, list(wires),
+        lambda s, w: s.move_wire(w.x1, w.y1, w.x2, w.y2, w.dx, w.dy), "moved")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_labels(path: str, points: list[Spot]) -> dict[str, Any]:
+    """Delete labels at these points, of any kind.
+
+    Args:
+        path: The open sheet.
+        points: Where the labels are.
+
+    Returns:
+        `removed`, how many labels actually went.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(sheet, list(points),
+                    lambda s, p: s.remove_label(p.x, p.y), "removed")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def move_labels(path: str, moves: list[SpotShift]) -> dict[str, Any]:
+    """Shift labels by an offset.
+
+    A label names the net it TOUCHES. Move one off its wire and it names
+    nothing, quietly -- read `list_nets` back afterwards.
+
+    Args:
+        path: The open sheet.
+        moves: Where each label is, and how far to move it.
+
+    Returns:
+        `moved`, how many labels were found and shifted.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(sheet, list(moves),
+                    lambda s, m: s.move_label(m.x, m.y, m.dx, m.dy), "moved")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def rotate_labels(path: str, turns: list[SpotTurn]) -> dict[str, Any]:
+    """Turn labels at these points.
+
+    Which way a GLOBAL label points is its justification, not its rotation --
+    see `add_labels`.
+
+    Args:
+        path: The open sheet.
+        turns: Where each label is, and the angle to turn it to.
+
+    Returns:
+        `turned`, how many labels were found and turned.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(sheet, list(turns),
+                    lambda s, t: s.rotate_label(t.x, t.y, t.rotation), "turned")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
+    """Delete junctions at these points.
+
+    Removing one separates wires that cross there into different nets, so read
+    `list_nets` back afterwards.
+
+    Args:
+        path: The open sheet.
+        points: Where the junctions are.
+
+    Returns:
+        `removed`, how many junctions actually went.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(sheet, list(points),
+                    lambda s, p: s.remove_junction(p.x, p.y), "removed")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
+    """Delete no-connect marks at these points.
+
+    A no-connect SUPPRESSES an ERC error. Taking one off lets a real fault be
+    reported again, which is usually the reason to.
+
+    Args:
+        path: The open sheet.
+        points: Where the marks are.
+
+    Returns:
+        `removed`, how many marks actually went.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    return _counted(sheet, list(points),
+                    lambda s, p: s.remove_no_connect(p.x, p.y), "removed")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def move_sheets(path: str, moves: list[SheetMove]) -> dict[str, Any]:
+    """Move child-sheet boxes, and say where their ports ended up.
+
+    The box moves and its ports move with it. The child FILE and its
+    `instance_path` do not change, so nothing downstream needs rebuilding --
+    which is the point: re-creating a root to move a box regenerates its UUID
+    and orphans every child.
+
+    Args:
+        path: The open parent sheet.
+        moves: The boxes to move, by name.
+
+    Returns:
+        `sheets`, each box with its new position and port coordinates.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(moves):
+        try:
+            out.append(sheet.move_sheet(m.name, m.x, m.y).as_dict())
+        except LookupError as exc:
+            return {**_fail(exc), "index": i, "sheets": out}
+    return {"ok": True, "count": len(out), "sheets": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_sheets(path: str, names: list[str]) -> dict[str, Any]:
+    """Take child-sheet boxes off this sheet, by name.
+
+    The child FILES are left alone. This removes the boxes that refer to them,
+    so the design stops walking into those pages.
+
+    Args:
+        path: The open parent sheet.
+        names: Sheet names, as shown above each box.
+
+    Returns:
+        `removed`, the names that went.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    gone: list[str] = []
+    for i, name in enumerate(names):
+        try:
+            sheet.remove_sheet(name)
+        except LookupError as exc:
+            return {**_fail(exc), "index": i, "removed": gone}
+        gone.append(name)
+    return {"ok": True, "count": len(gone), "removed": gone}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_fields(path: str, fields: list[FieldRef]) -> dict[str, Any]:
+    """Delete fields from parts.
+
+    Setting a field to an empty string is a DIFFERENT thing: it stays present
+    and blank, KiCad keeps writing it, and a BOM still sees the column.
+
+    Args:
+        path: The open sheet.
+        fields: The fields to delete.
+
+    Returns:
+        `fields`, each part's remaining fields after the delete.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, f in enumerate(fields):
+        try:
+            left = sheet.remove_field(f.ref, f.name, unit=f.unit)
+        except LookupError as exc:
+            return {**_fail(exc), "index": i, "fields": out}
+        out.append({"ref": f.ref, "fields": left})
+    return {"ok": True, "count": len(out), "fields": out}
+
 __all__ = [
     "add_components", "add_junctions", "add_labels", "add_no_connects",
     "add_power", "add_power_flags", "add_sheets", "add_wires",
     "check_sheet", "find_symbol", "get_component", "get_fields", "get_pin",
     "list_components", "list_nets", "list_wires", "mirror_components",
-    "move_components", "move_fields", "new_sheet", "next_ref",
-    "remove_components", "render_schematic", "rotate_components",
-    "save_sheet", "set_fields", "symbol_pins", "what_is_at",
+    "move_components", "move_fields", "move_labels", "move_sheets",
+    "move_wires", "new_sheet", "next_ref", "remove_components",
+    "remove_fields", "remove_junctions", "remove_labels", "remove_no_connects",
+    "remove_sheets", "remove_wires", "render_schematic", "rotate_components",
+    "rotate_labels", "save_sheet", "set_fields", "symbol_pins", "what_is_at",
 ]

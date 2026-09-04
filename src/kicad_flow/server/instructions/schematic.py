@@ -110,6 +110,18 @@ SCHEMATIC = (
     "way. `list_components`, `list_wires` and `get_fields` read back what is "
     "there.\n\n"
 
+    "Everything else on a sheet can be changed too, and is addressed by "
+    "WHERE IT IS rather than by a ref, because only a part has one: "
+    "`move_wires`, `remove_wires`, `move_labels`, `rotate_labels`, "
+    "`remove_labels`, `remove_junctions`, `remove_no_connects`, "
+    "`move_sheets`, `remove_sheets`, `remove_fields`. Pass the "
+    "coordinates this server REPORTED -- from `list_wires`, or from the "
+    "reply that drew the thing -- because they are snapped and one you "
+    "worked out yourself may miss. Each says how many it FOUND, so "
+    "nothing quietly does nothing. `move_sheets` keeps the box uuid and "
+    "its instance_path, so a page moves without rebuilding its "
+    "children.\n\n"
+
     "To change parts after placing them: `move_components`, "
     "`rotate_components`, `mirror_components`, `remove_components`. Each "
     "returns the parts with their pins where they NOW are, which is the "
