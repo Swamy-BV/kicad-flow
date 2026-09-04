@@ -85,11 +85,22 @@ async def build(client: Any) -> int:
         """Queue a write for the next flush."""
         pending.append({"tool": tool, "args": kw})
 
+    #: Which plural tool takes each queued write, and what it calls the list.
+    PLURAL = {"add_wire": ("add_wires", "wires"),
+              "add_label": ("add_labels", "labels"),
+              "add_junction": ("add_junctions", "points"),
+              "add_no_connect": ("add_no_connects", "points")}
+
     async def flush() -> None:
-        """Send everything queued, in order, as one call."""
-        if pending:
-            await call("batch", ops=list(pending))
-            pending.clear()
+        """Send the queue, one call per kind of thing in it."""
+        if not pending:
+            return
+        for kind in dict.fromkeys(op["tool"] for op in pending):
+            tool, key = PLURAL[kind]
+            items = [{k: v for k, v in op["args"].items() if k != "path"}
+                     for op in pending if op["tool"] == kind]
+            await call(tool, path=pending[0]["args"]["path"], **{key: items})
+        pending.clear()
 
     def pin(part: dict[str, Any], number: str) -> dict[str, Any]:
         """One pin of a placed part, by number or name."""
@@ -133,7 +144,9 @@ async def build(client: Any) -> int:
         p = pin(part, number)
         dx, dy = outward(p)
         end = (p["x"] + dx * length, p["y"] + dy * length)
-        sym = await call("add_power", path=sheet, x=end[0], y=end[1], net=name)
+        got = await call("add_power_symbols", path=sheet,
+                         symbols=[{"x": end[0], "y": end[1], "net": name}])
+        sym = got["symbols"][0] if got else {}
         if sym:
             pend("add_wire", path=sheet, x1=p["x"], y1=p["y"],
                        x2=sym["pins"][0]["x"], y2=sym["pins"][0]["y"])
@@ -142,9 +155,10 @@ async def build(client: Any) -> int:
                   value: str = "", rotation: float = 0.0,
                   mirror: str = "") -> dict[str, Any]:
         """Place a part and hand back what the server said about it."""
-        return await call("add_component", path=sheet, lib_id=lib_id, ref=ref,
-                          x=x, y=y, value=value, rotation=rotation,
-                          mirror=mirror)
+        got = await call("add_components", path=sheet, parts=[{
+            "lib_id": lib_id, "ref": ref, "x": x, "y": y, "value": value,
+            "rotation": rotation, "mirror": mirror}])
+        return got["parts"][0] if got else {}
 
     async def series(sheet: str, a: dict[str, Any], an: str,
                      b: dict[str, Any], bn: str) -> None:
@@ -164,10 +178,11 @@ async def build(client: Any) -> int:
                                  ("MCU", "mcu.kicad_sch", 152.4, 76.2),
                                  ("Sensors", "sensors.kicad_sch", 63.5, 133.35),
                                  ("IO", "io.kicad_sch", 152.4, 133.35)):
-        got = await call("add_sheet", path=root, name=name, filename=filename,
-                         x=x, y=y, width=50.8, height=38.1, ports=[])
+        got = await call("add_sheets", path=root, sheets=[{
+            "name": name, "filename": filename, "x": x, "y": y,
+            "width": 50.8, "height": 38.1, "ports": []}])
         if got:
-            boxes[name] = got
+            boxes[name] = got["sheets"][0]
     if failures:
         return failures
     await flush()
@@ -234,8 +249,10 @@ async def build(client: Any) -> int:
     pend("add_wire", path=power, x1=pin(cout, "1")["x"], y1=out5["y"],
                x2=pin(cout, "1")["x"], y2=pin(cout, "1")["y"])
     await rail(power, cout, "2", "GND")
-    v5 = await call("add_power", path=power, x=pin(cout, "1")["x"] + 8 * G,
-                    y=out5["y"] - 5 * G, net="+5V")
+    got5 = await call("add_power_symbols", path=power, symbols=[{
+        "x": pin(cout, "1")["x"] + 8 * G, "y": out5["y"] - 5 * G,
+        "net": "+5V"}])
+    v5 = got5["symbols"][0] if got5 else {}
     if v5:
         pend("add_wire", path=power, x1=pin(cout, "1")["x"] + 8 * G,
                    y1=out5["y"], x2=v5["pins"][0]["x"], y2=v5["pins"][0]["y"])
@@ -289,25 +306,30 @@ async def build(client: Any) -> int:
     # VBAT is not one of KiCad's power symbols -- there is no `power:VBAT` --
     # so it is an ordinary global label, and its flag hangs off a stub with
     # that label on it. GND has a symbol and gets the usual treatment.
-    flg = await call("add_power_flag", path=power, x=45.72, y=165.1)
+    _flg = await call("add_power_flags", path=power, flags=[{"x": 45.72, "y": 165.1}])
+    flg = _flg["flags"][0] if _flg else {}
     if flg:
         end = (45.72 + 10 * G, 165.1)
         pend("add_wire", path=power, x1=flg["pins"][0]["x"],
                    y1=flg["pins"][0]["y"], x2=end[0], y2=end[1])
         pend("add_label", path=power, x=end[0], y=end[1], text="VBAT",
                    kind="global", justify="left")
-    f5 = await call("add_power_flag", path=power, x=127.0, y=165.1)
-    s5 = await call("add_power", path=power, x=127.0 + 8 * G, y=165.1,
-                    net="+5V")
+    _f5 = await call("add_power_flags", path=power, flags=[{"x": 127.0, "y": 165.1}])
+    f5 = _f5["flags"][0] if _f5 else {}
+    _s5 = await call("add_power_symbols", path=power,
+                     symbols=[{"x": 127.0 + 8 * G, "y": 165.1, "net": "+5V"}])
+    s5 = _s5["symbols"][0] if _s5 else {}
     if f5 and s5:
         # The 5 V rail comes out of an inductor. ERC sees a passive, not a
         # supply, so nothing tells it this rail is driven.
         pend("add_wire", path=power, x1=f5["pins"][0]["x"],
                    y1=f5["pins"][0]["y"], x2=s5["pins"][0]["x"],
                    y2=s5["pins"][0]["y"])
-    gflg = await call("add_power_flag", path=power, x=88.9, y=165.1)
-    gsym = await call("add_power", path=power, x=88.9 + 8 * G, y=165.1,
-                      net="GND")
+    _gflg = await call("add_power_flags", path=power, flags=[{"x": 88.9, "y": 165.1}])
+    gflg = _gflg["flags"][0] if _gflg else {}
+    _gsym = await call("add_power_symbols", path=power,
+                       symbols=[{"x": 88.9 + 8 * G, "y": 165.1, "net": "GND"}])
+    gsym = _gsym["symbols"][0] if _gsym else {}
     if gflg and gsym:
         pend("add_wire", path=power, x1=gflg["pins"][0]["x"],
                    y1=gflg["pins"][0]["y"], x2=gsym["pins"][0]["x"],

@@ -14,6 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from ..backend import create, load
 from ..schematic import Sheet
 from . import _meta
@@ -103,50 +105,6 @@ def new_sheet(path: str, title: str = "", paper: str = "A4",
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_sheet(path: str, name: str, filename: str, x: float, y: float,
-              width: float = 38.1, height: float = 25.4,
-              ports: list[dict[str, str]] | None = None) -> dict[str, Any]:
-    """Put a child sheet on this one, and get back where its ports landed.
-
-    A design of more than one page is two halves that meet BY NAME: a port on
-    the box here, and a hierarchical label of the same name inside the child.
-    Nothing checks the pairing while you draw; `check_sheet` on the ROOT does.
-
-    Power does not need ports. GND and +3V3 are global -- a power symbol on
-    any sheet joins the same net as one on any other. Ports are for signals.
-
-    Then create the child with `new_sheet`, passing the `instance_path` this
-    returns, or the child's parts will not join the design's nets.
-
-    Args:
-        path: The open parent sheet.
-        name: The sheet's name, shown above the box.
-        filename: The child's file, e.g. ``"power.kicad_sch"``.
-        x: Top-left corner of the box.
-        y: Top-left corner of the box.
-        width: Box width in mm.
-        height: Box height in mm.
-        ports: ``[{"name": "SENSE", "kind": "input"}, ...]``. Kind is
-            ``input``, ``output``, ``bidirectional``, ``tri_state`` or
-            ``passive``. They are spread down the left edge; `move_component`
-            does not move them, so choose the box position with that in mind.
-
-    Returns:
-        ``{ok, name, filename, uuid, instance_path, x, y, width, height,
-        pins: [{name, x, y, ...}]}`` -- the pins are points to wire to.
-    """
-    try:
-        ref = _sheet(path).add_sheet(
-            name, filename, x, y, width=width, height=height,
-            ports=tuple((p["name"], p.get("kind", "passive"))
-                        for p in (ports or [])),
-        )
-    except (LookupError, KeyError, ValueError) as exc:
-        return _fail(exc)
-    return {"ok": True, **ref.as_dict()}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
 def save_sheet(path: str) -> dict[str, Any]:
     """Write the open sheet to disk.
 
@@ -224,91 +182,6 @@ def _blank() -> Sheet:
 # -- parts ----------------------------------------------------------------
 
 
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_component(path: str, lib_id: str, ref: str, x: float, y: float,
-                  value: str = "", rotation: float = 0.0, mirror: str = "",
-                  unit: int = 1) -> dict[str, Any]:
-    """Place one unit of a symbol on the sheet at ``(x, y)``.
-
-    **The returned pins are the point of this call.** Each carries the sheet
-    position to wire to, with rotation and mirroring already applied, and the
-    direction it points so you know which way to leave.
-
-    Args:
-        path: The open sheet.
-        lib_id: ``Library:Symbol``, e.g. ``"Device:R"``.
-        ref: Reference designator, e.g. ``"R1"``.
-        x: Position in mm; snapped to the 1.27 mm grid.
-        y: Position in mm.
-        value: Value field, e.g. ``"10k"``. Defaults to the symbol's own.
-        rotation: 0, 90, 180 or 270 degrees, counter-clockwise.
-            Any other angle is REFUSED -- KiCad will not open a sheet
-            holding a symbol at, say, 45.
-        mirror: ``"x"``, ``"y"`` or empty.
-        unit: Which unit of a multi-unit symbol -- an LM358 is two op-amps
-            plus a shared power unit. `symbol_pins` reports how many there
-            are. Units share a reference and are placed one call each, so
-            ``(ref, unit)`` names a placed thing.
-
-    Returns:
-        ``{ok, ref, lib_id, x, y, rotation, pins: [{number, name, x, y,
-        orientation, kind}]}``.
-    """
-    try:
-        part = _sheet(path).place(lib_id, ref, x, y, value=value,
-                                  rotation=rotation, mirror=mirror, unit=unit)
-    except (LookupError, ValueError) as exc:
-        return _fail(exc)
-    return {"ok": True, **part.as_dict()}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_component(path: str, ref: str, x: float, y: float,
-                   unit: int = 1) -> dict[str, Any]:
-    """Move a placed part. Returns it with its pins at their new positions."""
-    try:
-        return {"ok": True, **_sheet(path).move(ref, x, y, unit=unit).as_dict()}
-    except LookupError as exc:
-        return _fail(exc)
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def rotate_component(path: str, ref: str, rotation: float,
-                     unit: int = 1) -> dict[str, Any]:
-    """Turn a placed part to *rotation* degrees (0, 90, 180, 270).
-
-    Returns it with the pins where they now are -- which is why this is worth
-    a call rather than deleting and re-placing. Any angle that is not a
-    quarter turn is refused: KiCad will not open a sheet holding one.
-    """
-    try:
-        return {"ok": True,
-                **_sheet(path).rotate(ref, rotation, unit=unit).as_dict()}
-    except (LookupError, ValueError) as exc:
-        return _fail(exc)
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def mirror_component(path: str, ref: str, axis: str,
-                     unit: int = 1) -> dict[str, Any]:
-    """Mirror a placed part about ``"x"``, ``"y"``, or ``""`` for neither."""
-    try:
-        return {"ok": True,
-                **_sheet(path).mirror(ref, axis, unit=unit).as_dict()}
-    except (LookupError, ValueError) as exc:
-        return _fail(exc)
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def remove_component(path: str, ref: str, unit: int = 1) -> dict[str, Any]:
-    """Take one placed unit off the sheet."""
-    try:
-        _sheet(path).remove(ref, unit=unit)
-    except LookupError as exc:
-        return _fail(exc)
-    return {"ok": True, "removed": ref}
-
-
 @mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
 def get_component(path: str, ref: str, unit: int = 1) -> dict[str, Any]:
     """One placed unit and its pin positions."""
@@ -353,63 +226,6 @@ def get_pin(path: str, ref: str, pin: str) -> dict[str, Any]:
     return {"ok": True, "ref": ref, "pin": pin, **point.as_dict()}
 
 
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def set_field(path: str, ref: str, name: str, value: str) -> dict[str, Any]:
-    """Set one of a part's fields.
-
-    ``Footprint`` is the field the board export reads, so this is how a part
-    gets a footprint -- there is no separate call, because a footprint is not
-    special here. ``Value``, ``Datasheet``, ``MPN`` and custom names work the
-    same way.
-
-    Args:
-        path: The open sheet.
-        ref: The part.
-        name: Field name, e.g. ``"Footprint"``.
-        value: What to set it to.
-
-    Returns:
-        ``{ok, ref, fields}`` -- every field on the part.
-    """
-    try:
-        fields = _sheet(path).set_field(ref, name, value)
-    except LookupError as exc:
-        return _fail(exc)
-    return {"ok": True, "ref": ref, "fields": fields}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_field(path: str, ref: str, name: str, dx: float, dy: float,
-               rotation: float | None = None,
-               justify: str = "") -> dict[str, Any]:
-    """Move a part's Reference or Value label, relative to the part.
-
-    Labels are placed automatically when a part is placed or turned -- to the
-    side a vertical part's wires do not leave from, above and below a
-    horizontal one. That default keeps them off the wires, but on a crowded
-    sheet two parts' labels can still meet, and only you know which should
-    give way.
-
-    Args:
-        path: The open sheet.
-        ref: The part.
-        name: ``"Reference"``, ``"Value"``, or any other field.
-        dx: Offset from the part's position, in mm.
-        dy: Offset from the part's position, in mm.
-        rotation: Text angle in degrees; omit to leave it alone.
-        justify: ``"left"``, ``"right"``, or empty to centre.
-
-    Returns:
-        ``{ok, ref, field, x, y}``.
-    """
-    try:
-        at = _sheet(path).move_field(ref, name, dx, dy, rotation=rotation,
-                                     justify=justify)
-    except LookupError as exc:
-        return _fail(exc)
-    return {"ok": True, "ref": ref, "field": name, **at.as_dict()}
-
-
 @mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
 def get_fields(path: str, ref: str) -> dict[str, Any]:
     """Every field on a part, by name."""
@@ -420,105 +236,6 @@ def get_fields(path: str, ref: str) -> dict[str, Any]:
 
 
 # -- connections ----------------------------------------------------------
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_wire(path: str, x1: float, y1: float, x2: float,
-             y2: float) -> dict[str, Any]:
-    """Draw one straight wire segment between two points.
-
-    A corner is two calls. That is deliberate: where a wire turns is a drawing
-    decision, and nothing here will make it for you.
-    """
-    try:
-        a, b = _sheet(path).wire(x1, y1, x2, y2)
-    except LookupError as exc:
-        return _fail(exc)
-    return {"ok": True, "start": a.as_dict(), "end": b.as_dict()}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_junction(path: str, x: float, y: float) -> dict[str, Any]:
-    """Mark a point where crossing wires connect.
-
-    Wires that cross without one are NOT connected.
-    """
-    try:
-        return {"ok": True, **_sheet(path).junction(x, y).as_dict()}
-    except LookupError as exc:
-        return _fail(exc)
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_label(path: str, x: float, y: float, text: str, kind: str = "local",
-              rotation: float = 0.0, justify: str = "left") -> dict[str, Any]:
-    """Name a net at a point.
-
-    Two labels with the same text are the same net, with no wire between them.
-
-    Args:
-        path: The open sheet.
-        x: Position in mm; snapped to the grid.
-        y: Position in mm.
-        text: The net name.
-        kind: ``"local"`` (this sheet), ``"global"`` (the whole design), or
-            ``"hierarchical"`` (a port on this sheet).
-        rotation: Degrees. Only meaningful for a VERTICAL label (90, 270): a
-            horizontal global label renders identically at 0 and 180, because
-            rotation turns the box along with the text.
-        justify: ``"left"`` or ``"right"`` -- THIS is what points a global or
-            hierarchical label. Use ``right`` on a part's LEFT-hand pins: it
-            puts the flag's tip on the right, where the wire arrives, and
-            grows the box away from the part. Use ``left`` on its right-hand
-            pins. Get it backwards and the wire runs straight through the
-            text.
-    """
-    try:
-        at = _sheet(path).label(x, y, text, kind=kind, rotation=rotation,
-                                justify=justify)
-    except (LookupError, ValueError) as exc:
-        return _fail(exc)
-    return {"ok": True, "text": text, "kind": kind, "justify": justify,
-            **at.as_dict()}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_power(path: str, x: float, y: float, net: str,
-              rotation: float = 0.0) -> dict[str, Any]:
-    """Place a power symbol -- ``GND``, ``+3V3``, ``+5V``, ``VCC``.
-
-    Returns the placed part; its single pin is the point to wire to.
-    *rotation* is a quarter turn: 0, 90, 180 or 270.
-    """
-    try:
-        part = _sheet(path).power(x, y, net, rotation=rotation)
-    except (LookupError, ValueError) as exc:
-        return _fail(exc)
-    return {"ok": True, **part.as_dict()}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_power_flag(path: str, x: float, y: float,
-                   rotation: float = 0.0) -> dict[str, Any]:
-    """Place a PWR_FLAG, which tells ERC a net is driven.
-
-    Wire it to the net it vouches for. Without one, ERC reports every supply
-    as undriven.
-    """
-    try:
-        part = _sheet(path).power_flag(x, y, rotation=rotation)
-    except (LookupError, ValueError) as exc:
-        return _fail(exc)
-    return {"ok": True, **part.as_dict()}
-
-
-@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_no_connect(path: str, x: float, y: float) -> dict[str, Any]:
-    """Mark a pin deliberately unconnected, so ERC stops reporting it."""
-    try:
-        return {"ok": True, **_sheet(path).no_connect(x, y).as_dict()}
-    except LookupError as exc:
-        return _fail(exc)
 
 
 # -- reading back ---------------------------------------------------------
@@ -681,33 +398,563 @@ def list_wires(path: str) -> dict[str, Any]:
                       for a, b in segments]}
 
 
+# -- what goes on a sheet, many at a time ---------------------------------
+#
+# Every one of these takes a LIST. One item is a list of one, so there is no
+# singular form to choose between and no `batch` to fall back to: the element
+# is a typed model, so a misspelled key is rejected by the schema before
+# anything runs. That is the trade -- a single call nests one level deeper,
+# and 482 wires cost one round trip instead of 482.
+#
+# On a refusal they stop, say which INDEX failed, and hand back what already
+# landed. A half-finished batch is recoverable; a silent one is not.
+
+
+class NewPart(BaseModel):
+    """One part for `add_components`."""
+
+    lib_id: str = Field(description="Library symbol, e.g. 'Device:R'.")
+    ref: str = Field(description="Reference, e.g. 'R1'. Must be unused.")
+    x: float = Field(description="Position in mm; snapped to the 1.27 grid.")
+    y: float = Field(description="Position in mm.")
+    value: str = Field(default="", description="Shown value, e.g. '10k'.")
+    rotation: float = Field(default=0.0, description="0, 90, 180 or 270.")
+    mirror: str = Field(default="", description="'x', 'y', or empty.")
+    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+
+
+class Segment(BaseModel):
+    """One wire for `add_wires`, from one point to another."""
+
+    x1: float = Field(description="Start, in mm; snapped to the grid.")
+    y1: float = Field(description="Start, in mm.")
+    x2: float = Field(description="End, in mm.")
+    y2: float = Field(description="End, in mm.")
+
+
+class Spot(BaseModel):
+    """One point, for `add_junctions` and `add_no_connects`."""
+
+    x: float = Field(description="Position in mm; snapped to the grid.")
+    y: float = Field(description="Position in mm.")
+
+
+class NewLabel(BaseModel):
+    """One label for `add_labels`."""
+
+    x: float = Field(description="Position in mm; snapped to the grid.")
+    y: float = Field(description="Position in mm.")
+    text: str = Field(description="The net name.")
+    kind: str = Field(default="local",
+                      description="'local', 'global' or 'hierarchical'.")
+    rotation: float = Field(default=0.0, description="Only meaningful at 90 "
+                            "or 270; a horizontal label reads the same at 0 "
+                            "and 180.")
+    justify: str = Field(default="left", description="Which way the label "
+                         "points: 'left' grows it rightward, 'right' leftward. "
+                         "This, not rotation, is what aims a global label.")
+
+
+class NewPower(BaseModel):
+    """One power symbol for `add_power_symbols`."""
+
+    x: float = Field(description="Position in mm; snapped to the grid.")
+    y: float = Field(description="Position in mm.")
+    net: str = Field(description="Rail name, e.g. 'GND', '+3V3'.")
+    rotation: float = Field(default=0.0, description="0, 90, 180 or 270.")
+
+
+class NewFlag(BaseModel):
+    """One PWR_FLAG for `add_power_flags`."""
+
+    x: float = Field(description="Position in mm; snapped to the grid.")
+    y: float = Field(description="Position in mm.")
+    rotation: float = Field(default=0.0, description="0, 90, 180 or 270.")
+
+
+class NewSheetBox(BaseModel):
+    """One child-sheet box for `add_sheets`."""
+
+    name: str = Field(description="Sheet name, shown above the box.")
+    filename: str = Field(description="Child file, e.g. 'power.kicad_sch'.")
+    x: float = Field(description="Top-left corner, in mm.")
+    y: float = Field(description="Top-left corner, in mm.")
+    width: float = Field(default=38.1, description="Box width in mm.")
+    height: float = Field(default=25.4, description="Box height in mm.")
+    ports: list[dict[str, str]] = Field(
+        default_factory=list,
+        description='[{"name": "SENSE", "kind": "input"}, ...].')
+
+
+class PartMove(BaseModel):
+    """One absolute move for `move_components`."""
+
+    ref: str = Field(description="Reference to move.")
+    x: float = Field(description="New position in mm; snapped to the grid.")
+    y: float = Field(description="New position in mm.")
+    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+
+
+class PartTurn(BaseModel):
+    """One rotation for `rotate_components`."""
+
+    ref: str = Field(description="Reference to turn.")
+    rotation: float = Field(description="0, 90, 180 or 270.")
+    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+
+
+class PartFlip(BaseModel):
+    """One mirroring for `mirror_components`."""
+
+    ref: str = Field(description="Reference to mirror.")
+    axis: str = Field(description="'x', 'y', or empty to clear it.")
+    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+
+
+class FieldValue(BaseModel):
+    """One field to set, for `set_fields`."""
+
+    ref: str = Field(description="The part.")
+    name: str = Field(description="Field name, e.g. 'Footprint'.")
+    value: str = Field(description="The value to write.")
+
+
+class FieldShift(BaseModel):
+    """One field to move, for `move_fields`."""
+
+    ref: str = Field(description="The part.")
+    name: str = Field(description="Field name, e.g. 'Reference'.")
+    dx: float = Field(description="Offset from the part's position, in mm.")
+    dy: float = Field(description="Offset from the part's position, in mm.")
+    rotation: float | None = Field(default=None,
+                                   description="Absolute text angle, or null.")
+    justify: str = Field(default="", description="'left', 'right' or empty.")
+
+
+def _partial(exc: Exception, index: int, key: str,
+             done: list[Any]) -> dict[str, Any]:
+    """A refusal that says which element failed and what already landed."""
+    return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
+            "index": index, key: done}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_components(path: str, parts: list[NewPart]) -> dict[str, Any]:
+    """Place parts on the sheet, in order.
+
+    Each reply carries that part's pins at their positions ON THE SHEET, with
+    rotation and mirroring already applied. Place everything first, then read
+    the pins out of this reply and draw the wires with `add_wires`: a wire
+    aimed at a coordinate you worked out yourself, rather than one reported
+    here, looks connected and is not.
+
+    Args:
+        path: The open sheet.
+        parts: The parts, in order.
+
+    Returns:
+        `parts`, one entry per placement, each with its pins.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(parts):
+        try:
+            made = sheet.place(p.lib_id, p.ref, p.x, p.y, value=p.value,
+                               rotation=p.rotation, mirror=p.mirror,
+                               unit=p.unit)
+        except (LookupError, ValueError) as exc:
+            return _partial(exc, i, "parts", out)
+        out.append(made.as_dict())
+    return {"ok": True, "count": len(out), "parts": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_wires(path: str, wires: list[Segment]) -> dict[str, Any]:
+    """Draw wires, each between two points.
+
+    A wire connects by TOUCHING a pin, so both ends are snapped to the grid
+    and must land exactly on the pin coordinates `add_components` reported.
+    Two wires that cross do not connect unless a junction says they do.
+
+    Args:
+        path: The open sheet.
+        wires: The segments, in order.
+
+    Returns:
+        `wires`, one `{start, end}` per segment as it was snapped.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, w in enumerate(wires):
+        try:
+            a, b = sheet.wire(w.x1, w.y1, w.x2, w.y2)
+        except LookupError as exc:
+            return _partial(exc, i, "wires", out)
+        out.append({"start": a.as_dict(), "end": b.as_dict()})
+    return {"ok": True, "count": len(out), "wires": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_labels(path: str, labels: list[NewLabel]) -> dict[str, Any]:
+    """Name nets at points. Two labels with the same text are one net.
+
+    Args:
+        path: The open sheet.
+        labels: The labels, in order.
+
+    Returns:
+        `labels`, one entry per label with where it landed.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, lb in enumerate(labels):
+        try:
+            at = sheet.label(lb.x, lb.y, lb.text, kind=lb.kind,
+                             rotation=lb.rotation, justify=lb.justify)
+        except (LookupError, ValueError) as exc:
+            return _partial(exc, i, "labels", out)
+        out.append({"text": lb.text, "kind": lb.kind,
+                    "justify": lb.justify, **at.as_dict()})
+    return {"ok": True, "count": len(out), "labels": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
+    """Join crossing wires. Without one, wires that cross are separate nets.
+
+    Args:
+        path: The open sheet.
+        points: Where to put them.
+
+    Returns:
+        `points`, each as it was snapped.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(points):
+        try:
+            out.append(sheet.junction(p.x, p.y).as_dict())
+        except LookupError as exc:
+            return _partial(exc, i, "points", out)
+    return {"ok": True, "count": len(out), "points": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
+    """Mark pins deliberately unconnected, so ERC stops reporting them.
+
+    Args:
+        path: The open sheet.
+        points: Pin positions, from `add_components` or `get_pin`.
+
+    Returns:
+        `points`, each as it was snapped.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(points):
+        try:
+            out.append(sheet.no_connect(p.x, p.y).as_dict())
+        except LookupError as exc:
+            return _partial(exc, i, "points", out)
+    return {"ok": True, "count": len(out), "points": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_power_symbols(path: str, symbols: list[NewPower]) -> dict[str, Any]:
+    """Place power symbols. A rail joins BY NAME across every sheet.
+
+    Named `add_power_symbols` rather than `add_powers`, which is not English.
+
+    Args:
+        path: The open sheet.
+        symbols: The symbols, in order.
+
+    Returns:
+        `symbols`, each with its single pin -- the point to wire to.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, s in enumerate(symbols):
+        try:
+            out.append(sheet.power(s.x, s.y, s.net,
+                                   rotation=s.rotation).as_dict())
+        except (LookupError, ValueError) as exc:
+            return _partial(exc, i, "symbols", out)
+    return {"ok": True, "count": len(out), "symbols": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_power_flags(path: str, flags: list[NewFlag]) -> dict[str, Any]:
+    """Place PWR_FLAGs, which tell ERC a rail is driven.
+
+    A rail of only power INPUTS reads as undriven however many symbols sit on
+    it; one flag per rail is what settles that.
+
+    Args:
+        path: The open sheet.
+        flags: The flags, in order.
+
+    Returns:
+        `flags`, each with its single pin.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, f in enumerate(flags):
+        try:
+            out.append(sheet.power_flag(f.x, f.y,
+                                        rotation=f.rotation).as_dict())
+        except (LookupError, ValueError) as exc:
+            return _partial(exc, i, "flags", out)
+    return {"ok": True, "count": len(out), "flags": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_sheets(path: str, sheets: list[NewSheetBox]) -> dict[str, Any]:
+    """Put child-sheet boxes on this one, and say where their ports landed.
+
+    A design of more than one page is two halves that meet BY NAME: a port on
+    the box here, and a hierarchical label of the same name inside the child.
+    Nothing checks the pairing while you draw; `check_sheet` on the ROOT does.
+    Power needs no ports -- it is global.
+
+    Then create each child with `new_sheet`, passing back the `instance_path`
+    returned here, or the child's parts will not join the design's nets.
+
+    Args:
+        path: The open parent sheet.
+        sheets: The boxes, in order.
+
+    Returns:
+        `sheets`, each with its `instance_path` and port positions.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, s in enumerate(sheets):
+        try:
+            ref = sheet.add_sheet(
+                s.name, s.filename, s.x, s.y, width=s.width, height=s.height,
+                ports=tuple((p["name"], p.get("kind", "passive"))
+                            for p in s.ports),
+            )
+        except (LookupError, KeyError, ValueError) as exc:
+            return _partial(exc, i, "sheets", out)
+        out.append(ref.as_dict())
+    return {"ok": True, "count": len(out), "sheets": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def move_components(path: str, moves: list[PartMove] | None = None,
+                    refs: list[str] | None = None, dx: float = 0.0,
+                    dy: float = 0.0, unit: int = 1) -> dict[str, Any]:
+    """Move parts: each to a position of its own, or a set by one offset.
+
+    Two ways, because a caller wants both. `moves` puts each part somewhere
+    absolute. `refs` with `dx`/`dy` SHIFTS that set, which is what moving a
+    block of a sheet actually is -- every other move is absolute, so without
+    it a caller reads each position back, adds the offset itself, and calls
+    once per part.
+
+    Choosing the set is a separate question and stays one: `list_components`
+    reports every part and where it is, you filter it however you like, and
+    pass the references here. Nothing is inferred from context.
+
+    **Wires do not follow.** A part moved out from under its wires is joined
+    to nothing, and only `list_nets` says so.
+
+    Args:
+        path: The open sheet.
+        moves: Absolute placements, one per part.
+        refs: Parts to shift. Ignored when `moves` is given.
+        dx: Offset in mm, with `refs`.
+        dy: Offset in mm, with `refs`.
+        unit: Unit of a multi-unit symbol, with `refs`.
+
+    Returns:
+        `moved`, each part at its new position.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    if moves is None and refs is None:
+        return {"ok": False,
+                "error": "give either moves=[...] or refs=[...] with dx/dy"}
+    out: list[dict[str, Any]] = []
+    if moves is not None:
+        for i, m in enumerate(moves):
+            try:
+                out.append(sheet.move(m.ref, m.x, m.y, unit=m.unit).as_dict())
+            except (LookupError, ValueError) as exc:
+                return _partial(exc, i, "moved", out)
+    else:
+        for i, ref in enumerate(refs or []):
+            try:
+                was = sheet.part(ref, unit=unit).at
+                out.append(sheet.move(ref, was.x + dx, was.y + dy,
+                                      unit=unit).as_dict())
+            except (LookupError, ValueError) as exc:
+                return _partial(exc, i, "moved", out)
+    return {"ok": True, "count": len(out), "moved": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def rotate_components(path: str, turns: list[PartTurn]) -> dict[str, Any]:
+    """Turn parts. A rotation moves the pins, and the reply says where to.
+
+    Args:
+        path: The open sheet.
+        turns: The rotations, in order.
+
+    Returns:
+        `turned`, each part with its pins at their new positions.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, t in enumerate(turns):
+        try:
+            out.append(sheet.rotate(t.ref, t.rotation, unit=t.unit).as_dict())
+        except (LookupError, ValueError) as exc:
+            return _partial(exc, i, "turned", out)
+    return {"ok": True, "count": len(out), "turned": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def mirror_components(path: str, mirrors: list[PartFlip]) -> dict[str, Any]:
+    """Mirror parts about an axis, and say where the pins ended up.
+
+    Args:
+        path: The open sheet.
+        mirrors: The mirrorings, in order.
+
+    Returns:
+        `mirrored`, each part with its pins at their new positions.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(mirrors):
+        try:
+            out.append(sheet.mirror(m.ref, m.axis, unit=m.unit).as_dict())
+        except (LookupError, ValueError) as exc:
+            return _partial(exc, i, "mirrored", out)
+    return {"ok": True, "count": len(out), "mirrored": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_components(path: str, refs: list[str],
+                      unit: int = 1) -> dict[str, Any]:
+    """Take parts off the sheet. Wires and labels stay where they are.
+
+    Args:
+        path: The open sheet.
+        refs: References to remove.
+        unit: Unit of a multi-unit symbol.
+
+    Returns:
+        `removed`, the references that went.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    gone: list[Any] = []
+    for i, ref in enumerate(refs):
+        try:
+            sheet.remove(ref, unit=unit)
+        except LookupError as exc:
+            return _partial(exc, i, "removed", gone)
+        gone.append(ref)
+    return {"ok": True, "count": len(gone), "removed": gone}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def set_fields(path: str, fields: list[FieldValue]) -> dict[str, Any]:
+    """Set fields on parts -- `Footprint`, `Datasheet`, a custom one.
+
+    Args:
+        path: The open sheet.
+        fields: The values, in order.
+
+    Returns:
+        `fields`, each part's full field set after the write.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, f in enumerate(fields):
+        try:
+            got = sheet.set_field(f.ref, f.name, f.value)
+        except LookupError as exc:
+            return _partial(exc, i, "fields", out)
+        out.append({"ref": f.ref, "fields": got})
+    return {"ok": True, "count": len(out), "fields": out}
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
+    """Move a part's text relative to the part, so it stops printing on it.
+
+    A library places these and cannot know what ends up beside them.
+
+    Args:
+        path: The open sheet.
+        moves: The moves, in order.
+
+    Returns:
+        `moved`, each field at its new position.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, m in enumerate(moves):
+        try:
+            at = sheet.move_field(m.ref, m.name, m.dx, m.dy,
+                                  rotation=m.rotation, justify=m.justify)
+        except LookupError as exc:
+            return _partial(exc, i, "moved", out)
+        out.append({"ref": m.ref, "field": m.name, **at.as_dict()})
+    return {"ok": True, "count": len(out), "moved": out}
+
 __all__ = [
-    "add_component",
-    "add_junction",
-    "add_label",
-    "add_no_connect",
-    "add_power",
-    "add_power_flag",
-    "add_sheet",
-    "add_wire",
-    "check_sheet",
-    "find_symbol",
-    "get_component",
-    "get_fields",
-    "get_pin",
-    "list_components",
-    "list_nets",
-    "list_wires",
-    "mirror_component",
-    "move_component",
-    "move_field",
-    "new_sheet",
-    "next_ref",
-    "remove_component",
-    "render_schematic",
-    "rotate_component",
-    "save_sheet",
-    "set_field",
-    "symbol_pins",
-    "what_is_at",
+    "add_components", "add_junctions", "add_labels", "add_no_connects",
+    "add_power_flags", "add_power_symbols", "add_sheets", "add_wires",
+    "check_sheet", "find_symbol", "get_component", "get_fields", "get_pin",
+    "list_components", "list_nets", "list_wires", "mirror_components",
+    "move_components", "move_fields", "new_sheet", "next_ref",
+    "remove_components", "render_schematic", "rotate_components",
+    "save_sheet", "set_fields", "symbol_pins", "what_is_at",
 ]

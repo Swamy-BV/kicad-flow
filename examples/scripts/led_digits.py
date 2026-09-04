@@ -158,12 +158,12 @@ async def build(client: Client) -> int:
                title="0-9 in LEDs -- root")
     boxes: dict[str, dict[str, Any]] = {}
     for i, digit in enumerate(DIGITS):
-        got = await call("add_sheet", path=root, name=f"Digit {digit}",
-                         filename=f"digit_{digit}.kicad_sch",
-                         x=25.4 + (i % 5) * 50.8, y=38.1 + (i // 5) * 50.8,
-                         width=38.1, height=33.02, ports=[])
+        got = await call("add_sheets", path=root, sheets=[{
+            "name": f"Digit {digit}", "filename": f"digit_{digit}.kicad_sch",
+            "x": 25.4 + (i % 5) * 50.8, "y": 38.1 + (i // 5) * 50.8,
+            "width": 38.1, "height": 33.02, "ports": []}])
         if got:
-            boxes[digit] = got
+            boxes[digit] = got["sheets"][0]
     if failures:
         return failures
     await call("save_sheet", path=root)
@@ -184,23 +184,22 @@ async def build(client: Client) -> int:
         lit = [(c, r) for r, line in enumerate(rows)
                for c, ch in enumerate(line) if ch == "#"]
 
-        # phase 1: everything that occupies a position
+        # phase 1: everything that occupies a position. Two calls, because
+        # parts and power symbols are different things -- 32 parts in one and
+        # 32 rails in the other, rather than 64 round trips.
         parts: list[dict[str, Any]] = []
+        rails: list[dict[str, Any]] = []
         for i in range(len(lit)):
             x, top, n = COL_X[i % 8], ROW_Y[i // 8], base + i + 1
             parts += [
-                {"tool": "add_power", "args": {
-                    "path": child, "x": x, "y": top, "net": VCC}},
-                {"tool": "add_component", "args": {
-                    "path": child, "lib_id": "Device:R", "ref": f"R{n}",
-                    "x": x, "y": top + R_DY, "value": "330R"}},
-                {"tool": "add_component", "args": {
-                    "path": child, "lib_id": "Device:LED", "ref": f"D{n}",
-                    "x": x, "y": top + D_DY, "value": "RED",
-                    "rotation": LED_ROT}},
-                {"tool": "add_power", "args": {
-                    "path": child, "x": x, "y": top + GND_DY, "net": GND,
-                    "rotation": 180}},
+                {"lib_id": "Device:R", "ref": f"R{n}",
+                 "x": x, "y": top + R_DY, "value": "330R"},
+                {"lib_id": "Device:LED", "ref": f"D{n}", "x": x,
+                 "y": top + D_DY, "value": "RED", "rotation": LED_ROT},
+            ]
+            rails += [
+                {"x": x, "y": top, "net": VCC},
+                {"x": x, "y": top + GND_DY, "net": GND, "rotation": 180},
             ]
         if digit == "0":
             # ERC has no way to know a rail is fed: every power symbol on
@@ -209,44 +208,45 @@ async def build(client: Client) -> int:
             # Below the channels, not beside them: at x=8G they printed on the
             # sheet border, which the render showed and ERC did not.
             for i, net in enumerate((VCC, GND)):
-                parts += [
-                    {"tool": "add_power_flag", "args": {
-                        "path": child, "x": (24 + i * 30) * G, "y": 118 * G}},
-                    {"tool": "add_power", "args": {
-                        "path": child, "x": (24 + i * 30) * G, "y": 126 * G,
-                        "net": net}},
-                ]
-        placed_sch = await call("batch", ops=parts)
-        if not placed_sch:
+                rails.append({"x": (24 + i * 30) * G, "y": 126 * G,
+                              "net": net})
+        made = await call("add_components", path=child, parts=parts)
+        powered = await call("add_power_symbols", path=child, symbols=rails)
+        if not (made and powered):
             continue
-        got = placed_sch["results"]
+        got_parts, got_rails = made["parts"], powered["symbols"]
+        flags: list[dict[str, Any]] = []
+        if digit == "0":
+            f = await call("add_power_flags", path=child, flags=[
+                {"x": (24 + i * 30) * G, "y": 118 * G} for i in range(2)])
+            flags = f["flags"] if f else []
 
         # phase 2: the wires, aimed at the pins phase 1 reported
         wires: list[dict[str, Any]] = []
+        labels: list[dict[str, Any]] = []
 
         def link(a: dict[str, Any], an: str, b: dict[str, Any], bn: str,
-                 sheet: str = child, into: list[dict[str, Any]] = wires) -> None:
+                 into: list[dict[str, Any]] = wires) -> None:
             """One wire between two pins the server just located."""
             pa, pb = pin(a, an), pin(b, bn)
-            into.append({"tool": "add_wire", "args": {
-                "path": sheet, "x1": pa[0], "y1": pa[1],
-                "x2": pb[0], "y2": pb[1]}})
+            into.append({"x1": pa[0], "y1": pa[1], "x2": pb[0], "y2": pb[1]})
 
         for i, (col, row) in enumerate(lit):
-            up, res, led, dn = got[i * 4:i * 4 + 4]
+            res, led = got_parts[i * 2:i * 2 + 2]
+            up, dn = got_rails[i * 2:i * 2 + 2]
             # +3V3 -> R.1, R.2 -> LED anode(2), LED cathode(1) -> GND.
             link(up, "1", res, "1")
             link(res, "2", led, "2")
             link(led, "1", dn, "1")
             # The cell this channel lights, so the board can be read back
             # against the schematic rather than against this file.
-            wires.append({"tool": "add_label", "args": {
-                "path": child, "x": COL_X[i % 8],
-                "y": ROW_Y[i // 8] + D_DY - 4 * G,
-                "text": f"D{digit}_{col}{row}", "kind": "local"}})
-        for j in range(len(lit) * 4, len(got), 2):
-            link(got[j], "1", got[j + 1], "1")      # each PWR_FLAG to its rail
-        await call("batch", ops=wires)
+            labels.append({"x": COL_X[i % 8],
+                           "y": ROW_Y[i // 8] + D_DY - 4 * G,
+                           "text": f"D{digit}_{col}{row}", "kind": "local"})
+        for k, flag in enumerate(flags):        # each PWR_FLAG to its rail
+            link(flag, "1", got_rails[len(lit) * 2 + k], "1")
+        await call("add_wires", path=child, wires=wires)
+        await call("add_labels", path=child, labels=labels)
         await call("save_sheet", path=child)
     print(f"sheets: 10 children x 16 channels = "
           f"{len(DIGITS) * 16} LEDs and as many resistors")
@@ -449,20 +449,26 @@ async def build(client: Client) -> int:
     # checked back to the coordinate the wire was drawn to -- if it did not
     # return, the sheet saved afterwards would be quietly broken.
     d1_before = await call("get_pin", path=child0, ref="D1", pin="2")
-    await call("move_component", path=child0, ref="D1",
-               x=comp.get("x", 0.0) + 12.7, y=comp.get("y", 0.0))
+    await call("move_components", path=child0, moves=[{
+        "ref": "D1", "x": comp.get("x", 0.0) + 12.7, "y": comp.get("y", 0.0)}])
     shifted = await call("get_pin", path=child0, ref="D1", pin="2")
-    same("move_component: pin dx",
+    same("move_components: pin dx",
          shifted.get("x", 0.0) - d1_before.get("x", 0.0), 12.7)
-    await call("rotate_component", path=child0, ref="D1", rotation=0)
+    await call("rotate_components", path=child0,
+               turns=[{"ref": "D1", "rotation": 0}])
     turned_s = await call("get_component", path=child0, ref="D1")
-    same("rotate_component: reported rotation", turned_s.get("rotation"), 0.0)
-    await call("mirror_component", path=child0, ref="D1", axis="x")
+    same("rotate_components: reported rotation", turned_s.get("rotation"), 0.0)
+    await call("mirror_components", path=child0,
+               mirrors=[{"ref": "D1", "axis": "x"}])
     # Back the way it was: no mirror, the original turn, the original place.
-    await call("mirror_component", path=child0, ref="D1", axis="")
-    await call("rotate_component", path=child0, ref="D1", rotation=LED_ROT)
-    await call("move_component", path=child0, ref="D1",
-               x=comp.get("x", 0.0), y=comp.get("y", 0.0))
+    # One call each, because a list of one is how the singular case is
+    # spelled now -- there is no other form to reach for.
+    await call("mirror_components", path=child0,
+               mirrors=[{"ref": "D1", "axis": ""}])
+    await call("rotate_components", path=child0,
+               turns=[{"ref": "D1", "rotation": LED_ROT}])
+    await call("move_components", path=child0, moves=[{
+        "ref": "D1", "x": comp.get("x", 0.0), "y": comp.get("y", 0.0)}])
     d1_after = await call("get_pin", path=child0, ref="D1", pin="2")
     same("restore: D1 pin x", d1_after.get("x"), d1_before.get("x"))
     same("restore: D1 pin y", d1_after.get("y"), d1_before.get("y"))
@@ -550,15 +556,15 @@ async def build(client: Client) -> int:
     same("remove_footprint dropped one", n_before - n_after, 1)
     spare = str(OUT / "_scratch.kicad_sch")
     await call("new_sheet", path=spare, title="scratch")
-    await call("add_component", path=spare, lib_id="Device:R", ref="RX",
-               x=50, y=50)
+    await call("add_components", path=spare, parts=[
+        {"lib_id": "Device:R", "ref": "RX", "x": 50, "y": 50}])
     # `count`, not a guess at the list's name: `list_components` returns its
     # parts under "parts", and `list_footprints` under "footprints". Every
     # reply carries `count`, which is the one key that does not need guessing.
     c_before = (await call("list_components", path=spare)).get("count", 0)
-    await call("remove_component", path=spare, ref="RX")
+    await call("remove_components", path=spare, refs=["RX"])
     c_after = (await call("list_components", path=spare)).get("count", 0)
-    same("remove_component dropped one", c_before - c_after, 1)
+    same("remove_components dropped one", c_before - c_after, 1)
 
     grew = await call("set_board_layers", path=scratch, count=4)
     gone = await call("remove_copper", path=scratch, net="N1", layer="F.Cu")

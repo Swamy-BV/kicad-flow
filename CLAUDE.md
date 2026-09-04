@@ -49,13 +49,24 @@ correct answer and the caller cannot compute it, it is a fact — do it for them
 worse than one that is plainly wrong half the time and takes an argument. The
 caller can see what they meant; the layer cannot.
 
-**`batch` is transport, not surface.** It runs N primitives in one request and
-adds no capability -- there is nothing expressible in it that is not
-expressible as N calls, and it decides nothing. It is the one tool that takes a
-list rather than scalars, and it earns that by being the only one: a batch
-variant of each primitive would have doubled the surface to say the same thing.
-Placement cannot share a batch with wiring, because a wire is drawn to a
-coordinate `add_component` reports.
+**Every schematic write takes a LIST.** `add_components`, `add_wires`,
+`move_components` -- one item is a list of one, so there is no singular form to
+choose between and no second way to do anything. This is the one place the
+"takes scalars" rule is bent, and it buys two things: the call count an agent
+pays drops by a factor of 20 or more, and every element stays a typed model, so
+a misspelled key is rejected by the schema naming the exact index before
+anything runs.
+
+It bends the rule; it does not cross the line. The caller still supplies every
+coordinate, and there is nothing expressible in a list of N that is not
+expressible as N calls. Nothing is decided.
+
+**Placement cannot share a call with wiring.** A wire is drawn to a coordinate
+`add_components` REPORTS, so the parts have to land and answer first. Two
+calls, always: place, read the pins out of the reply, then wire.
+
+The board side has not been through this yet and still takes scalars; `batch`
+runs its primitives N at a time until it has.
 
 ## Hard rules
 
