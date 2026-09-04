@@ -29,7 +29,7 @@ def symbol_dirs() -> list[Path]:
 
     Honors ``$KICAD_SYMBOL_DIR`` (semicolon- or os-separated) first, then the
     ``share/kicad/symbols`` folder beside the installed ``kicad-cli``. The scan
-    is cached (see :func:`clear_caches`); a fresh list is returned each call so
+    is cached; a fresh list is returned each call so
     callers may mutate it freely.
     """
     return list(_symbol_dirs_cached())
@@ -301,7 +301,7 @@ def load_symbol(lib_id: str) -> LibrarySymbol:
     query), and materialising each one deep-copies its whole definition tree.
     Treat it as read-only; the one place that stores a definition *into* a
     schematic (:func:`~kicad_flow.sch.components.ensure_lib_symbol`) copies it
-    first. Call :func:`clear_caches` after writing to a library on disk.
+    first, so a library written to on disk after the first read is not seen.
 
     Args:
         lib_id: e.g. ``"Device:R"`` or ``"power:GND"``.
@@ -354,15 +354,3 @@ def _library_symbol_names(path_str: str) -> tuple[str, ...]:
     return tuple(_TOP_SYMBOL_RE.findall(text))
 
 
-def clear_caches() -> None:
-    """Drop cached library parses.
-
-    Call after writing to a library on disk (importing a symbol, scaffolding a
-    project library) so the next lookup re-reads the file instead of serving a
-    stale parse.
-    """
-    _load_library_tree.cache_clear()
-    _library_symbol_names.cache_clear()
-    _load_symbol_cached.cache_clear()
-    _find_library_cached.cache_clear()
-    _symbol_dirs_cached.cache_clear()

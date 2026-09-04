@@ -5,7 +5,6 @@ KiCad file directly:
 
 * :mod:`_sexpr` -- KiCad's dialect of S-expressions, not a general reader.
 * :mod:`_library` -- loading and flattening a ``.kicad_sym``.
-* :mod:`_fileio` -- writing a KiCad tree atomically.
 
 Public, because a caller legitimately needs to run the tool and look at the
 result -- the monitor uses both:
