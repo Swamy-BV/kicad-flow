@@ -21,19 +21,27 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import Field, ValidationError, validate_call
 
 from . import _meta, tools_board, tools_schematic
 from ._app import mcp
 
 
 def _registry() -> dict[str, Any]:
-    """Every primitive `batch` may call, by tool name."""
+    """Every primitive `batch` may call, by tool name.
+
+    Wrapped in :func:`~pydantic.validate_call`, because the arguments arriving
+    here are plain JSON. A tool that takes a list of models -- `add_wires`
+    takes `list[Segment]` -- was handed a list of dicts and failed with
+    ``'dict' object has no attribute 'x1'``. The direct path never saw this:
+    FastMCP coerces against the signature before calling. This does the same,
+    so the two paths agree.
+    """
     out: dict[str, Any] = {}
     for module in (tools_schematic, tools_board):
         for name in module.__all__:
             fn = getattr(module, name)
-            out[name] = getattr(fn, "fn", fn)
+            out[name] = validate_call(getattr(fn, "fn", fn))
     return out
 
 
@@ -92,8 +100,8 @@ def batch(
             continue
         try:
             got = fn(**(op.get("args") or {}))
-        except TypeError as exc:          # wrong or missing arguments
-            got = {"ok": False, "error": f"TypeError: {exc}"}
+        except (TypeError, ValidationError) as exc:   # wrong or missing args
+            got = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         results.append(got)
         if isinstance(got, dict) and got.get("ok") is not True:
             failed.append({"index": i, "tool": name,

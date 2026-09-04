@@ -172,6 +172,31 @@ def _net_name(node: Node | None) -> str:
     return str(node.items[-1])
 
 
+def _turn_pads(node: Node, by: float) -> None:
+    """Add *by* degrees to every pad's own ``at`` angle.
+
+    KiCad rotates a pad's POSITION from the footprint's angle but takes the
+    pad's SHAPE orientation from the pad's own ``(at x y angle)``. Leave the
+    angle off and a turned part keeps axis-aligned pads: measured on a
+    SOT-23-6 at 90 degrees, its own pads overlapped at 0.0000 mm and DRC
+    returned 4 clearance and 4 solder-mask errors, all of the part against
+    itself. Writing the angle cleared all eight.
+
+    Added rather than set, because a footprint may already give a pad an angle
+    of its own, and that is relative to the footprint.
+    """
+    if not by % 360.0:
+        return
+    for pad in node.get_all("pad"):
+        at = pad.get("at")
+        if at is None:
+            continue
+        if len(at.items) > 3:
+            _set(at, 2, (_f(at, 2) + by) % 360.0)
+        else:
+            at.items.append(Sym(_fmt(by % 360.0)))
+
+
 def _pad_on_board(dx: float, dy: float, at: Point,
                   rotation: float) -> Point:
     """Where a pad lands once its footprint is placed and turned.
@@ -334,6 +359,7 @@ class KiCadBoard(Board):
             self._mirror(node)
         self._set_child(node, "layer", ["F.Cu" if side == "F" else "B.Cu"])
         self._set_child(node, "at", [x, y, rotation % 360.0])
+        _turn_pads(node, rotation % 360.0)
         self._set_child(node, "uuid", [_uid()])
         self._set_property(node, "Reference", ref)
         self._set_property(node, "Value", value or fp_id.split(":")[-1])
@@ -433,7 +459,9 @@ class KiCadBoard(Board):
         at = node.get("at")
         if at is None:
             raise LookupError(f"{ref} has no position")
+        was = _f(at, 2) if len(at.items) > 3 else 0.0
         _set(at, 2, rotation % 360.0)
+        _turn_pads(node, (rotation - was) % 360.0)
         return self.footprint(ref)
 
     def flip(self, ref: str, side: str) -> Footprint:
@@ -544,15 +572,25 @@ class KiCadBoard(Board):
                              Point(_f(at, 0), _f(at, 1)), _f(at, 2))
 
     def set_net(self, ref: str, pad: str, net: str) -> str:
-        """Put *ref*'s *pad* on *net*, and return the net."""
+        """Put EVERY pad of *ref* numbered *pad* on *net*, and return the net.
+
+        A pad number is not unique. A USB-C receptacle carries four shield lugs
+        all numbered ``SH``; an SOT-223 numbers its tab ``2`` along with a lead.
+        They are one electrical pin and the schematic names them once, so
+        setting the first and leaving the rest floating is silently wrong --
+        the unnetted copper reads as an island and DRC calls it unconnected.
+        """
         node = self._require(ref)
+        hit = 0
         for candidate in node.get_all("pad"):
             if _text(candidate) == pad:
                 existing = candidate.get("net")
                 if existing is not None:
                     candidate.items.remove(existing)
                 candidate.items.append(_node("net", [net]))
-                return net
+                hit += 1
+        if hit:
+            return net
         have = ", ".join(_text(p) for p in node.get_all("pad"))
         raise LookupError(f"{ref} has no pad {pad!r}; it has {have}")
 

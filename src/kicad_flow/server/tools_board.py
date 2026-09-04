@@ -38,7 +38,10 @@ def _board(path: str) -> Board:
     key = _key(path)
     if key not in _OPEN:
         if not Path(path).is_file():
-            raise LookupError(f"no board at {path}; call new_board first")
+            raise LookupError(
+                f"no file at {path}. An existing .kicad_pcb "
+                f"reopens by itself -- just name it. Use `new_board` only to "
+                f"create one, which OVERWRITES whatever is there.")
         _OPEN[key] = load_board(path)
     return _OPEN[key]
 

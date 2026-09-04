@@ -37,7 +37,10 @@ def _sheet(path: str) -> Sheet:
     key = _key(path)
     if key not in _OPEN:
         if not Path(path).is_file():
-            raise LookupError(f"no sheet at {path}; call new_sheet first")
+            raise LookupError(
+                f"no file at {path}. An existing .kicad_sch "
+                f"reopens by itself -- just name it. Use `new_sheet` only to "
+                f"create one, which OVERWRITES whatever is there.")
         _OPEN[key] = load(path)
     return _OPEN[key]
 

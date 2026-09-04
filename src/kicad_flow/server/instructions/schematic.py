@@ -119,6 +119,10 @@ SCHEMATIC = (
     "`list_components` and filter it, because nothing here infers which "
     "parts you meant.\n\n"
 
+    "A SAVED SHEET REOPENS BY ITSELF. Name an existing file in any call and "
+    "it is read from disk -- there is no open call and you do not need one. "
+    "`new_sheet` CREATES, and overwrites whatever was there, so do not "
+    "reach for it to get back to a design you already have.\n\n"
     "A sheet stays open in the server between calls, keyed by its path, so a "
     "session is a sequence of small calls rather than a re-parse each time. "
     "Work in batches -- every call is a full round-trip -- and check at "
