@@ -51,7 +51,7 @@ SCHEMATIC = (
     "must join -- wires that cross without one are NOT connected. "
     "`add_labels` names nets: "
     "two labels with the same text are one net with no wire between them.\n"
-    "5. `add_power_symbols` for the rails (GND, +3V3, +5V) -- each "
+    "5. `add_power` for the rails (GND, +3V3, +5V) -- each "
     "returns a single pin, which is what you wire to. `add_power_flags` "
     "on each supply, or ERC reports every rail as undriven. "
     "`add_no_connects` on pins left unconnected on purpose.\n"

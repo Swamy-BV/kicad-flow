@@ -456,7 +456,7 @@ class NewLabel(BaseModel):
 
 
 class NewPower(BaseModel):
-    """One power symbol for `add_power_symbols`."""
+    """One power symbol for `add_power`."""
 
     x: float = Field(description="Position in mm; snapped to the grid.")
     y: float = Field(description="Position in mm.")
@@ -676,10 +676,11 @@ def add_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_power_symbols(path: str, symbols: list[NewPower]) -> dict[str, Any]:
+def add_power(path: str, symbols: list[NewPower]) -> dict[str, Any]:
     """Place power symbols. A rail joins BY NAME across every sheet.
 
-    Named `add_power_symbols` rather than `add_powers`, which is not English.
+    Singular where the rest are plural, because `add_powers` is not
+    English. It takes a list like every other write here.
 
     Args:
         path: The open sheet.
@@ -951,7 +952,7 @@ def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
 
 __all__ = [
     "add_components", "add_junctions", "add_labels", "add_no_connects",
-    "add_power_flags", "add_power_symbols", "add_sheets", "add_wires",
+    "add_power", "add_power_flags", "add_sheets", "add_wires",
     "check_sheet", "find_symbol", "get_component", "get_fields", "get_pin",
     "list_components", "list_nets", "list_wires", "mirror_components",
     "move_components", "move_fields", "new_sheet", "next_ref",

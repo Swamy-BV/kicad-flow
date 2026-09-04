@@ -144,7 +144,7 @@ async def build(client: Any) -> int:
         p = pin(part, number)
         dx, dy = outward(p)
         end = (p["x"] + dx * length, p["y"] + dy * length)
-        got = await call("add_power_symbols", path=sheet,
+        got = await call("add_power", path=sheet,
                          symbols=[{"x": end[0], "y": end[1], "net": name}])
         sym = got["symbols"][0] if got else {}
         if sym:
@@ -249,7 +249,7 @@ async def build(client: Any) -> int:
     pend("add_wire", path=power, x1=pin(cout, "1")["x"], y1=out5["y"],
                x2=pin(cout, "1")["x"], y2=pin(cout, "1")["y"])
     await rail(power, cout, "2", "GND")
-    got5 = await call("add_power_symbols", path=power, symbols=[{
+    got5 = await call("add_power", path=power, symbols=[{
         "x": pin(cout, "1")["x"] + 8 * G, "y": out5["y"] - 5 * G,
         "net": "+5V"}])
     v5 = got5["symbols"][0] if got5 else {}
@@ -316,7 +316,7 @@ async def build(client: Any) -> int:
                    kind="global", justify="left")
     _f5 = await call("add_power_flags", path=power, flags=[{"x": 127.0, "y": 165.1}])
     f5 = _f5["flags"][0] if _f5 else {}
-    _s5 = await call("add_power_symbols", path=power,
+    _s5 = await call("add_power", path=power,
                      symbols=[{"x": 127.0 + 8 * G, "y": 165.1, "net": "+5V"}])
     s5 = _s5["symbols"][0] if _s5 else {}
     if f5 and s5:
@@ -327,7 +327,7 @@ async def build(client: Any) -> int:
                    y2=s5["pins"][0]["y"])
     _gflg = await call("add_power_flags", path=power, flags=[{"x": 88.9, "y": 165.1}])
     gflg = _gflg["flags"][0] if _gflg else {}
-    _gsym = await call("add_power_symbols", path=power,
+    _gsym = await call("add_power", path=power,
                        symbols=[{"x": 88.9 + 8 * G, "y": 165.1, "net": "GND"}])
     gsym = _gsym["symbols"][0] if _gsym else {}
     if gflg and gsym:

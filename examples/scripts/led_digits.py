@@ -211,7 +211,7 @@ async def build(client: Client) -> int:
                 rails.append({"x": (24 + i * 30) * G, "y": 126 * G,
                               "net": net})
         made = await call("add_components", path=child, parts=parts)
-        powered = await call("add_power_symbols", path=child, symbols=rails)
+        powered = await call("add_power", path=child, symbols=rails)
         if not (made and powered):
             continue
         got_parts, got_rails = made["parts"], powered["symbols"]
