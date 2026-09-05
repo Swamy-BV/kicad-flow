@@ -268,8 +268,9 @@ async def build(client: Client) -> int:
     # the pads out of the reply, then route at the reported coordinates.
     board = str(OUT / "led_digits.kicad_pcb")
     await call("new_board", path=board, layers=2)
-    await call("add_outlines", path=board, outlines=[{"points": [
-        [0, 0], [BOARD_W, 0], [BOARD_W, BOARD_H], [0, BOARD_H]]}])
+    await call("add_graphics", path=board, graphics=[{
+        "kind": "rectangle", "layer": "Edge.Cuts",
+        "x1": 0, "y1": 0, "x2": BOARD_W, "y2": BOARD_H}])
     print(f"\nboard {BOARD_W} x {BOARD_H} mm, 2 layers")
 
     placed: list[tuple[int, str, float, float]] = []
@@ -646,8 +647,17 @@ async def build(client: Client) -> int:
     # the design above, so it gets a scratch board that is deleted after.
     scratch = str(OUT / "_scratch.kicad_pcb")
     await call("new_board", path=scratch, layers=2)
-    await call("add_outlines", path=scratch, outlines=[{
-        "points": [[0, 0], [20, 0], [20, 20], [0, 20]]}])
+    graphic_result = await call("add_graphics", path=scratch, graphics=[
+        {"kind": "rectangle", "layer": "Edge.Cuts",
+         "x1": 0, "y1": 0, "x2": 20, "y2": 20},
+        {"kind": "circle", "layer": "F.SilkS", "x": 10, "y": 10,
+         "radius": 2, "fill": True},
+    ])
+    graphic_uuid = graphic_result.get("graphics", [{}, {}])[1].get("uuid", "")
+    await call("list_graphics", path=scratch, layer="F.SilkS")
+    await call("move_graphics", path=scratch, moves=[{
+        "uuid": graphic_uuid, "dx": 1, "dy": 0}])
+    await call("remove_graphics", path=scratch, uuids=[graphic_uuid])
     await call("add_tracks", path=scratch, tracks=[{
         "x1": 2, "y1": 2, "x2": 18, "y2": 2,
         "layer": "F.Cu", "width": 0.25, "net": "N1"}])

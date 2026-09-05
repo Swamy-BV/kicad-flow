@@ -32,6 +32,7 @@ from kicad_flow.pcb.types import (
     Finding,
     Footprint,
     FootprintDef,
+    Graphic,
     Net,
     NetPad,
     Pad,
@@ -54,6 +55,15 @@ _COPPER = {
     6: ("F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu"),
 }
 _SIDES = ("F", "B")
+_GRAPHIC_NODES = {
+    "line": "gr_line",
+    "arc": "gr_arc",
+    "circle": "gr_circle",
+    "rectangle": "gr_rect",
+    "polygon": "gr_poly",
+}
+_GRAPHIC_KINDS = {node: kind for kind, node in _GRAPHIC_NODES.items()}
+_GRAPHIC_LAYERS = ("Edge.Cuts", "F.SilkS", "B.SilkS")
 
 
 def _uid() -> str:
@@ -113,6 +123,52 @@ def _point_in_polygon(pt: tuple[float, float],
             if x < xin:
                 inside = not inside
     return inside
+
+
+def _circle_through(a: Point, b: Point,
+                    c: Point) -> tuple[Point, float] | None:
+    """Centre and radius of the circle through three points, if defined."""
+    d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y)
+             + c.x * (a.y - b.y))
+    if abs(d) < 1e-12:
+        return None
+    aa = a.x * a.x + a.y * a.y
+    bb = b.x * b.x + b.y * b.y
+    cc = c.x * c.x + c.y * c.y
+    x = (aa * (b.y - c.y) + bb * (c.y - a.y)
+         + cc * (a.y - b.y)) / d
+    y = (aa * (c.x - b.x) + bb * (a.x - c.x)
+         + cc * (b.x - a.x)) / d
+    centre = Point(x, y)
+    return centre, math.hypot(a.x - x, a.y - y)
+
+
+def _arc_extrema(points: tuple[Point, ...]) -> list[Point]:
+    """The cardinal extrema lying on a start/mid/end circular arc."""
+    if len(points) != 3:
+        return list(points)
+    circle = _circle_through(*points)
+    if circle is None:
+        return list(points)
+    centre, radius = circle
+    angles = [math.atan2(p.y - centre.y, p.x - centre.x) % (2 * math.pi)
+              for p in points]
+    start, mid, end = angles
+    ccw_span = (end - start) % (2 * math.pi)
+    ccw = (mid - start) % (2 * math.pi) <= ccw_span
+
+    def on_arc(angle: float) -> bool:
+        if ccw:
+            return (angle - start) % (2 * math.pi) <= ccw_span + 1e-12
+        return (start - angle) % (2 * math.pi) <= \
+            (start - end) % (2 * math.pi) + 1e-12
+
+    out = list(points)
+    for angle in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2):
+        if on_arc(angle):
+            out.append(Point(centre.x + radius * math.cos(angle),
+                             centre.y + radius * math.sin(angle)))
+    return out
 
 
 def _node(name: str, atoms: list[Any] | None = None) -> Node:
@@ -244,18 +300,23 @@ class KiCadBoard(Board):
     @property
     def size(self) -> tuple[float, float]:
         """The outline's ``(width, height)``, or ``(0, 0)`` if undrawn."""
-        xs: list[float] = []
-        ys: list[float] = []
-        for node in self._tree.get_all("gr_line"):
-            if _text(node.get("layer")) != "Edge.Cuts":
-                continue
-            for end in ("start", "end"):
-                point = node.get(end)
-                if point is not None:
-                    xs.append(_f(point, 0))
-                    ys.append(_f(point, 1))
-        if not xs:
+        points: list[Point] = []
+        for graphic in self.graphics("Edge.Cuts"):
+            if graphic.kind == "circle":
+                centre, rim = graphic.points
+                radius = math.hypot(rim.x - centre.x, rim.y - centre.y)
+                points.extend([
+                    Point(centre.x - radius, centre.y - radius),
+                    Point(centre.x + radius, centre.y + radius),
+                ])
+            elif graphic.kind == "arc":
+                points.extend(_arc_extrema(graphic.points))
+            else:
+                points.extend(graphic.points)
+        if not points:
             return (0.0, 0.0)
+        xs = [p.x for p in points]
+        ys = [p.y for p in points]
         return (round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3))
 
     @property
@@ -294,21 +355,127 @@ class KiCadBoard(Board):
         self._path.write_text(dumps(self._tree) + "\n", encoding="utf-8")
         return self._path
 
-    def outline(self, points: list[tuple[float, float]]) -> list[Point]:
-        """Draw the board edge through *points* and return them."""
-        if len(points) < 3:
-            raise ValueError("an outline needs at least 3 points")
-        made = [Point(float(x), float(y)) for x, y in points]
-        for a, b in zip(made, [*made[1:], made[0]], strict=True):
-            self._tree.items.append(_node("gr_line", [
-                _node("start", [a.x, a.y]),
-                _node("end", [b.x, b.y]),
-                _node("stroke", [_node("width", [0.1]),
-                                 _node("type", [Sym("default")])]),
-                _node("layer", ["Edge.Cuts"]),
-                _node("uuid", [_uid()]),
-            ]))
-        return made
+    def graphic(self, kind: str, points: list[tuple[float, float]], *,
+                layer: str, width: float = 0.1,
+                fill: bool = False) -> Graphic:
+        """Draw one outline or silkscreen primitive and return it."""
+        if kind not in _GRAPHIC_NODES:
+            raise ValueError(f"kind must be one of {sorted(_GRAPHIC_NODES)}, "
+                             f"not {kind!r}")
+        if layer not in _GRAPHIC_LAYERS:
+            raise ValueError(f"graphic layer must be one of "
+                             f"{list(_GRAPHIC_LAYERS)}, not {layer!r}")
+        expected = {"line": 2, "arc": 3, "circle": 2, "rectangle": 2}
+        if kind == "polygon":
+            if len(points) < 3:
+                raise ValueError("a polygon needs at least 3 points")
+        elif len(points) != expected[kind]:
+            raise ValueError(f"a {kind} needs {expected[kind]} points")
+        made = tuple(Point(float(x), float(y)) for x, y in points)
+        if width < 0:
+            raise ValueError("graphic width cannot be negative")
+        if kind == "arc" and _circle_through(*made) is None:
+            raise ValueError("an arc's start, mid and end cannot be collinear")
+        if kind == "circle" and made[0] == made[1]:
+            raise ValueError("a circle needs a non-zero radius")
+        if fill and kind not in ("circle", "rectangle", "polygon"):
+            raise ValueError(f"a {kind} cannot be filled")
+        if fill and layer == "Edge.Cuts":
+            raise ValueError("Edge.Cuts shapes cannot be filled")
+
+        uid = _uid()
+        stroke = _node("stroke", [_node("width", [width]),
+                                  _node("type", [Sym("solid")])])
+        common = [stroke]
+        if kind in ("circle", "rectangle", "polygon"):
+            common.append(_node("fill", [Sym("yes" if fill else "no")]))
+        common.extend([_node("layer", [layer]), _node("uuid", [uid])])
+        if kind == "line":
+            geometry = [_node("start", [made[0].x, made[0].y]),
+                        _node("end", [made[1].x, made[1].y])]
+        elif kind == "arc":
+            geometry = [_node("start", [made[0].x, made[0].y]),
+                        _node("mid", [made[1].x, made[1].y]),
+                        _node("end", [made[2].x, made[2].y])]
+        elif kind == "circle":
+            geometry = [_node("center", [made[0].x, made[0].y]),
+                        _node("end", [made[1].x, made[1].y])]
+        elif kind == "rectangle":
+            geometry = [_node("start", [made[0].x, made[0].y]),
+                        _node("end", [made[1].x, made[1].y])]
+        else:
+            geometry = [_node("pts", [
+                _node("xy", [point.x, point.y]) for point in made])]
+        self._tree.items.append(_node(_GRAPHIC_NODES[kind], geometry + common))
+        return Graphic(uid, kind, layer, made, float(width), fill)
+
+    def graphics(self, layer: str = "") -> list[Graphic]:
+        """Every outline and silkscreen primitive, in file order."""
+        if layer and layer not in _GRAPHIC_LAYERS:
+            raise ValueError(f"graphic layer must be one of "
+                             f"{list(_GRAPHIC_LAYERS)}, not {layer!r}")
+        out: list[Graphic] = []
+        for item in self._tree.items:
+            if not isinstance(item, Node) or item.name not in _GRAPHIC_KINDS:
+                continue
+            found = self._graphic_from_node(item)
+            if found.layer in _GRAPHIC_LAYERS and \
+                    (not layer or found.layer == layer):
+                out.append(found)
+        return out
+
+    def move_graphic(self, uuid: str, dx: float, dy: float) -> Graphic:
+        """Shift one graphic primitive by an offset."""
+        node = self._graphic_node(uuid)
+        for name in ("start", "mid", "end", "center"):
+            point = node.get(name)
+            if point is not None:
+                point.items = [point.items[0], Sym(_fmt(_f(point, 0) + dx)),
+                               Sym(_fmt(_f(point, 1) + dy))]
+        pts = node.get("pts")
+        if pts is not None:
+            for point in pts.get_all("xy"):
+                point.items = [point.items[0], Sym(_fmt(_f(point, 0) + dx)),
+                               Sym(_fmt(_f(point, 1) + dy))]
+        return self._graphic_from_node(node)
+
+    def remove_graphic(self, uuid: str) -> None:
+        """Remove one graphic primitive by UUID."""
+        self._tree.items.remove(self._graphic_node(uuid))
+
+    def _graphic_node(self, uuid: str) -> Node:
+        """The top-level graphic carrying *uuid*."""
+        for item in self._tree.items:
+            if isinstance(item, Node) and item.name in _GRAPHIC_KINDS and \
+                    _text(item.get("uuid")) == uuid:
+                return item
+        raise LookupError(f"no graphic with uuid {uuid!r}")
+
+    def _graphic_from_node(self, node: Node) -> Graphic:
+        """Read one KiCad graphical node into the board contract."""
+        kind = _GRAPHIC_KINDS[node.name]
+        names = {"line": ("start", "end"),
+                 "arc": ("start", "mid", "end"),
+                 "circle": ("center", "end"),
+                 "rectangle": ("start", "end")}
+        if kind == "polygon":
+            pts = node.get("pts")
+            point_nodes = pts.get_all("xy") if pts is not None else []
+        else:
+            point_nodes = []
+            for name in names[kind]:
+                point = node.get(name)
+                if point is not None:
+                    point_nodes.append(point)
+        points = tuple(Point(_f(point, 0), _f(point, 1))
+                       for point in point_nodes)
+        stroke = node.get("stroke")
+        fill = node.get("fill")
+        return Graphic(
+            _text(node.get("uuid")), kind, _text(node.get("layer")), points,
+            _f(stroke.get("width"), 0) if stroke is not None else 0.0,
+            _text(fill) in ("yes", "solid") if fill is not None else False,
+        )
 
     # -- the library ------------------------------------------------------
 

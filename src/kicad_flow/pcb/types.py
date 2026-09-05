@@ -30,6 +30,29 @@ class Point:
 
 
 @dataclass(frozen=True)
+class Graphic:
+    """One non-copper board shape, identified for later editing.
+
+    ``points`` carry the primitive's defining geometry in order: line and
+    rectangle corners; arc start, mid and end; circle centre and rim; or all
+    polygon vertices. This is geometry, not KiCad syntax.
+    """
+
+    uuid: str
+    kind: str
+    layer: str
+    points: tuple[Point, ...]
+    width: float = 0.1
+    fill: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete, round-trippable shape as JSON."""
+        return {"uuid": self.uuid, "kind": self.kind, "layer": self.layer,
+                "points": [p.as_dict() for p in self.points],
+                "width": self.width, "fill": self.fill}
+
+
+@dataclass(frozen=True)
 class Pad:
     """One pad of a placed footprint, at its position **on the board**.
 

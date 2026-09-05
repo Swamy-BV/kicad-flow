@@ -17,9 +17,9 @@ small calls rather than a re-parse each time. `save_board` writes.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..backend import create_board, load_board
 from ..pcb.api import Board
@@ -62,11 +62,82 @@ def _partial(exc: Exception, index: int, key: str,
     return {**_fail(exc), "index": index, key: done}
 
 
-class BoardOutline(BaseModel):
-    """One closed polygonal board-edge contour."""
+class _GraphicBase(BaseModel):
+    """Fields shared by every outline and silkscreen primitive."""
 
+    model_config = ConfigDict(extra="forbid")
+
+    layer: Literal["Edge.Cuts", "F.SilkS", "B.SilkS"] = Field(
+        description="Board outline or front/back silkscreen layer.")
+    width: float = Field(default=0.1, description="Stroke width in mm.")
+
+
+class LineGraphic(_GraphicBase):
+    """One straight graphical segment."""
+
+    kind: Literal["line"]
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+class ArcGraphic(_GraphicBase):
+    """One unambiguous circular arc through start, mid and end."""
+
+    kind: Literal["arc"]
+    x1: float
+    y1: float
+    xm: float
+    ym: float
+    x2: float
+    y2: float
+
+
+class CircleGraphic(_GraphicBase):
+    """One circle by centre and radius."""
+
+    kind: Literal["circle"]
+    x: float
+    y: float
+    radius: float
+    fill: bool = False
+
+
+class RectangleGraphic(_GraphicBase):
+    """One axis-aligned rectangle by opposite corners."""
+
+    kind: Literal["rectangle"]
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    fill: bool = False
+
+
+class PolygonGraphic(_GraphicBase):
+    """One closed polygon."""
+
+    kind: Literal["polygon"]
     points: list[list[float]] = Field(
-        description="Closed contour as [[x, y], ...], with at least 3 points.")
+        description="Closed polygon as [[x, y], ...], with at least 3 points.")
+    fill: bool = False
+
+
+GraphicSpec = Annotated[
+    LineGraphic | ArcGraphic | CircleGraphic | RectangleGraphic | PolygonGraphic,
+    Field(discriminator="kind"),
+]
+
+
+class GraphicMove(BaseModel):
+    """One graphical primitive and the offset to apply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    uuid: str = Field(description="Identity returned by add/list_graphics.")
+    dx: float = Field(description="Horizontal offset in mm.")
+    dy: float = Field(description="Vertical offset in mm.")
 
 
 class NewFootprint(BaseModel):
@@ -224,30 +295,91 @@ def save_board(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_outlines(path: str,
-                 outlines: list[BoardOutline]) -> dict[str, Any]:
-    """Draw closed board-edge contours in order.
+def add_graphics(path: str, graphics: list[GraphicSpec]) -> dict[str, Any]:
+    """Draw board outlines and front/back silkscreen art in order.
 
-    A board with a cutout or several islands has several contours. Which
-    contours to draw remains the caller's decision.
-
-    Args:
-        path: The open board.
-        outlines: Contours, each containing at least three ``[x, y]`` points.
+    Lines, arcs, circles, rectangles and polygons are geometric primitives,
+    not shape generators: the caller supplies every coordinate. Join line and
+    arc endpoints on ``Edge.Cuts`` to make a complex contour. Closed circles,
+    rectangles and polygons make contours by themselves. KiCad decides which
+    nested closed contours are cutouts; the API does not guess.
     """
     try:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
     out: list[dict[str, Any]] = []
-    for i, contour in enumerate(outlines):
+    for i, shape in enumerate(graphics):
         try:
-            made = board.outline([(p[0], p[1]) for p in contour.points])
+            if isinstance(shape, LineGraphic):
+                points = [(shape.x1, shape.y1), (shape.x2, shape.y2)]
+                fill = False
+            elif isinstance(shape, ArcGraphic):
+                points = [(shape.x1, shape.y1), (shape.xm, shape.ym),
+                          (shape.x2, shape.y2)]
+                fill = False
+            elif isinstance(shape, CircleGraphic):
+                points = [(shape.x, shape.y),
+                          (shape.x + shape.radius, shape.y)]
+                fill = shape.fill
+            elif isinstance(shape, RectangleGraphic):
+                points = [(shape.x1, shape.y1), (shape.x2, shape.y2)]
+                fill = shape.fill
+            else:
+                points = [(p[0], p[1]) for p in shape.points]
+                fill = shape.fill
+            made = board.graphic(shape.kind, points, layer=shape.layer,
+                                 width=shape.width, fill=fill)
         except (IndexError, *_ERRORS) as exc:
-            return _partial(exc, i, "outlines", out)
-        out.append({"points": [p.as_dict() for p in made]})
-    return {"ok": True, "count": len(out), "outlines": out,
+            return _partial(exc, i, "graphics", out)
+        out.append(made.as_dict())
+    return {"ok": True, "count": len(out), "graphics": out,
             "size": list(board.size)}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def list_graphics(path: str, layer: str = "") -> dict[str, Any]:
+    """List outline and silkscreen shapes, optionally on one layer."""
+    try:
+        found = _board(path).graphics(layer)
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(found),
+            "graphics": [shape.as_dict() for shape in found]}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def move_graphics(path: str, moves: list[GraphicMove]) -> dict[str, Any]:
+    """Shift graphical primitives by UUID; nothing else follows them."""
+    try:
+        board = _board(path)
+    except _ERRORS as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, move in enumerate(moves):
+        try:
+            out.append(board.move_graphic(
+                move.uuid, move.dx, move.dy).as_dict())
+        except _ERRORS as exc:
+            return _partial(exc, i, "moved", out)
+    return {"ok": True, "count": len(out), "moved": out}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_graphics(path: str, uuids: list[str]) -> dict[str, Any]:
+    """Remove graphical primitives by UUID in order."""
+    try:
+        board = _board(path)
+    except _ERRORS as exc:
+        return _fail(exc)
+    out: list[str] = []
+    for i, uuid in enumerate(uuids):
+        try:
+            board.remove_graphic(uuid)
+        except _ERRORS as exc:
+            return _partial(exc, i, "removed", out)
+        out.append(uuid)
+    return {"ok": True, "count": len(out), "removed": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -786,7 +918,7 @@ def render_board(path: str, output_file: str, side: str = "top",
 
 __all__ = [
     "add_board_texts",
-    "add_outlines",
+    "add_graphics",
     "add_tracks",
     "add_vias",
     "add_zones",
@@ -800,13 +932,16 @@ __all__ = [
     "list_board_nets",
     "list_copper",
     "list_footprints",
+    "list_graphics",
     "move_footprint_fields",
     "move_footprints",
+    "move_graphics",
     "new_board",
     "place_footprints",
     "refill_zones",
     "remove_copper",
     "remove_footprints",
+    "remove_graphics",
     "render_board",
     "rotate_footprints",
     "save_board",

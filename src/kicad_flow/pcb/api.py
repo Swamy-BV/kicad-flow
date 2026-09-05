@@ -37,6 +37,7 @@ from .types import (
     Finding,
     Footprint,
     FootprintDef,
+    Graphic,
     Net,
     Point,
     Track,
@@ -89,13 +90,32 @@ class Board(ABC):
         """Write the board to disk and return its path."""
 
     @abstractmethod
-    def outline(self, points: list[tuple[float, float]]) -> list[Point]:
-        """Draw the board edge through *points* and return them.
+    def graphic(self, kind: str, points: list[tuple[float, float]], *,
+                layer: str, width: float = 0.1,
+                fill: bool = False) -> Graphic:
+        """Draw one non-copper shape and return its identity and geometry.
 
-        One closed contour. A board with holes or several islands is several
-        calls -- which contour is a cutout and which is an island is a
-        decision, and the caller makes it.
+        Supported primitives are ``line``, ``arc``, ``circle``, ``rectangle``
+        and ``polygon``. Their defining points are respectively 2, 3, 2, 2,
+        and 3 or more. Layers are ``Edge.Cuts``, ``F.SilkS`` and ``B.SilkS``.
+
+        A complex outline is caller-supplied lines and arcs whose endpoints
+        meet. A closed circle, rectangle or polygon is one contour. Nothing
+        here decides whether a contour is an outside edge or an internal
+        cutout.
         """
+
+    @abstractmethod
+    def graphics(self, layer: str = "") -> list[Graphic]:
+        """Every non-copper shape, optionally restricted to one layer."""
+
+    @abstractmethod
+    def move_graphic(self, uuid: str, dx: float, dy: float) -> Graphic:
+        """Shift one shape by an offset and return its new geometry."""
+
+    @abstractmethod
+    def remove_graphic(self, uuid: str) -> None:
+        """Remove one shape by the UUID returned when it was drawn."""
 
     # -- the library ------------------------------------------------------
 
