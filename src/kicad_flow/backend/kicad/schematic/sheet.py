@@ -74,9 +74,37 @@ def _node(name: str, atoms: list[Any] | None = None) -> Node:
     return Node(items)
 
 
+#: Namespace for every identifier this backend writes. Fixed, so the same
+#: design produces the same file on every build.
+_UUID_NS = _uuid.UUID("6b3f7a1e-9c2d-5e48-9f10-2a7c4d8e0b53")
+
+
+def _walk(node: Node) -> Iterator[Node]:
+    """Every node in the tree, depth first."""
+    yield node
+    for item in node.items:
+        if isinstance(item, Node):
+            yield from _walk(item)
+
+
 def _uid() -> str:
-    """A fresh UUID, as KiCad writes them."""
+    """A fresh random UUID, for the few places nothing stable identifies."""
     return str(_uuid.uuid4())
+
+
+def _uid_from(key: str) -> str:
+    """A UUID derived from *key*, so a rebuild writes the same one.
+
+    Every identifier used to be `uuid4`, which meant re-running a build
+    rewrote every symbol instance even when nothing about the design had
+    changed: fc's five pages churned about 4,000 lines a run, and a diff could
+    not show what had actually moved. Deriving them from something stable
+    about the thing makes the file a function of the design.
+
+    It also makes a sheet's `instance_path` stable, because that path IS its
+    uuid -- so re-creating a root no longer orphans its children.
+    """
+    return str(_uuid.uuid5(_UUID_NS, key))
 
 
 #: The only angles a symbol can be placed at.
@@ -273,6 +301,23 @@ class KiCadSheet(Sheet):
         self._paper = paper
         self._instance_path = instance_path
         self._defs: dict[str, library.LibrarySymbol] = {}
+        # Every identifier already in the file. A derived uuid is checked
+        # against it, so two identical things -- two wires between the same
+        # pair of points -- cannot end up sharing one.
+        self._uids: set[str] = {
+            _text(node.get("uuid"))
+            for node in _walk(tree) if node.get("uuid") is not None
+        }
+
+    def _uid_for(self, key: str) -> str:
+        """A stable uuid for *key*, made unique if that key repeats."""
+        n = 1
+        while True:
+            candidate = _uid_from(key if n == 1 else f"{key}#{n}")
+            if candidate not in self._uids:
+                self._uids.add(candidate)
+                return candidate
+            n += 1
 
     @property
     def uuid(self) -> str:
@@ -309,7 +354,7 @@ class KiCadSheet(Sheet):
                   ports: tuple[tuple[str, str], ...] = ()) -> SheetRef:
         """Put a child sheet on this one, and return where its ports landed."""
         at = Point(snap(x), snap(y))
-        uid = _uid()
+        uid = self._uid_for(f"sheet:{name}:{filename}")
         node = _node("sheet", [
             _node("at", [at.x, at.y]),
             _node("size", [snap(width), snap(height)]),
@@ -331,7 +376,7 @@ class KiCadSheet(Sheet):
                     _node("font", [_node("size", [1.27, 1.27])]),
                     _node("justify", [Sym("right")]),
                 ]),
-                _node("uuid", [_uid()]),
+                _node("uuid", [self._uid_for(f"port:{name}:{port}")]),
             ]))
             pins.append(Pin(number=port, name=port, at=Point(at.x, py),
                             orientation=180.0, kind=kind, length=0.0))
@@ -447,7 +492,7 @@ class KiCadSheet(Sheet):
             _node("in_bom", [Sym("yes")]),
             _node("on_board", [Sym("yes")]),
             _node("dnp", [Sym("no")]),
-            _node("uuid", [_uid()]),
+            _node("uuid", [self._uid_for(f"symbol:{ref}:{unit}")]),
         ])
         if mirror in ("x", "y"):
             node.items.insert(3, _node("mirror", [Sym(mirror)]))
@@ -459,7 +504,8 @@ class KiCadSheet(Sheet):
         self._layout_fields(node, lib_id, rotation, mirror, unit)
         for pin in _symbol_pins(sym.definition, unit):
             node.items.append(
-                _node("pin", [pin[0], _node("uuid", [_uid()])])
+                _node("pin", [pin[0], _node(
+                    "uuid", [self._uid_for(f"pin:{ref}:{unit}:{pin[0]}")])])
             )
         # Without this, KiCad does not consider the symbol annotated, and a
         # wire between two of its pins connects nothing -- see _instances.
@@ -906,7 +952,8 @@ class KiCadSheet(Sheet):
                               _node("xy", [b.x, b.y])]),
             _node("stroke", [_node("width", [0]),
                                  _node("type", [Sym("default")])]),
-            _node("uuid", [_uid()]),
+            _node("uuid", [self._uid_for(
+                f"wire:{a.x},{a.y}:{b.x},{b.y}")]),
         ]))
         return [a, b]
 
@@ -917,7 +964,7 @@ class KiCadSheet(Sheet):
             _node("at", [at.x, at.y]),
             _node("diameter", [0]),
             _node("color", [0, 0, 0, 0]),
-            _node("uuid", [_uid()]),
+            _node("uuid", [self._uid_for(f"junction:{at.x},{at.y}")]),
         ]))
         return at
 
@@ -948,7 +995,8 @@ class KiCadSheet(Sheet):
                 _node("font", [_node("size", [1.27, 1.27])]),
                 _node("justify", sides),
             ]),
-            _node("uuid", [_uid()]),
+            _node("uuid", [self._uid_for(
+                f"label:{kind}:{text}:{at.x},{at.y}")]),
         ])
         if kind != "local":
             # After the text, not before it: items[0] is the node's own name,
@@ -983,7 +1031,7 @@ class KiCadSheet(Sheet):
         at = Point(snap(x), snap(y))
         self._tree.items.append(_node("no_connect", [
             _node("at", [at.x, at.y]),
-            _node("uuid", [_uid()]),
+            _node("uuid", [self._uid_for(f"noconnect:{at.x},{at.y}")]),
         ]))
         return at
 
@@ -1147,7 +1195,7 @@ def create(path: str | Path, *, paper: str = "A4", title: str = "",
         _node("version", [20250114]),
         _node("generator", ["kicad_flow"]),
         _node("generator_version", ["10.0"]),
-        _node("uuid", [_uid()]),
+        _node("uuid", [_uid_from(f"file:{Path(path).name}")]),
         _node("paper", [paper]),
         _node("lib_symbols", []),
         _node("sheet_instances", [
