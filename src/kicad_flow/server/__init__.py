@@ -21,10 +21,22 @@ from . import (  # noqa: F401  (register)
 )
 from ._app import mcp
 from .activity import ActivityMiddleware
+from .autosave import AutosaveMiddleware
+from .autosave import AutosaveMiddleware
 
 # Log every tool call to the activity JSONL so the live monitor can show what
 # the agent is doing (best-effort; a logging failure never affects a tool call).
 mcp.add_middleware(ActivityMiddleware())
+
+# Put every change on disk as it happens, so the monitor has something
+# current to render. A sheet used to reach disk only on `save_sheet`,
+# which is why the preview sat still while a design was being built.
+mcp.add_middleware(AutosaveMiddleware())
+
+# Put every change on disk as it happens, so the monitor has something current
+# to render. A sheet used to reach disk only on `save_sheet`, which is why the
+# preview sat still while a design was being built.
+mcp.add_middleware(AutosaveMiddleware())
 
 
 def _monitor_port() -> int | None:

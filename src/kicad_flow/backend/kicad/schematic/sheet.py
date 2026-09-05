@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import math
+import os
 import uuid as _uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -399,9 +400,18 @@ class KiCadSheet(Sheet):
                         pins=tuple(pins))
 
     def save(self) -> Path:
-        """Write the sheet to disk and return its path."""
+        """Write the sheet to disk and return its path.
+
+        Written to a neighbouring temp file and moved into place, so the sheet
+        is never half a file. That matters more than it used to: with autosave
+        on, this runs after every write rather than once at the end, and
+        something else may be reading -- the monitor renders the file the
+        moment it changes, and KiCad may have it open.
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(dumps(self._tree) + "\n", encoding="utf-8")
+        scratch = self._path.with_name(f".{self._path.name}.writing")
+        scratch.write_text(dumps(self._tree) + "\n", encoding="utf-8")
+        os.replace(scratch, self._path)          # atomic on the same volume
         return self._path
 
     # -- the library ------------------------------------------------------
