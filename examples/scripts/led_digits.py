@@ -127,11 +127,16 @@ async def build(client: Client) -> int:
     """Build both halves and report. Returns a non-zero failure count."""
     failures = 0
     calls = 0
+    used_tools: set[str] = set()
 
     async def call(tool: str, **kw: Any) -> dict[str, Any]:
         """One MCP call, failing loudly rather than continuing on sand."""
         nonlocal failures, calls
         calls += 1
+        used_tools.add(tool)
+        if tool == "batch":
+            used_tools.update(str(op.get("tool")) for op in kw.get("ops", [])
+                              if isinstance(op, dict) and op.get("tool"))
         res = await client.call_tool(tool, kw)
         data = res.data if hasattr(res, "data") else res
         if not isinstance(data, dict) or data.get("ok") is not True:
@@ -498,8 +503,34 @@ async def build(client: Client) -> int:
     await call("add_no_connects", path=scratch_sch, points=[{"x": 90, "y": 90}])
     await call("set_fields", path=scratch_sch,
                fields=[{"ref": "R1", "name": "MPN", "value": "TEMP"}])
+    await call("add_texts", path=scratch_sch, notes=[{
+        "x": 80, "y": 40, "text": "line one\nline two\t(tab)", "size": 1.27}])
     await call("add_sheets", path=scratch_sch, sheets=[
         {"name": "Box", "filename": "box.kicad_sch", "x": 30, "y": 120}])
+
+    same("next_ref after R1", (await call(
+        "next_ref", path=scratch_sch, prefix="R")).get("ref"), "R2")
+    at_top = await call("what_is_at", path=scratch_sch,
+                        x=top["x"], y=top["y"])
+    same("what_is_at sees R1.1", len(at_top.get("pins", [])), 1)
+    same("what_is_at sees its wire", at_top.get("wire_ends"), 1)
+    same("move_fields found one", len((await call(
+        "move_fields", path=scratch_sch, moves=[{
+            "ref": "R1", "name": "Reference", "dx": 2.54, "dy": -2.54}]))
+        .get("moved", [])), 1)
+
+    # Move the wire and put it back. Both operations must find the same
+    # segment; the final remover below proves its endpoints were restored.
+    wire_args = {"x1": top["x"], "y1": top["y"],
+                 "x2": top["x"], "y2": top["y"] - 10.16}
+    same("move_wires found one", (await call(
+        "move_wires", path=scratch_sch,
+        wires=[{**wire_args, "dx": 2.54, "dy": 0}])).get("moved"), 1)
+    same("move_wires back", (await call(
+        "move_wires", path=scratch_sch, wires=[{
+            "x1": top["x"] + 2.54, "y1": top["y"],
+            "x2": top["x"] + 2.54, "y2": top["y"] - 10.16,
+            "dx": -2.54, "dy": 0}])).get("moved"), 1)
 
     # move the label, then put it back, and check it landed where it started
     same("move_labels found one",
@@ -553,6 +584,10 @@ async def build(client: Client) -> int:
     fields_left = await call("get_fields", path=scratch_sch, ref="R1")
     if "MPN" in fields_left.get("fields", {}):
         wrong.append("remove_fields left MPN behind")
+    # Force KiCad itself to parse the multiline note written above. The
+    # in-process S-expression parser accepting its own output is not enough.
+    await call("save_sheet", path=scratch_sch)
+    await call("list_nets", path=scratch_sch)
     Path(scratch_sch).unlink(missing_ok=True)
 
     # -- 9. move it, turn it, flip it, and put it back ----------------------
@@ -655,21 +690,25 @@ async def build(client: Client) -> int:
           f"{len(left.get('vias', []))} via(s)")
     Path(scratch).unlink(missing_ok=True)
     Path(spare).unlink(missing_ok=True)
-    if wrong:
-        print("")
-        print(f"{len(wrong)} disagreement(s) in total:")
-        for w in wrong:
-            print(f"  WRONG {w}")
-
     await call("render_board", path=board,
                output_file=str(OUT / "led_digits-top.png"), side="top")
     await call("render_board", path=board,
                output_file=str(OUT / "led_digits-bottom.png"), side="bottom")
     await call("render_schematic", path=root, output_dir=str(OUT))
+    advertised = {tool.name for tool in await client.list_tools()}
+    missing = sorted(advertised - used_tools)
+    if missing:
+        wrong.append("MCP tools not exercised: " + ", ".join(missing))
+    if wrong:
+        print("")
+        print(f"{len(wrong)} disagreement(s) in total:")
+        for w in wrong:
+            print(f"  WRONG {w}")
+    print(f"API coverage: {len(used_tools & advertised)}/{len(advertised)} tools")
     took = time.time() - started
     print(f"\n{calls} MCP calls in {took:.1f}s ({calls / took:.0f}/s), "
           f"{failures} failed")
-    return failures + int(left.get("count") or 0) + len(errors)
+    return failures + int(left.get("count") or 0) + len(errors) + len(wrong)
 
 
 async def main() -> int:

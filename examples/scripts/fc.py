@@ -623,6 +623,9 @@ async def build(client: Any) -> int:
     for n in named:
         pins = ", ".join(f"{p['ref']}.{p['pin']}" for p in n["pins"])
         print(f"   {n['name']:14s} {pins[:82]}")
+    # Keep the README thumbnail reproducible. The output directory is removed
+    # at the start of every build, so the example must redraw what it deletes.
+    await call("render_schematic", path=root, output_dir=str(OUT), pages="3")
     return failures + int(report.get("errors") or 0)
 
 

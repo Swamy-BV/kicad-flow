@@ -106,7 +106,8 @@ def _unescape(s: str) -> str:
     while i < n:
         if s[i] == "\\" and i + 1 < n:
             nxt = s[i + 1]
-            out.append({"n": "\n", "t": "\t", '"': '"', "\\": "\\"}.get(nxt, nxt))
+            out.append({"n": "\n", "r": "\r", "t": "\t", '"': '"',
+                        "\\": "\\"}.get(nxt, nxt))
             i += 2
         else:
             out.append(s[i])
@@ -164,7 +165,11 @@ def loads(text: str) -> Node:
 
 def _escape(s: str) -> str:
     """Escape a Python string for a KiCad quoted token."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return (s.replace("\\", "\\\\")
+             .replace('"', '\\"')
+             .replace("\n", "\\n")
+             .replace("\r", "\\r")
+             .replace("\t", "\\t"))
 
 
 def _atom_text(atom: Sym | str) -> str:
