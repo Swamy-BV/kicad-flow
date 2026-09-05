@@ -956,6 +956,56 @@ def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
     return {"ok": True, "count": len(out), "moved": out}
 
 
+
+class SheetNote(BaseModel):
+    """One note for `add_texts`."""
+
+    x: float = Field(description="Position in mm; snapped to the grid.")
+    y: float = Field(description="Position in mm. This is the text's BASELINE,"
+                     " so a note grows downward from here.")
+    text: str = Field(description="The note. Newlines are kept.")
+    size: float = Field(default=1.27, description="Text height in mm. 1.27 "
+                        "matches a label; 2.54 reads as a heading.")
+    rotation: float = Field(default=0.0, description="Degrees. Any angle.")
+    bold: bool = Field(default=False, description="Bold, for a heading.")
+    justify: str = Field(default="left",
+                         description="'left', 'right' or 'center'.")
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
+    """Write notes on the sheet -- plain text that connects nothing.
+
+    THIS IS NOT `add_labels`. A label names a net and joins everything it
+    touches; a note is ignored by ERC and never appears in `list_nets`. Put
+    the things a reader needs and the netlist must not have here: a revision
+    block, a derivation, "all VBAT caps 50 V", why a resistor is 13k7.
+
+    The board has `add_board_text`; this is the schematic's equivalent.
+
+    Args:
+        path: The open sheet.
+        notes: The notes, in order.
+
+    Returns:
+        `notes`, each with the point it was snapped to.
+    """
+    try:
+        sheet = _sheet(path)
+    except LookupError as exc:
+        return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, n in enumerate(notes):
+        try:
+            at = sheet.text(n.x, n.y, n.text, size=n.size,
+                            rotation=n.rotation, bold=n.bold,
+                            justify=n.justify)
+        except (LookupError, ValueError) as exc:
+            return {**_fail(exc), "index": i, "notes": out}
+        out.append({"text": n.text, "size": n.size, **at.as_dict()})
+    return {"ok": True, "count": len(out), "notes": out}
+
+
 # -- editing what is already drawn ----------------------------------------
 #
 # A part has a ref. Nothing else on a sheet does, so a wire, a label, a
@@ -1263,13 +1313,17 @@ def remove_fields(path: str, fields: list[FieldRef]) -> dict[str, Any]:
     return {"ok": True, "count": len(out), "fields": out}
 
 __all__ = [
-    "add_components", "add_junctions", "add_labels", "add_no_connects",
-    "add_power", "add_power_flags", "add_sheets", "add_wires",
-    "check_sheet", "find_symbol", "get_component", "get_fields", "get_pin",
-    "list_components", "list_nets", "list_wires", "mirror_components",
-    "move_components", "move_fields", "move_labels", "move_sheets",
-    "move_wires", "new_sheet", "next_ref", "remove_components",
-    "remove_fields", "remove_junctions", "remove_labels", "remove_no_connects",
-    "remove_sheets", "remove_wires", "render_schematic", "rotate_components",
-    "rotate_labels", "save_sheet", "set_fields", "symbol_pins", "what_is_at",
+    "add_components", "add_junctions", "add_labels",
+    "add_no_connects", "add_power", "add_power_flags",
+    "add_sheets", "add_texts", "add_wires",
+    "check_sheet", "find_symbol", "get_component",
+    "get_fields", "get_pin", "list_components",
+    "list_nets", "list_wires", "mirror_components",
+    "move_components", "move_fields", "move_labels",
+    "move_sheets", "move_wires", "new_sheet",
+    "next_ref", "remove_components", "remove_fields",
+    "remove_junctions", "remove_labels", "remove_no_connects",
+    "remove_sheets", "remove_wires", "render_schematic",
+    "rotate_components", "rotate_labels", "save_sheet",
+    "set_fields", "symbol_pins", "what_is_at",
 ]

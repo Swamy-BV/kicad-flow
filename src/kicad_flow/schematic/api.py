@@ -361,6 +361,19 @@ class Sheet(ABC):
         matters while drawing -- *is this actually connected?*
         """
 
+    @abstractmethod
+    def text(self, x: float, y: float, text: str, *, size: float = 1.27,
+             rotation: float = 0.0, bold: bool = False,
+             justify: str = "left") -> Point:
+        """Write a note on the sheet, and return where it landed.
+
+        Plain text and nothing else: it names no net, joins nothing, and ERC
+        never sees it. That is the difference from `label`, which looks the
+        same on the page and is the thing that CONNECTS. Use this for the
+        notes a reader needs and the netlist must not have -- a revision
+        block, a derivation, "all VBAT caps 50 V".
+        """
+
     # -- editing what is already drawn --------------------------------------
     #
     # A part is named by its ref. Nothing else on a sheet has a name, so a

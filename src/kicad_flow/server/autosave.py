@@ -82,6 +82,7 @@ def _save(path: str) -> None:
     """Write one open design, if it is one this server has."""
     from . import tools_board, tools_schematic
 
+    registry: dict[str, Any]
     if path.endswith(".kicad_sch"):
         registry, key = tools_schematic._OPEN, tools_schematic._key(path)
     elif path.endswith(".kicad_pcb"):

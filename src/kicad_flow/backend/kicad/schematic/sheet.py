@@ -1036,6 +1036,29 @@ class KiCadSheet(Sheet):
             n += 1
         return f"{prefix}{n:04d}"
 
+    def text(self, x: float, y: float, text: str, *, size: float = 1.27,
+             rotation: float = 0.0, bold: bool = False,
+             justify: str = "left") -> Point:
+        """Write a note on the sheet. It connects nothing and ERC ignores it."""
+        at = Point(snap(x), snap(y))
+        font = [_node("size", [size, size]), _node("thickness", [size * 0.2])]
+        if bold:
+            font.append(_node("bold", [Sym("yes")]))
+        self._tree.items.append(_node("text", [
+            text,
+            _node("exclude_from_sim", [Sym("no")]),
+            _node("at", [at.x, at.y, rotation % 360.0]),
+            _node("effects", [
+                _node("font", font),
+                # `bottom` pins the baseline to the anchor. Without it KiCad
+                # centres the block on the point, so a multi-line note grows
+                # upward off the page instead of downward from where it was put.
+                _node("justify", [Sym(justify), Sym("bottom")]),
+            ]),
+            _node("uuid", [self._uid_for(f"text:{text}:{at.x},{at.y}")]),
+        ]))
+        return at
+
     def no_connect(self, x: float, y: float) -> Point:
         """Mark a pin deliberately unconnected."""
         at = Point(snap(x), snap(y))

@@ -97,6 +97,13 @@ SCHEMATIC = (
     "root. Those two read children from disk, so an unsaved child is reported "
     "as though its parts were not there, with no warning.\n\n"
 
+    "`add_texts` writes a NOTE -- plain text that connects nothing and "
+    "ERC never sees. It is not `add_labels`, which looks the same on the "
+    "page and is the thing that JOINS. Notes are for what a reader needs "
+    "and the netlist must not have: a revision block, why a resistor is "
+    "13k7, all VBAT caps 50 V. The board has `add_board_text`; this is "
+    "the schematic's.\n\n"
+
     "Labels: `justify` is what POINTS a global or hierarchical label, not "
     "`rotation`. Use 'right' on a part's LEFT-hand pins -- it puts the flag's "
     "tip on the right where the wire arrives and grows the box away from the "

@@ -22,7 +22,6 @@ from . import (  # noqa: F401  (register)
 from ._app import mcp
 from .activity import ActivityMiddleware
 from .autosave import AutosaveMiddleware
-from .autosave import AutosaveMiddleware
 
 # Log every tool call to the activity JSONL so the live monitor can show what
 # the agent is doing (best-effort; a logging failure never affects a tool call).
