@@ -6,15 +6,13 @@ a script and expensive for an agent, where a call is a conversational turn.
 
 This adds NO new capability. `batch` runs the same primitives, with the same
 arguments, and returns what each one returned; there is nothing you can express
-here that you could not express as N calls. It is a transport, not a surface.
-That is why it is one tool rather than a batch variant of each primitive: the
-primitives keep taking scalars and keep doing one thing.
+here that you could not express as N calls. It is a transport for mixing
+different operations. Repeatable writes already take typed lists.
 
-**Placement and wiring cannot go in the same batch, and should not.** A wire is
-drawn to a coordinate that `add_component` returns, so the caller has to see the
-pins before it can compute the wire. The shape that works is two batches: place
-everything, read the pins out of the reply, then draw everything. That is what a
-careful caller does one call at a time anyway.
+**Placement and wiring cannot go in the same request, and should not.** A wire
+is drawn to a coordinate that `add_components` returns, so the caller has to see
+the pins before it can compute the wire. Place everything, read the pins out of
+the reply, then draw everything.
 """
 
 from __future__ import annotations
@@ -49,7 +47,7 @@ def _registry() -> dict[str, Any]:
 def batch(
     ops: Annotated[list[dict[str, Any]], Field(
         description="Calls to run in order, each "
-                    '`{"tool": "add_wire", "args": {"path": ..., "x1": ...}}`. '
+                    '`{"tool": "save_board", "args": {"path": ...}}`. '
                     "Any schematic or board tool except `batch` itself.")],
     stop_on_error: Annotated[bool, Field(
         description="Stop at the first refusal (default), or run the rest and "
@@ -60,14 +58,14 @@ def batch(
     """Run several tool calls in one request, in order.
 
     Same primitives, same arguments, same replies -- one round trip instead of
-    N. Use it for the repetitive half of a design: all the wires on a sheet,
-    all the pads on a net, all the tracks of a bus.
+    N. Repeatable writes already accept typed lists; use this when one request
+    needs several different, independent operations.
 
-    **Two batches, not one.** `add_component` and `place_footprint` return the
+    **Two requests, not one.** `add_components` and `place_footprints` return the
     pin and pad positions that later calls must aim at, so place first, read
-    the reply, then send the wires or tracks as a second batch. A wire drawn to
-    a coordinate you guessed instead of one the server reported looks connected
-    and is not.
+    the reply, then send the wires or tracks as a second typed list call. A wire
+    drawn to a coordinate you guessed instead of one the server reported looks
+    connected and is not.
 
     Args:
         ops: The calls, in order.

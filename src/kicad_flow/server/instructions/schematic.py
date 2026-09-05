@@ -101,7 +101,7 @@ SCHEMATIC = (
     "ERC never sees. It is not `add_labels`, which looks the same on the "
     "page and is the thing that JOINS. Notes are for what a reader needs "
     "and the netlist must not have: a revision block, why a resistor is "
-    "13k7, all VBAT caps 50 V. The board has `add_board_text`; this is "
+    "13k7, all VBAT caps 50 V. The board has `add_board_texts`; this is "
     "the schematic's.\n\n"
 
     "Labels: `justify` is what POINTS a global or hierarchical label, not "

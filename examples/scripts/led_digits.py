@@ -24,7 +24,7 @@ the same sixteen-channel circuit and the whole thing is ten of them: 160 LEDs,
                 times. Nothing else is routed because nothing else has to be.
 
 **The nets come from the schematic, not from here.** `list_nets` on the root
-says which pads share a net; `set_pad_net` applies it. The board never invents
+says which pads share a net; `set_pad_nets` applies it. The board never invents
 a name -- that is the composition the two contracts exist for.
 
 Nothing here decides anything. The grid, the digit shapes and the board size
@@ -264,13 +264,12 @@ async def build(client: Client) -> int:
 
     # -- 3. the board ------------------------------------------------------
     #
-    # Three batches for the whole board, on the same two-phase shape the
-    # sheets used: place, read the pads out of the reply, then lay copper at
-    # the coordinates the server reported.
+    # Typed list calls keep the same two-phase shape as the sheets: place, read
+    # the pads out of the reply, then route at the reported coordinates.
     board = str(OUT / "led_digits.kicad_pcb")
     await call("new_board", path=board, layers=2)
-    await call("add_outline", path=board, points=[
-        [0, 0], [BOARD_W, 0], [BOARD_W, BOARD_H], [0, BOARD_H]])
+    await call("add_outlines", path=board, outlines=[{"points": [
+        [0, 0], [BOARD_W, 0], [BOARD_W, BOARD_H], [0, BOARD_H]]}])
     print(f"\nboard {BOARD_W} x {BOARD_H} mm, 2 layers")
 
     placed: list[tuple[int, str, float, float]] = []
@@ -279,15 +278,14 @@ async def build(client: Client) -> int:
         x, y = cell_xy(digit, col, row)
         n = i + 1
         puts += [
-            {"tool": "place_footprint", "args": {
-                "path": board, "fp_id": LED_FP, "ref": f"D{n}",
-                "x": x, "y": y, "value": "RED"}},
-            {"tool": "place_footprint", "args": {
-                "path": board, "fp_id": RES_FP, "ref": f"R{n}", "x": x,
-                "y": y, "rotation": 90, "side": "B", "value": "330R"}},
+            {"fp_id": LED_FP, "ref": f"D{n}",
+             "x": x, "y": y, "value": "RED"},
+            {"fp_id": RES_FP, "ref": f"R{n}", "x": x,
+             "y": y, "rotation": 90, "side": "B", "value": "330R"},
         ]
         placed.append((n, digit, x, y))
-    parts_out = (await call("batch", ops=puts)).get("results", [])
+    parts_out = (await call(
+        "place_footprints", path=board, footprints=puts)).get("footprints", [])
     # The pads came back with the placement, already turned and already on the
     # right side. Nothing needs asking again.
     pads_of: dict[str, dict[str, dict[str, float]]] = {}
@@ -304,12 +302,11 @@ async def build(client: Client) -> int:
     sets: list[dict[str, Any]] = []
     for net in nets.get("nets", []):
         for p in net["pins"]:
-            sets.append({"tool": "set_pad_net", "args": {
-                "path": board, "ref": p["ref"], "pad": p["pin"],
-                "net": net["name"]}})
+            sets.append({"ref": p["ref"], "pad": p["pin"],
+                         "net": net["name"]})
             of[f"{p['ref']}.{p['pin']}"] = net["name"]
-    applied = await call("batch", ops=sets, stop_on_error=False)
-    assigned = applied.get("ran", 0) - len(applied.get("failed", []))
+    applied = await call("set_pad_nets", path=board, pads=sets)
+    assigned = len(applied.get("pads", []))
     print(f"nets from the schematic: {assigned} pads assigned")
 
     # -- 5. one via and two tracks per channel -----------------------------
@@ -319,7 +316,8 @@ async def build(client: Client) -> int:
     # neither needs any copper drawn for it at all.
     vias = tracks = 0
     sizes: dict[tuple[float, float], int] = {}
-    copper: list[dict[str, Any]] = []
+    new_vias: list[dict[str, Any]] = []
+    new_tracks: list[dict[str, Any]] = []
     for n, digit, x, y in placed:
         anode = pads_of.get(f"D{n}", {}).get("2")
         rpad = pads_of.get(f"R{n}", {}).get("2")
@@ -328,22 +326,20 @@ async def build(client: Client) -> int:
             continue
         vx, vy = round(x + VIA_DX, 3), y
         dia, drill = VIA_SIZES[list(DIGITS).index(digit)]
-        copper += [
-            {"tool": "add_via", "args": {
-                "path": board, "x": vx, "y": vy, "net": net,
-                "diameter": dia, "drill": drill}},
-            {"tool": "add_track", "args": {
-                "path": board, "x1": anode["x"], "y1": anode["y"],
-                "x2": vx, "y2": vy, "layer": "F.Cu", "width": 0.25,
-                "net": net}},
-            {"tool": "add_track", "args": {
-                "path": board, "x1": vx, "y1": vy, "x2": rpad["x"],
-                "y2": rpad["y"], "layer": "B.Cu", "width": 0.25, "net": net}},
+        new_vias.append({"x": vx, "y": vy, "net": net,
+                         "diameter": dia, "drill": drill})
+        new_tracks += [
+            {"x1": anode["x"], "y1": anode["y"],
+             "x2": vx, "y2": vy, "layer": "F.Cu", "width": 0.25,
+             "net": net},
+            {"x1": vx, "y1": vy, "x2": rpad["x"],
+             "y2": rpad["y"], "layer": "B.Cu", "width": 0.25, "net": net},
         ]
         sizes[(dia, drill)] = sizes.get((dia, drill), 0) + 1
         vias += 1
         tracks += 2
-    await call("batch", ops=copper)
+    await call("add_vias", path=board, vias=new_vias)
+    await call("add_tracks", path=board, tracks=new_tracks)
     print(f"routed {vias} vias and {tracks} tracks -- one anode crossing "
           f"per channel, and nothing else")
     print("  via sizes, one per digit: "
@@ -351,10 +347,13 @@ async def build(client: Client) -> int:
 
     # -- 6. the two pours, on opposite faces --------------------------------
     ring = [[1, 1], [BOARD_W - 1, 1], [BOARD_W - 1, BOARD_H - 1], [1, BOARD_H - 1]]
-    await call("add_zone", path=board, points=ring, layer="F.Cu", net=GND)
-    await call("add_zone", path=board, points=ring, layer="B.Cu", net=VCC)
-    await call("add_board_text", path=board, x=BOARD_W / 2, y=BOARD_H - 2.2,
-               text="0-9  160 LEDs", layer="F.SilkS", size=1.4)
+    await call("add_zones", path=board, zones=[
+        {"points": ring, "layer": "F.Cu", "net": GND},
+        {"points": ring, "layer": "B.Cu", "net": VCC},
+    ])
+    await call("add_board_texts", path=board, texts=[{
+        "x": BOARD_W / 2, "y": BOARD_H - 2.2,
+        "text": "0-9  160 LEDs", "layer": "F.SilkS", "size": 1.4}])
     await call("save_board", path=board)
     filled = await call("refill_zones", path=board)
     print(f"pours: GND on F.Cu under the LEDs, {VCC} on B.Cu under the "
@@ -598,33 +597,42 @@ async def build(client: Client) -> int:
     n_last, _dl, x_last, y_last = placed[-1]
     ref = f"D{n_last}"
     before = await call("get_pad", path=board, ref=ref, pad="2")
-    moved = await call("move_footprint", path=board, ref=ref,
-                       x=x_last + 5, y=y_last + 5)
+    moved_result = await call("move_footprints", path=board, moves=[{
+        "ref": ref, "x": x_last + 5, "y": y_last + 5}])
+    moved = (moved_result.get("moved") or [{}])[0]
     after = await call("get_pad", path=board, ref=ref, pad="2")
     same("move: pad dx", after.get("x", 0.0) - before.get("x", 0.0), 5.0)
     same("move: pad dy", after.get("y", 0.0) - before.get("y", 0.0), 5.0)
-    turned = await call("rotate_footprint", path=board, ref=ref, rotation=90)
+    turned_result = await call("rotate_footprints", path=board, turns=[{
+        "ref": ref, "rotation": 90}])
+    turned = (turned_result.get("turned") or [{}])[0]
     same("rotate: reported rotation", turned.get("rotation"), 90.0)
     rp = await call("get_pad", path=board, ref=ref, pad="2")
     # A pad offset purely in X must become an offset purely in Y at 90 degrees.
     same("rotate: X offset became Y offset",
          abs(rp.get("y", 0.0) - moved.get("y", 0.0)),
          abs(after.get("x", 0.0) - moved.get("x", 0.0)), tol=0.01)
-    flipped = await call("flip_footprint", path=board, ref=ref, side="B")
+    flipped_result = await call("flip_footprints", path=board, flips=[{
+        "ref": ref, "side": "B"}])
+    flipped = (flipped_result.get("flipped") or [{}])[0]
     same("flip: side", flipped.get("side"), "B")
-    await call("set_footprint_field", path=board, ref=ref, name="Value",
-               value="AUDIT")
+    await call("set_footprint_fields", path=board, fields=[{
+        "ref": ref, "name": "Value", "value": "AUDIT"}])
     fields = await call("get_footprint_fields", path=board, ref=ref)
     same("set/get footprint field", fields.get("fields", {}).get("Value"),
          "AUDIT")
-    await call("move_footprint_field", path=board, ref=ref, name="Reference",
-               dx=0.0, dy=-1.2, hide=True)
+    await call("move_footprint_fields", path=board, moves=[{
+        "ref": ref, "name": "Reference", "dx": 0.0, "dy": -1.2,
+        "hide": True}])
     # Put it back, exactly.
-    await call("flip_footprint", path=board, ref=ref, side="F")
-    await call("rotate_footprint", path=board, ref=ref, rotation=0)
-    await call("move_footprint", path=board, ref=ref, x=x_last, y=y_last)
-    await call("set_footprint_field", path=board, ref=ref, name="Value",
-               value="RED")
+    await call("flip_footprints", path=board,
+               flips=[{"ref": ref, "side": "F"}])
+    await call("rotate_footprints", path=board,
+               turns=[{"ref": ref, "rotation": 0}])
+    await call("move_footprints", path=board,
+               moves=[{"ref": ref, "x": x_last, "y": y_last}])
+    await call("set_footprint_fields", path=board, fields=[{
+        "ref": ref, "name": "Value", "value": "RED"}])
     restored = await call("get_pad", path=board, ref=ref, pad="2")
     same("restore: pad x", restored.get("x"), before.get("x"))
     same("restore: pad y", restored.get("y"), before.get("y"))
@@ -638,16 +646,17 @@ async def build(client: Client) -> int:
     # the design above, so it gets a scratch board that is deleted after.
     scratch = str(OUT / "_scratch.kicad_pcb")
     await call("new_board", path=scratch, layers=2)
-    await call("add_outline", path=scratch,
-               points=[[0, 0], [20, 0], [20, 20], [0, 20]])
-    await call("add_track", path=scratch, x1=2, y1=2, x2=18, y2=2,
-               layer="F.Cu", width=0.25, net="N1")
-    await call("add_via", path=scratch, x=10, y=2, net="N1",
-               diameter=0.60, drill=0.30)
+    await call("add_outlines", path=scratch, outlines=[{
+        "points": [[0, 0], [20, 0], [20, 20], [0, 20]]}])
+    await call("add_tracks", path=scratch, tracks=[{
+        "x1": 2, "y1": 2, "x2": 18, "y2": 2,
+        "layer": "F.Cu", "width": 0.25, "net": "N1"}])
+    await call("add_vias", path=scratch, vias=[{
+        "x": 10, "y": 2, "net": "N1", "diameter": 0.60, "drill": 0.30}])
     # Under the minimum the board was created with. Nothing on the contract
     # can change that minimum, which is the gap -- the finding is the point.
-    await call("add_via", path=scratch, x=14, y=2, net="N1",
-               diameter=0.45, drill=0.20)
+    await call("add_vias", path=scratch, vias=[{
+        "x": 14, "y": 2, "net": "N1", "diameter": 0.45, "drill": 0.20}])
     # The other end of the sweep -- a via too big for its room -- is NOT
     # demonstrated here. Two 0.9 mm vias 0.9 mm apart on different nets were
     # tried and DRC returned only `via_dangling`, no clearance error, because
@@ -658,14 +667,19 @@ async def build(client: Client) -> int:
     small = [f for f in sdrc.get("findings", [])
              if "drill" in f["kind"] or "annular" in f["kind"]]
     # The removers, where removing something costs nothing.
-    await call("place_footprint", path=scratch, fp_id=LED_FP, ref="DX",
-               x=4, y=15, value="SPARE")
+    await call("place_footprints", path=scratch, footprints=[{
+        "fp_id": LED_FP, "ref": "DX", "x": 4, "y": 15,
+        "value": "SPARE"}])
     n_before = len((await call("list_footprints", path=scratch))
                    .get("footprints", []))
-    await call("remove_footprint", path=scratch, ref="DX")
+    await call("remove_footprints", path=scratch, refs=["DX"])
     n_after = len((await call("list_footprints", path=scratch))
                   .get("footprints", []))
-    same("remove_footprint dropped one", n_before - n_after, 1)
+    same("remove_footprints dropped one", n_before - n_after, 1)
+    # `batch` remains a transport for mixed calls; plural writes no longer
+    # need hundreds of scalar operations nested inside it.
+    await call("batch", ops=[{
+        "tool": "list_footprints", "args": {"path": scratch}}])
     spare = str(OUT / "_scratch.kicad_sch")
     await call("new_sheet", path=spare, title="scratch")
     await call("add_components", path=spare, parts=[
@@ -694,6 +708,10 @@ async def build(client: Client) -> int:
                output_file=str(OUT / "led_digits-top.png"), side="top")
     await call("render_board", path=board,
                output_file=str(OUT / "led_digits-bottom.png"), side="bottom")
+    await call("render_board", path=board,
+               output_file=str(OUT / "led_digits-3d.png"), width=1400,
+               height=1000, quality="high", rotate="-30,0,25",
+               perspective=True, floor=True, zoom=0.9)
     await call("render_schematic", path=root, output_dir=str(OUT))
     advertised = {tool.name for tool in await client.list_tools()}
     missing = sorted(advertised - used_tools)

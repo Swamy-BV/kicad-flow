@@ -981,7 +981,7 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
     the things a reader needs and the netlist must not have here: a revision
     block, a derivation, "all VBAT caps 50 V", why a resistor is 13k7.
 
-    The board has `add_board_text`; this is the schematic's equivalent.
+    The board has `add_board_texts`; this is the schematic's equivalent.
 
     Args:
         path: The open sheet.

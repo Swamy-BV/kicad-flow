@@ -41,6 +41,7 @@ from kicad_flow.pcb.types import (
     Zone,
 )
 
+from .. import render as _render
 from .._sexpr import Node, Sym, dumps, loads
 from ..cli import cli as _kicad
 from . import library as _fplib
@@ -958,11 +959,18 @@ class KiCadBoard(Board):
                 "connected": len(pads) + len(ends) + len(vias) > 1}
 
     def render(self, output_file: str | Path, *, side: str = "top",
-               width: int = 1200, height: int = 1200) -> Path:
-        """Draw the board and return the image."""
+               width: int = 1200, height: int = 1200,
+               quality: str = "basic", background: str = "opaque",
+               zoom: float = 1.0, rotate: str = "",
+               perspective: bool = False, floor: bool = False,
+               pan: str = "", pivot: str = "") -> Path:
+        """Render the board in 3D and return the image."""
         self.save()
-        return _kicad.pcb_render(self._path, output_file, side=side,
-                                 width=width, height=height)
+        return _render.render_board(
+            self._path, output_file, side=side, width=width, height=height,
+            quality=quality, background=background, zoom=zoom,
+            rotate=rotate or None, perspective=perspective, floor=floor,
+            pan=pan or None, pivot=pivot or None)
 
 
 #: Load, fill and save. `save_board` is the runner's own preamble and is what

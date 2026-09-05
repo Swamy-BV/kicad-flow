@@ -341,13 +341,18 @@ class Board(ABC):
 
     @abstractmethod
     def render(self, output_file: str | Path, *, side: str = "top",
-               width: int = 1200, height: int = 1200) -> Path:
-        """Draw the board and return the image.
+               width: int = 1200, height: int = 1200,
+               quality: str = "basic", background: str = "opaque",
+               zoom: float = 1.0, rotate: str = "",
+               perspective: bool = False, floor: bool = False,
+               pan: str = "", pivot: str = "") -> Path:
+        """Render the board in 3D and return the PNG or JPEG image.
 
         The other half of :meth:`check`. That one has the rule answer and
         cannot see a part 6 mm from where you put it, a block of passives
         piled in one corner, or an outline that renders as one piece and would
-        mill as three.
+        mill as three. Camera placement and appearance are caller decisions;
+        this method passes them to the backend renderer unchanged.
         """
 
 

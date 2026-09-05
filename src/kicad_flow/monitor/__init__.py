@@ -146,37 +146,12 @@ _3d_lock = threading.Lock()
 
 def _render_3d(board: Path) -> Path | None:
     """Render a board in 3D to a PNG via ``kicad-cli pcb render``; None on fail."""
-    cli = kicad_cli.path()
-    if cli is None:
-        return None
     _RENDER_DIR.mkdir(parents=True, exist_ok=True)
     out = _RENDER_DIR / (board.stem + "-3d.png")
     with contextlib.suppress(Exception):
-        subprocess.run(
-            [
-                cli,
-                "pcb",
-                "render",
-                "-o",
-                str(out),
-                "--rotate",
-                "-30,0,25",
-                "--perspective",
-                "--quality",
-                "basic",
-                "--background",
-                "opaque",
-                "--width",
-                "1400",
-                "--height",
-                "1000",
-                str(board),
-            ],
-            capture_output=True,
-            timeout=180,
-            stdin=subprocess.DEVNULL,
-            check=False,
-        )
+        render.render_board(
+            board, out, width=1400, height=1000, rotate="-30,0,25",
+            perspective=True, quality="basic", background="opaque")
     return out if out.is_file() and out.stat().st_size > 0 else None
 
 

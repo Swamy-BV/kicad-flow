@@ -22,6 +22,8 @@ and a caller who wants a netlist does not care which half of KiCad owns it.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -131,7 +133,9 @@ class KiCadCLI:
     def pcb_render(self, board: str | Path, output_file: str | Path, *,
                    side: str = "top", width: int = 1200, height: int = 1200,
                    quality: str = "basic", rotate: str | None = None,
-                   background: str = "opaque", zoom: float = 1.0) -> Path:
+                   background: str = "opaque", zoom: float = 1.0,
+                   perspective: bool = False, floor: bool = False,
+                   pan: str | None = None, pivot: str | None = None) -> Path:
         """Render the board in 3D to a PNG or JPEG."""
         args = ["pcb", "render", "--side", side,
                 "-w", str(int(width)), "-h", str(int(height)),
@@ -139,7 +143,49 @@ class KiCadCLI:
                 "--zoom", str(float(zoom))]
         if rotate:
             args += ["--rotate", rotate]
-        return self._to_file(args, board, output_file, timeout=600.0)
+        if perspective:
+            args.append("--perspective")
+        if floor:
+            args.append("--floor")
+        if pan:
+            args += ["--pan", pan]
+        if pivot:
+            args += ["--pivot", pivot]
+
+        # Render beside the destination and replace only after KiCad produced
+        # a non-empty image. A stale image must never be reported as the result
+        # of a failed render, and the suffix tells KiCad whether to write PNG
+        # or JPEG.
+        source = _require(board, "file")
+        out = Path(output_file)
+        if out.suffix.lower() not in (".png", ".jpg", ".jpeg"):
+            raise ValueError("3D render output must end in .png, .jpg or .jpeg")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        scratch = out.with_name(f".{out.stem}.rendering{out.suffix}")
+        scratch.unlink(missing_ok=True)
+        # KiCad holds its input open while rendering. The live monitor can do
+        # that concurrently with an MCP write, and on Windows the writer then
+        # cannot atomically replace the board. Render a same-directory snapshot
+        # so `${KIPRJMOD}` paths still resolve but the editable file is released
+        # immediately after this fast copy.
+        with tempfile.NamedTemporaryFile(
+                prefix=f".{source.stem}.render-source-",
+                suffix=source.suffix, dir=source.parent, delete=False) as tmp:
+            render_source = Path(tmp.name)
+        try:
+            shutil.copyfile(source, render_source)
+            self._run([*args, "-o", str(scratch),
+                       str(render_source)], timeout=600.0)
+            if not scratch.is_file() or scratch.stat().st_size == 0:
+                raise _run.KiCadCliError(
+                    "kicad-cli reported success but wrote no 3D render")
+            os.replace(scratch, out)
+        except Exception:
+            scratch.unlink(missing_ok=True)
+            raise
+        finally:
+            render_source.unlink(missing_ok=True)
+        return out
 
 
     # -- libraries --------------------------------------------------------

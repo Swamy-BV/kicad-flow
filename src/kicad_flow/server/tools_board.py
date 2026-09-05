@@ -1,8 +1,8 @@
 """MCP tools: the board primitives, one tool per primitive.
 
-The board counterpart of :mod:`.tools_schematic`, and the same shape. A tool
-takes a few scalars and returns what it made -- notably, every call that places
-something returns the **pad positions**, so the next call can route to them
+The board counterpart of :mod:`.tools_schematic`, and the same shape. Every
+repeatable write takes a typed list and returns what it made -- notably, every
+placement returns the **pad positions**, so the next call can route to them
 without a lookup and without repeating the rotation arithmetic.
 
 There is no autoplacer, no router, no via stitcher and no fanout. Those existed
@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, Field
 
 from ..backend import create_board, load_board
 from ..pcb.api import Board
@@ -52,6 +54,131 @@ def _fail(exc: Exception) -> dict[str, Any]:
 
 
 _ERRORS = (LookupError, ValueError, OSError, RuntimeError)
+
+
+def _partial(exc: Exception, index: int, key: str,
+             done: list[Any]) -> dict[str, Any]:
+    """A refusal that identifies the failed item and prior applied results."""
+    return {**_fail(exc), "index": index, key: done}
+
+
+class BoardOutline(BaseModel):
+    """One closed polygonal board-edge contour."""
+
+    points: list[list[float]] = Field(
+        description="Closed contour as [[x, y], ...], with at least 3 points.")
+
+
+class NewFootprint(BaseModel):
+    """One footprint placement."""
+
+    fp_id: str = Field(description="Library footprint id.")
+    ref: str = Field(description="Reference designator, e.g. R1.")
+    x: float = Field(description="Footprint origin X in mm.")
+    y: float = Field(description="Footprint origin Y in mm.")
+    rotation: float = Field(default=0.0, description="Any angle in degrees.")
+    side: str = Field(default="F", description="F or B.")
+    value: str = Field(default="", description="Value field.")
+
+
+class FootprintMove(BaseModel):
+    """One footprint's new absolute position."""
+
+    ref: str = Field(description="Reference designator to move.")
+    x: float = Field(description="New absolute footprint-origin X in mm.")
+    y: float = Field(description="New absolute footprint-origin Y in mm.")
+
+
+class FootprintTurn(BaseModel):
+    """One footprint's new absolute rotation."""
+
+    ref: str = Field(description="Reference designator to rotate.")
+    rotation: float = Field(description="New absolute angle in degrees.")
+
+
+class FootprintFlip(BaseModel):
+    """One footprint's requested board side."""
+
+    ref: str = Field(description="Reference designator to flip.")
+    side: str = Field(description="F or B.")
+
+
+class PadNet(BaseModel):
+    """One pad-to-net assignment."""
+
+    ref: str = Field(description="Reference designator containing the pad.")
+    pad: str = Field(description="Pad number or name.")
+    net: str = Field(description="Exact net name to assign.")
+
+
+class FootprintFieldValue(BaseModel):
+    """One footprint field value."""
+
+    ref: str = Field(description="Reference designator containing the field.")
+    name: str = Field(description="Field name, e.g. Value or LCSC.")
+    value: str = Field(description="New field value.")
+
+
+class FootprintFieldShift(BaseModel):
+    """One footprint field placement."""
+
+    ref: str = Field(description="Reference designator containing the field.")
+    name: str = Field(description="Field name, e.g. Reference.")
+    dx: float = Field(description="X offset from the footprint origin in mm.")
+    dy: float = Field(description="Y offset from the footprint origin in mm.")
+    rotation: float | None = Field(
+        default=None, description="Absolute text angle, or preserve when omitted.")
+    layer: str = Field(
+        default="", description="New layer, or preserve when empty.")
+    hide: bool | None = Field(
+        default=None, description="Visibility override, or preserve when omitted.")
+
+
+class NewTrack(BaseModel):
+    """One straight copper segment."""
+
+    x1: float = Field(description="Start X in mm.")
+    y1: float = Field(description="Start Y in mm.")
+    x2: float = Field(description="End X in mm.")
+    y2: float = Field(description="End Y in mm.")
+    layer: str = Field(description="Copper layer name.")
+    width: float = Field(description="Track width in mm.")
+    net: str = Field(default="", description="Exact net name, or empty for none.")
+
+
+class NewVia(BaseModel):
+    """One plated through-via."""
+
+    x: float = Field(description="Centre X in mm.")
+    y: float = Field(description="Centre Y in mm.")
+    net: str = Field(default="", description="Exact net name, or empty for none.")
+    diameter: float = Field(default=0.6, description="Finished diameter in mm.")
+    drill: float = Field(default=0.3, description="Drill diameter in mm.")
+
+
+class NewZone(BaseModel):
+    """One copper pour or keep-out polygon."""
+
+    points: list[list[float]] = Field(
+        description="Polygon as [[x, y], ...], with at least 3 points.")
+    layer: str = Field(description="Copper layer name.")
+    net: str = Field(default="", description="Pour net, or empty for no net.")
+    clearance: float = Field(default=0.0, description="Clearance in mm.")
+    forbids: list[str] = Field(
+        default_factory=list,
+        description="For a keep-out: tracks, vias, pads, pours, footprints.")
+
+
+class NewBoardText(BaseModel):
+    """One text item on a board layer."""
+
+    x: float = Field(description="Anchor X in mm.")
+    y: float = Field(description="Anchor Y in mm.")
+    text: str = Field(description="Literal text; newlines are preserved.")
+    layer: str = Field(description="Board layer name, e.g. F.SilkS.")
+    size: float = Field(default=1.0, description="Text height and width in mm.")
+    rotation: float = Field(default=0.0, description="Angle in degrees.")
+    mirror: bool = Field(default=False, description="Mirror the text.")
 
 
 # -- the board ------------------------------------------------------------
@@ -97,23 +224,30 @@ def save_board(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_outline(path: str,
-                points: list[list[float]]) -> dict[str, Any]:
-    """Draw the board edge through *points* -- one closed contour.
+def add_outlines(path: str,
+                 outlines: list[BoardOutline]) -> dict[str, Any]:
+    """Draw closed board-edge contours in order.
 
-    A board with a cutout or several islands is several calls: which contour
-    is a hole and which is an island is a decision, and it is yours.
+    A board with a cutout or several islands has several contours. Which
+    contours to draw remains the caller's decision.
 
     Args:
         path: The open board.
-        points: ``[[x, y], ...]``, at least three, in mm.
+        outlines: Contours, each containing at least three ``[x, y]`` points.
     """
     try:
-        made = _board(path).outline([(p[0], p[1]) for p in points])
-    except (IndexError, *_ERRORS) as exc:
+        board = _board(path)
+    except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, "points": [p.as_dict() for p in made],
-            "size": list(_board(path).size)}
+    out: list[dict[str, Any]] = []
+    for i, contour in enumerate(outlines):
+        try:
+            made = board.outline([(p[0], p[1]) for p in contour.points])
+        except (IndexError, *_ERRORS) as exc:
+            return _partial(exc, i, "outlines", out)
+        out.append({"points": [p.as_dict() for p in made]})
+    return {"ok": True, "count": len(out), "outlines": out,
+            "size": list(board.size)}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -151,7 +285,7 @@ def footprint_pads(fp_id: str) -> dict[str, Any]:
     Use the COURTYARD to decide how much room to leave -- not the bounding
     box, which includes silkscreen, and not the pad extent, which excludes the
     body. For the positions to actually ROUTE to, place it and read the pads
-    `place_footprint` returns.
+    `place_footprints` returns.
     """
     try:
         found = _blank().footprint_def(fp_id)
@@ -169,10 +303,9 @@ def _blank() -> Board:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def place_footprint(path: str, fp_id: str, ref: str, x: float, y: float,
-                    rotation: float = 0.0, side: str = "F",
-                    value: str = "") -> dict[str, Any]:
-    """Place a footprint on the board at ``(x, y)`` as *ref*.
+def place_footprints(path: str,
+                     footprints: list[NewFootprint]) -> dict[str, Any]:
+    """Place footprints on the board in order.
 
     **The returned pads are the point of this call.** Each carries the board
     position to route to, with rotation and side already applied.
@@ -183,61 +316,93 @@ def place_footprint(path: str, fp_id: str, ref: str, x: float, y: float,
 
     Args:
         path: The open board.
-        fp_id: ``Library:Footprint``.
-        ref: Reference designator, e.g. ``"R1"``.
-        x: Position in mm.
-        y: Position in mm.
-        rotation: Degrees. ANY angle -- a board is not on a 90-degree grid.
-        side: ``"F"`` front or ``"B"`` back. A part on the back is MIRRORED.
-        value: Value field.
+        footprints: Placements. Rotation may be any angle; side is F or B.
     """
     try:
-        part = _board(path).place(fp_id, ref, x, y, rotation=rotation,
-                                  side=side, value=value)
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, **part.as_dict()}
+    out: list[dict[str, Any]] = []
+    for i, p in enumerate(footprints):
+        try:
+            made = board.place(p.fp_id, p.ref, p.x, p.y,
+                               rotation=p.rotation, side=p.side, value=p.value)
+        except _ERRORS as exc:
+            return _partial(exc, i, "footprints", out)
+        out.append(made.as_dict())
+    return {"ok": True, "count": len(out), "footprints": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def move_footprint(path: str, ref: str, x: float, y: float) -> dict[str, Any]:
-    """Move a placed footprint. Its pads move with it; copper does not."""
+def move_footprints(path: str,
+                    moves: list[FootprintMove]) -> dict[str, Any]:
+    """Move footprints. Their pads move with them; copper does not."""
     try:
-        return {"ok": True, **_board(path).move(ref, x, y).as_dict()}
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, move in enumerate(moves):
+        try:
+            out.append(board.move(move.ref, move.x, move.y).as_dict())
+        except _ERRORS as exc:
+            return _partial(exc, i, "moved", out)
+    return {"ok": True, "count": len(out), "moved": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def rotate_footprint(path: str, ref: str, rotation: float) -> dict[str, Any]:
-    """Turn a placed footprint to *rotation* degrees. Any angle."""
+def rotate_footprints(path: str,
+                      turns: list[FootprintTurn]) -> dict[str, Any]:
+    """Turn footprints to absolute rotations. Any angle is valid."""
     try:
-        return {"ok": True, **_board(path).rotate(ref, rotation).as_dict()}
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, turn in enumerate(turns):
+        try:
+            out.append(board.rotate(turn.ref, turn.rotation).as_dict())
+        except _ERRORS as exc:
+            return _partial(exc, i, "turned", out)
+    return {"ok": True, "count": len(out), "turned": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def flip_footprint(path: str, ref: str, side: str) -> dict[str, Any]:
-    """Put a footprint on ``"F"`` or ``"B"``.
+def flip_footprints(path: str,
+                    flips: list[FootprintFlip]) -> dict[str, Any]:
+    """Put footprints on requested ``"F"`` or ``"B"`` sides.
 
     Flipping MIRRORS it: the pads run the other way. Anything you routed to
     the old pad positions now goes nowhere -- read them back.
     """
     try:
-        return {"ok": True, **_board(path).flip(ref, side).as_dict()}
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, flip in enumerate(flips):
+        try:
+            out.append(board.flip(flip.ref, flip.side).as_dict())
+        except _ERRORS as exc:
+            return _partial(exc, i, "flipped", out)
+    return {"ok": True, "count": len(out), "flipped": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def remove_footprint(path: str, ref: str) -> dict[str, Any]:
-    """Take a footprint off the board."""
+def remove_footprints(path: str, refs: list[str]) -> dict[str, Any]:
+    """Take footprints off the board in order."""
     try:
-        _board(path).remove(ref)
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, "removed": ref}
+    out: list[str] = []
+    for i, ref in enumerate(refs):
+        try:
+            board.remove(ref)
+        except _ERRORS as exc:
+            return _partial(exc, i, "removed", out)
+        out.append(ref)
+    return {"ok": True, "count": len(out), "removed": out}
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
@@ -287,8 +452,8 @@ def get_pad(path: str, ref: str, pad: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def set_pad_net(path: str, ref: str, pad: str, net: str) -> dict[str, Any]:
-    """Put a pad on a net.
+def set_pad_nets(path: str, pads: list[PadNet]) -> dict[str, Any]:
+    """Put pads on nets in order.
 
     A library footprint carries no nets -- it is a land pattern, not a
     circuit. Without them the board is geometry: nothing is unrouted because
@@ -299,10 +464,17 @@ def set_pad_net(path: str, ref: str, pad: str, net: str) -> dict[str, Any]:
     `list_nets` on the sheet and apply it here, one pad at a time.
     """
     try:
-        return {"ok": True, "ref": ref, "pad": pad,
-                "net": _board(path).set_net(ref, pad, net)}
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
+    out: list[dict[str, str]] = []
+    for i, pad in enumerate(pads):
+        try:
+            net = board.set_net(pad.ref, pad.pad, pad.net)
+        except _ERRORS as exc:
+            return _partial(exc, i, "pads", out)
+        out.append({"ref": pad.ref, "pad": pad.pad, "net": net})
+    return {"ok": True, "count": len(out), "pads": out}
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
@@ -315,21 +487,27 @@ def get_footprint_fields(path: str, ref: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def set_footprint_field(path: str, ref: str, name: str,
-                        value: str) -> dict[str, Any]:
-    """Set one of a footprint's fields, e.g. ``Value`` or ``LCSC``."""
+def set_footprint_fields(path: str,
+                         fields: list[FootprintFieldValue]) -> dict[str, Any]:
+    """Set footprint fields, e.g. ``Value`` or ``LCSC``."""
     try:
-        return {"ok": True, "ref": ref,
-                "fields": _board(path).set_field(ref, name, value)}
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
+    out: list[dict[str, Any]] = []
+    for i, field in enumerate(fields):
+        try:
+            values = board.set_field(field.ref, field.name, field.value)
+        except _ERRORS as exc:
+            return _partial(exc, i, "fields", out)
+        out.append({"ref": field.ref, "fields": values})
+    return {"ok": True, "count": len(out), "fields": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def move_footprint_field(path: str, ref: str, name: str, dx: float, dy: float,
-                         rotation: float | None = None, layer: str = "",
-                         hide: bool | None = None) -> dict[str, Any]:
-    """Move a footprint's Reference or Value, relative to the footprint.
+def move_footprint_fields(
+        path: str, moves: list[FootprintFieldShift]) -> dict[str, Any]:
+    """Move footprint fields relative to their footprints.
 
     The library places these and cannot know what ends up beside them. On a
     dense board they land on their own part, a neighbour, or a pad -- and
@@ -341,51 +519,71 @@ def move_footprint_field(path: str, ref: str, name: str, dx: float, dy: float,
     `hide=true` takes it off the silkscreen without losing it.
     """
     try:
-        at = _board(path).move_field(ref, name, dx, dy, rotation=rotation,
-                                     layer=layer, hide=hide)
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, "ref": ref, "field": name, **at.as_dict()}
+    out: list[dict[str, Any]] = []
+    for i, move in enumerate(moves):
+        try:
+            at = board.move_field(
+                move.ref, move.name, move.dx, move.dy,
+                rotation=move.rotation, layer=move.layer, hide=move.hide)
+        except _ERRORS as exc:
+            return _partial(exc, i, "moved", out)
+        out.append({"ref": move.ref, "field": move.name, **at.as_dict()})
+    return {"ok": True, "count": len(out), "moved": out}
 
 
 # -- copper ---------------------------------------------------------------
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_track(path: str, x1: float, y1: float, x2: float, y2: float,
-              layer: str, width: float, net: str = "") -> dict[str, Any]:
-    """Lay one straight copper segment on one layer.
+def add_tracks(path: str, tracks: list[NewTrack]) -> dict[str, Any]:
+    """Lay straight copper segments in order.
 
-    A corner is two calls and a layer change is a via. That is deliberate:
+    A corner is two list items and a layer change is a via. That is deliberate:
     where a track turns and where it changes layer are routing decisions.
 
     Copper on the wrong layer connects nothing, so *layer* is required --
     `new_board` reports which exist.
     """
     try:
-        made = _board(path).track(x1, y1, x2, y2, layer=layer, width=width,
-                                  net=net)
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, **made.as_dict()}
+    out: list[dict[str, Any]] = []
+    for i, track in enumerate(tracks):
+        try:
+            made = board.track(
+                track.x1, track.y1, track.x2, track.y2,
+                layer=track.layer, width=track.width, net=track.net)
+        except _ERRORS as exc:
+            return _partial(exc, i, "tracks", out)
+        out.append(made.as_dict())
+    return {"ok": True, "count": len(out), "tracks": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_via(path: str, x: float, y: float, net: str = "",
-            diameter: float = 0.6, drill: float = 0.3) -> dict[str, Any]:
-    """Drill a plated via joining front to back."""
+def add_vias(path: str, vias: list[NewVia]) -> dict[str, Any]:
+    """Drill plated through-vias joining front to back."""
     try:
-        made = _board(path).via(x, y, net=net, diameter=diameter, drill=drill)
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, **made.as_dict()}
+    out: list[dict[str, Any]] = []
+    for i, via in enumerate(vias):
+        try:
+            made = board.via(via.x, via.y, net=via.net,
+                             diameter=via.diameter, drill=via.drill)
+        except _ERRORS as exc:
+            return _partial(exc, i, "vias", out)
+        out.append(made.as_dict())
+    return {"ok": True, "count": len(out), "vias": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_zone(path: str, points: list[list[float]], layer: str, net: str = "",
-             clearance: float = 0.0,
-             forbids: list[str] | None = None) -> dict[str, Any]:
-    """Pour copper inside *points* on *layer*, tied to *net*.
+def add_zones(path: str, zones: list[NewZone]) -> dict[str, Any]:
+    """Add copper pours or keep-out polygons in order.
 
     With *forbids* it is a KEEP-OUT instead -- a region refusing any of
     ``tracks``, ``vias``, ``pads``, ``pours``, ``footprints``.
@@ -394,12 +592,20 @@ def add_zone(path: str, points: list[list[float]], layer: str, net: str = "",
     that connects nothing and renders as almost nothing.
     """
     try:
-        made = _board(path).zone([(p[0], p[1]) for p in points], layer=layer,
-                                 net=net, clearance=clearance,
-                                 forbids=tuple(forbids or ()))
-    except (IndexError, *_ERRORS) as exc:
+        board = _board(path)
+    except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, **made.as_dict()}
+    out: list[dict[str, Any]] = []
+    for i, zone in enumerate(zones):
+        try:
+            made = board.zone(
+                [(p[0], p[1]) for p in zone.points], layer=zone.layer,
+                net=zone.net, clearance=zone.clearance,
+                forbids=tuple(zone.forbids))
+        except (IndexError, *_ERRORS) as exc:
+            return _partial(exc, i, "zones", out)
+        out.append(made.as_dict())
+    return {"ok": True, "count": len(out), "zones": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -416,19 +622,26 @@ def refill_zones(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_board_text(path: str, x: float, y: float, text: str, layer: str,
-                   size: float = 1.0, rotation: float = 0.0,
-                   mirror: bool = False) -> dict[str, Any]:
-    """Put text on a layer -- a legend, a fab note, a part marking.
+def add_board_texts(path: str,
+                    texts: list[NewBoardText]) -> dict[str, Any]:
+    """Put texts on board layers -- legends, fab notes, part markings.
 
     Back-side silkscreen wants ``mirror=true`` or it reads reversed.
     """
     try:
-        at = _board(path).text(x, y, text, layer=layer, size=size,
-                               rotation=rotation, mirror=mirror)
+        board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, "text": text, "layer": layer, **at.as_dict()}
+    out: list[dict[str, Any]] = []
+    for i, note in enumerate(texts):
+        try:
+            at = board.text(
+                note.x, note.y, note.text, layer=note.layer, size=note.size,
+                rotation=note.rotation, mirror=note.mirror)
+        except _ERRORS as exc:
+            return _partial(exc, i, "texts", out)
+        out.append({"text": note.text, "layer": note.layer, **at.as_dict()})
+    return {"ok": True, "count": len(out), "texts": out}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -528,8 +741,12 @@ def what_is_on_board(path: str, x: float, y: float,
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.WRITE)
 def render_board(path: str, output_file: str, side: str = "top",
-                 width: int = 1200, height: int = 1200) -> dict[str, Any]:
-    """Render the board to a PNG you can actually look at.
+                 width: int = 1200, height: int = 1200,
+                 quality: str = "basic", background: str = "opaque",
+                 zoom: float = 1.0, rotate: str = "",
+                 perspective: bool = False, floor: bool = False,
+                 pan: str = "", pivot: str = "") -> dict[str, Any]:
+    """Render the board in 3D to a PNG or JPEG you can actually look at.
 
     LOOK AT THE BOARD. `check_board` has the rule answer and cannot see a
     part 6 mm from where you put it, a designator printed over a pad, a block
@@ -539,26 +756,43 @@ def render_board(path: str, output_file: str, side: str = "top",
 
     Render BOTH sides -- half the parts are usually on the back, and the
     bottom view is MIRRORED, so left and right swap.
+
+    Args:
+        path: The open board.
+        output_file: Destination ending in ``.png``, ``.jpg`` or ``.jpeg``.
+        side: ``top``, ``bottom``, ``left``, ``right``, ``front`` or ``back``.
+        width: Image width in pixels.
+        height: Image height in pixels.
+        quality: ``basic``, ``high``, ``user`` or ``job_settings``.
+        background: ``opaque``, ``transparent`` or ``default``.
+        zoom: Camera zoom; 1 fits the board.
+        rotate: Board rotation as ``X,Y,Z`` degrees; ``-30,0,25`` isometric.
+        perspective: Use perspective instead of orthographic projection.
+        floor: Include a floor, shadows and post-processing.
+        pan: Camera translation as ``X,Y,Z``.
+        pivot: Orbit pivot as ``X,Y,Z`` centimetres from board centre.
     """
     try:
         board = _board(path)
-        image = board.render(output_file, side=side, width=width,
-                             height=height)
+        image = board.render(
+            output_file, side=side, width=width, height=height,
+            quality=quality, background=background, zoom=zoom, rotate=rotate,
+            perspective=perspective, floor=floor, pan=pan, pivot=pivot)
     except _ERRORS as exc:
         return _fail(exc)
     return {"ok": True, "board": str(board.path), "image": str(image),
-            "side": side}
+            "side": side, "quality": quality, "perspective": perspective}
 
 
 __all__ = [
-    "add_board_text",
-    "add_outline",
-    "add_track",
-    "add_via",
-    "add_zone",
+    "add_board_texts",
+    "add_outlines",
+    "add_tracks",
+    "add_vias",
+    "add_zones",
     "check_board",
     "find_footprint",
-    "flip_footprint",
+    "flip_footprints",
     "footprint_pads",
     "get_footprint",
     "get_footprint_fields",
@@ -566,19 +800,19 @@ __all__ = [
     "list_board_nets",
     "list_copper",
     "list_footprints",
-    "move_footprint",
-    "move_footprint_field",
+    "move_footprint_fields",
+    "move_footprints",
     "new_board",
-    "place_footprint",
+    "place_footprints",
     "refill_zones",
     "remove_copper",
-    "remove_footprint",
+    "remove_footprints",
     "render_board",
-    "rotate_footprint",
+    "rotate_footprints",
     "save_board",
     "set_board_layers",
-    "set_footprint_field",
-    "set_pad_net",
+    "set_footprint_fields",
+    "set_pad_nets",
     "unrouted_connections",
     "what_is_on_board",
 ]

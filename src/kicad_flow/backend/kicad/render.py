@@ -140,6 +140,10 @@ def render_board(
     quality: str = "basic",
     zoom: float = 1.0,
     rotate: str | None = None,
+    perspective: bool = False,
+    floor: bool = False,
+    pan: str | None = None,
+    pivot: str | None = None,
 ) -> Path:
     """Render a board to a PNG that can actually be looked at.
 
@@ -153,6 +157,10 @@ def render_board(
         quality: ``basic`` (fast) or ``high``.
         zoom: Camera zoom; 1.0 fits the board.
         rotate: ``"X,Y,Z"`` degrees, e.g. ``"-45,0,45"`` for an isometric view.
+        perspective: Use perspective rather than orthographic projection.
+        floor: Draw a floor with shadows and post-processing.
+        pan: Camera translation as ``"X,Y,Z"``.
+        pivot: Orbit pivot relative to board centre as ``"X,Y,Z"`` centimetres.
 
     Returns:
         The PNG path.
@@ -168,8 +176,20 @@ def render_board(
     sides = ("top", "bottom", "left", "right", "front", "back")
     if side not in sides:
         raise ValueError(f"side must be one of {sides}, not {side!r}")
+    backgrounds = ("opaque", "transparent", "default")
+    if background not in backgrounds:
+        raise ValueError(
+            f"background must be one of {backgrounds}, not {background!r}")
+    qualities = ("basic", "high", "user", "job_settings")
+    if quality not in qualities:
+        raise ValueError(f"quality must be one of {qualities}, not {quality!r}")
+    if width < 1 or height < 1:
+        raise ValueError("render width and height must be positive")
+    if zoom <= 0:
+        raise ValueError("render zoom must be positive")
     return kicad_cli.cli.pcb_render(
         src, output_file, side=side, width=int(width), height=int(height),
         quality=quality, rotate=rotate or None, background=background,
-        zoom=zoom,
+        zoom=zoom, perspective=perspective, floor=floor, pan=pan or None,
+        pivot=pivot or None,
     )
