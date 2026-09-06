@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..backend import create, load
 from ..schematic import Sheet
@@ -86,9 +86,9 @@ def new_sheet(path: str, title: str = "", paper: str = "A4",
     Args:
         path: Where the sheet will be written.
         title: Title-block title.
-        paper: ``"A4"`` (default) or ``"A3"``. There is nothing larger on
-            purpose -- a page too big for A3 is one nobody reads. Put the
-            overflow on another sheet with `add_sheets`.
+        paper: ``"A4"`` (default) or ``"A3"``. Prefer another functional A4
+            child sheet. Use A3 only when one indivisible block cannot remain
+            legible on A4 after reasonable layout.
         instance_path: Only for a CHILD sheet: the `instance_path` that
             `add_sheet` returned when the parent placed it. Leave empty for a
             standalone sheet or the root of a design. Get it wrong and the
@@ -409,6 +409,17 @@ def list_wires(path: str) -> dict[str, Any]:
                       for a, b in segments]}
 
 
+@mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
+def list_labels(path: str) -> dict[str, Any]:
+    """Every label, including its stable UUID for move/remove operations."""
+    try:
+        labels = _sheet(path).labels()
+    except LookupError as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(labels),
+            "labels": [label.as_dict() for label in labels]}
+
+
 # -- what goes on a sheet, many at a time ---------------------------------
 #
 # Every one of these takes a LIST. One item is a list of one, so there is no
@@ -450,6 +461,27 @@ class Spot(BaseModel):
     y: float = Field(description="Position in mm.")
 
 
+class LabelTarget(BaseModel):
+    """One label selected by stable UUID, or legacy snapped position."""
+
+    uuid: str = Field(
+        default="", description="Identity returned by add/list_labels.")
+    x: float | None = Field(
+        default=None, description="Legacy position in mm when UUID is empty.")
+    y: float | None = Field(
+        default=None, description="Legacy position in mm when UUID is empty.")
+
+    @model_validator(mode="after")
+    def valid_target(self) -> LabelTarget:
+        """Require UUID alone or a complete coordinate pair."""
+        if self.uuid:
+            if self.x is not None or self.y is not None:
+                raise ValueError("select a label by uuid or position, not both")
+        elif self.x is None or self.y is None:
+            raise ValueError("a label target needs uuid or both x and y")
+        return self
+
+
 class NewLabel(BaseModel):
     """One label for `add_labels`."""
 
@@ -458,12 +490,13 @@ class NewLabel(BaseModel):
     text: str = Field(description="The net name.")
     kind: str = Field(default="local",
                       description="'local', 'global' or 'hierarchical'.")
-    rotation: float = Field(default=0.0, description="Only meaningful at 90 "
-                            "or 270; a horizontal label reads the same at 0 "
-                            "and 180.")
-    justify: str = Field(default="left", description="Which way the label "
-                         "points: 'left' grows it rightward, 'right' leftward. "
-                         "This, not rotation, is what aims a global label.")
+    rotation: float = Field(default=0.0, description="Local, global and "
+                            "hierarchical labels can be vertical at 90 or 270; "
+                            "horizontal reads the same at 0 and 180.")
+    justify: str = Field(default="left", description="Text growth direction: "
+                         "'left' grows rightward and 'right' grows leftward. "
+                         "Set this explicitly for local labels: use 'right' "
+                         "on left-side pins and 'left' on right-side pins.")
 
 
 class NewPower(BaseModel):
@@ -615,6 +648,11 @@ def add_wires(path: str, wires: list[Segment]) -> dict[str, Any]:
 def add_labels(path: str, labels: list[NewLabel]) -> dict[str, Any]:
     """Name nets at points. Two labels with the same text are one net.
 
+    Prefer direct wires between nearby components. For a necessary local label,
+    draw a short wire stub away from the component and place the label at its
+    free end; anchoring local text directly on a pin often draws it over the
+    body. Set its justification explicitly for the side of the component.
+
     Args:
         path: The open sheet.
         labels: The labels, in order.
@@ -629,12 +667,11 @@ def add_labels(path: str, labels: list[NewLabel]) -> dict[str, Any]:
     out: list[dict[str, Any]] = []
     for i, lb in enumerate(labels):
         try:
-            at = sheet.label(lb.x, lb.y, lb.text, kind=lb.kind,
-                             rotation=lb.rotation, justify=lb.justify)
+            made = sheet.label(lb.x, lb.y, lb.text, kind=lb.kind,
+                               rotation=lb.rotation, justify=lb.justify)
         except (LookupError, ValueError) as exc:
             return _partial(exc, i, "labels", out)
-        out.append({"text": lb.text, "kind": lb.kind,
-                    "justify": lb.justify, **at.as_dict()})
+        out.append(made.as_dict())
     return {"ok": True, "count": len(out), "labels": out}
 
 
@@ -1014,12 +1051,10 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
 
 # -- editing what is already drawn ----------------------------------------
 #
-# A part has a ref. Nothing else on a sheet does, so a wire, a label, a
-# junction and a no-connect are addressed by WHERE THEY ARE -- the coordinates
-# `list_wires`, `list_nets` and the call that drew them already reported.
-# Coordinates are snapped, so a point read back from this server matches
-# exactly; one worked out by hand may not. Every call says how many it FOUND,
-# so doing nothing cannot pass for success.
+# Labels have stable UUIDs; use those after moving or mirroring nearby parts.
+# Coordinate selection remains for compatibility and for junctions, wires and
+# no-connects. Every call says how many it FOUND, so doing nothing cannot pass
+# for success.
 
 
 class WireEnds(BaseModel):
@@ -1038,15 +1073,15 @@ class WireShift(WireEnds):
     dy: float = Field(description="Offset in mm.")
 
 
-class SpotShift(Spot):
-    """One point, and how far to move whatever is there."""
+class LabelShift(LabelTarget):
+    """One label, and how far to move it."""
 
     dx: float = Field(description="Offset in mm.")
     dy: float = Field(description="Offset in mm.")
 
 
-class SpotTurn(Spot):
-    """One point, and the angle to turn whatever is there to."""
+class LabelTurn(LabelTarget):
+    """One label, and the angle to turn it to."""
 
     rotation: float = Field(description="Degrees. 90 or 270 for a vertical "
                             "label; horizontal reads the same at 0 and 180.")
@@ -1078,6 +1113,33 @@ def _counted(sheet: Sheet, items: list[Any], each: Any,
         except (LookupError, ValueError) as exc:
             return {**_fail(exc), "index": i, key: found}
     return {"ok": True, "count": len(items), key: found}
+
+
+def _remove_label(sheet: Sheet, target: LabelTarget) -> int:
+    """Remove one UUID target, or every legacy target at a position."""
+    if target.uuid:
+        sheet.remove_label_by_id(target.uuid)
+        return 1
+    assert target.x is not None and target.y is not None
+    return sheet.remove_label(target.x, target.y)
+
+
+def _move_label(sheet: Sheet, target: LabelShift) -> int:
+    """Move one UUID target, or every legacy target at a position."""
+    if target.uuid:
+        sheet.move_label_by_id(target.uuid, target.dx, target.dy)
+        return 1
+    assert target.x is not None and target.y is not None
+    return sheet.move_label(target.x, target.y, target.dx, target.dy)
+
+
+def _rotate_label(sheet: Sheet, target: LabelTurn) -> int:
+    """Rotate one UUID target, or every legacy target at a position."""
+    if target.uuid:
+        sheet.rotate_label_by_id(target.uuid, target.rotation)
+        return 1
+    assert target.x is not None and target.y is not None
+    return sheet.rotate_label(target.x, target.y, target.rotation)
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -1128,12 +1190,12 @@ def move_wires(path: str, wires: list[WireShift]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_labels(path: str, points: list[Spot]) -> dict[str, Any]:
-    """Delete labels at these points, of any kind.
+def remove_labels(path: str, points: list[LabelTarget]) -> dict[str, Any]:
+    """Delete labels by UUID, or legacy snapped position.
 
     Args:
         path: The open sheet.
-        points: Where the labels are.
+        points: UUID targets from `add_labels`/`list_labels`, or positions.
 
     Returns:
         `removed`, how many labels actually went.
@@ -1142,12 +1204,11 @@ def remove_labels(path: str, points: list[Spot]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    return _counted(sheet, list(points),
-                    lambda s, p: s.remove_label(p.x, p.y), "removed")
+    return _counted(sheet, list(points), _remove_label, "removed")
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_labels(path: str, moves: list[SpotShift]) -> dict[str, Any]:
+def move_labels(path: str, moves: list[LabelShift]) -> dict[str, Any]:
     """Shift labels by an offset.
 
     A label names the net it TOUCHES. Move one off its wire and it names
@@ -1155,7 +1216,7 @@ def move_labels(path: str, moves: list[SpotShift]) -> dict[str, Any]:
 
     Args:
         path: The open sheet.
-        moves: Where each label is, and how far to move it.
+        moves: Each label's UUID or position, and how far to move it.
 
     Returns:
         `moved`, how many labels were found and shifted.
@@ -1164,12 +1225,11 @@ def move_labels(path: str, moves: list[SpotShift]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    return _counted(sheet, list(moves),
-                    lambda s, m: s.move_label(m.x, m.y, m.dx, m.dy), "moved")
+    return _counted(sheet, list(moves), _move_label, "moved")
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def rotate_labels(path: str, turns: list[SpotTurn]) -> dict[str, Any]:
+def rotate_labels(path: str, turns: list[LabelTurn]) -> dict[str, Any]:
     """Turn labels at these points.
 
     Which way a GLOBAL label points is its justification, not its rotation --
@@ -1177,7 +1237,7 @@ def rotate_labels(path: str, turns: list[SpotTurn]) -> dict[str, Any]:
 
     Args:
         path: The open sheet.
-        turns: Where each label is, and the angle to turn it to.
+        turns: Each label's UUID or position, and the requested angle.
 
     Returns:
         `turned`, how many labels were found and turned.
@@ -1186,8 +1246,7 @@ def rotate_labels(path: str, turns: list[SpotTurn]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    return _counted(sheet, list(turns),
-                    lambda s, t: s.rotate_label(t.x, t.y, t.rotation), "turned")
+    return _counted(sheet, list(turns), _rotate_label, "turned")
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -1324,7 +1383,7 @@ __all__ = [
     "add_sheets", "add_texts", "add_wires",
     "check_sheet", "find_symbol", "get_component",
     "get_fields", "get_pin", "list_components",
-    "list_nets", "list_wires", "mirror_components",
+    "list_labels", "list_nets", "list_wires", "mirror_components",
     "move_components", "move_fields", "move_labels",
     "move_sheets", "move_wires", "new_sheet",
     "next_ref", "remove_components", "remove_fields",

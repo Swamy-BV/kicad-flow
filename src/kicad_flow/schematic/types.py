@@ -24,6 +24,24 @@ class Point:
 
 
 @dataclass(frozen=True)
+class Label:
+    """One net label, with stable identity for later editing."""
+
+    uuid: str
+    text: str
+    kind: str
+    at: Point
+    rotation: float
+    justify: str
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete label as JSON, with its position flattened."""
+        return {"uuid": self.uuid, "text": self.text, "kind": self.kind,
+                "x": round(self.at.x, 3), "y": round(self.at.y, 3),
+                "rotation": self.rotation, "justify": self.justify}
+
+
+@dataclass(frozen=True)
 class Pin:
     """One pin of a placed part, at its position **on the sheet**.
 
@@ -214,5 +232,5 @@ class SheetRef:
                 "pins": [p.as_dict() for p in self.pins]}
 
 
-__all__ = ["Finding", "Net", "NetPin", "Part", "Pin", "Point", "SheetRef",
-           "SymbolDef"]
+__all__ = ["Finding", "Label", "Net", "NetPin", "Part", "Pin", "Point",
+           "SheetRef", "SymbolDef"]

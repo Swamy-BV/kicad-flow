@@ -3,9 +3,12 @@
 An MCP server for authoring **KiCad 10** schematics and boards, built on
 [FastMCP](https://github.com/jlowin/fastmcp).
 
-89 primitive calls — place a part, ask where its pins are, draw a wire, name a
+91 primitive calls — place a part, ask where its pins are, draw a wire, name a
 net. Nothing above them. The caller decides what the sheet should look like;
 this layer says where things actually are.
+
+All schematic and PCB coordinates and dimensions are millimetres. New
+schematic sheets default to A4; prefer another functional A4 sheet over A3.
 
 ## Examples
 
@@ -63,6 +66,11 @@ Component Search Engine KiCad bundles can be installed through
 `import_project_library`; symbols, footprints, models, provenance, and KiCad
 library tables remain inside that project rather than changing global KiCad
 configuration. See [`providers/jlcpcb/README.md`](src/kicad_flow/providers/jlcpcb/README.md).
+The server instructions tell the AI to keep design intent, schematic/PCB
+implementation, decisions, research provenance, downloaded datasheets and
+missing information inside each hardware project's `docs/` directory. The MCP
+does not create or edit those documents. See
+[`docs/project-documentation.md`](docs/project-documentation.md).
 
 ## Use with Claude Desktop
 

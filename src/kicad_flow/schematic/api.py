@@ -27,7 +27,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from .types import Finding, Net, Part, Point, SheetRef, SymbolDef
+from .types import Finding, Label, Net, Part, Point, SheetRef, SymbolDef
 
 #: KiCad's schematic grid. Every position a caller gives is snapped to it,
 #: because a wire end and a pin that differ by a fraction of a millimetre are
@@ -250,7 +250,7 @@ class Sheet(ABC):
 
     @abstractmethod
     def label(self, x: float, y: float, text: str, *, kind: str = "local",
-              rotation: float = 0.0, justify: str = "left") -> Point:
+              rotation: float = 0.0, justify: str = "left") -> Label:
         """Attach a net name at a point.
 
         Args:
@@ -305,8 +305,8 @@ class Sheet(ABC):
         """Every wire segment on the sheet."""
 
     @abstractmethod
-    def labels(self) -> list[dict[str, object]]:
-        """Every label, as ``{x, y, text, kind, rotation, justify}``."""
+    def labels(self) -> list[Label]:
+        """Every label, including the stable identity used to edit it."""
 
     @abstractmethod
     def nets(self) -> list[Net]:
@@ -413,12 +413,20 @@ class Sheet(ABC):
         """Delete labels at this point, of any kind, and say how many."""
 
     @abstractmethod
+    def remove_label_by_id(self, uuid: str) -> None:
+        """Delete exactly one label by the identity returned when it was added."""
+
+    @abstractmethod
     def move_label(self, x: float, y: float, dx: float, dy: float) -> int:
         """Shift labels at this point by ``(dx, dy)``, and say how many.
 
         A label names the net it TOUCHES. Move one off its wire and it names
         nothing, quietly.
         """
+
+    @abstractmethod
+    def move_label_by_id(self, uuid: str, dx: float, dy: float) -> Label:
+        """Shift exactly one label by identity and return its new geometry."""
 
     @abstractmethod
     def rotate_label(self, x: float, y: float, rotation: float) -> int:
@@ -428,6 +436,10 @@ class Sheet(ABC):
         same at 0 and 180. Which way a global label POINTS is its
         justification, not its rotation.
         """
+
+    @abstractmethod
+    def rotate_label_by_id(self, uuid: str, rotation: float) -> Label:
+        """Turn exactly one label by identity and return its new geometry."""
 
     @abstractmethod
     def remove_junction(self, x: float, y: float) -> int:

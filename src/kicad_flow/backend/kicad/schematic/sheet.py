@@ -24,6 +24,7 @@ from typing import Any
 from kicad_flow.schematic.api import GRID, Sheet, snap
 from kicad_flow.schematic.types import (
     Finding,
+    Label,
     Net,
     NetPin,
     Part,
@@ -814,6 +815,31 @@ class KiCadSheet(Sheet):
             self._tree.items.remove(node)
         return len(found)
 
+    def _label_from_node(self, node: Node) -> Label:
+        """Describe one stored label without exposing its S-expression."""
+        at = node.get("at")
+        effects = node.get("effects")
+        just = effects.get("justify") if effects is not None else None
+        kind = next((kind for kind, name in _LABEL_NODE.items()
+                     if name == node.name), "local")
+        return Label(
+            uuid=_text(node.get("uuid")), text=_text(node), kind=kind,
+            at=Point(_f(at, 0), _f(at, 1)), rotation=_f(at, 2),
+            justify=_text(just) if just is not None else "",
+        )
+
+    def _label_node(self, uuid: str) -> Node:
+        """The label carrying *uuid*, or a useful refusal."""
+        for name in _LABEL_NODE.values():
+            for node in self._tree.get_all(name):
+                if _text(node.get("uuid")) == uuid:
+                    return node
+        raise LookupError(f"no label with uuid {uuid!r}")
+
+    def remove_label_by_id(self, uuid: str) -> None:
+        """Delete exactly one label by stable identity."""
+        self._tree.items.remove(self._label_node(uuid))
+
     def move_label(self, x: float, y: float, dx: float, dy: float) -> int:
         """Shift labels at this point by ``(dx, dy)``."""
         found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
@@ -824,6 +850,16 @@ class KiCadSheet(Sheet):
             _set(at, 0, snap(_f(at, 0) + dx))
             _set(at, 1, snap(_f(at, 1) + dy))
         return len(found)
+
+    def move_label_by_id(self, uuid: str, dx: float, dy: float) -> Label:
+        """Shift exactly one label by stable identity."""
+        node = self._label_node(uuid)
+        at = node.get("at")
+        if at is None:
+            raise LookupError(f"label {uuid!r} has no position")
+        _set(at, 0, snap(_f(at, 0) + dx))
+        _set(at, 1, snap(_f(at, 1) + dy))
+        return self._label_from_node(node)
 
     def rotate_label(self, x: float, y: float, rotation: float) -> int:
         """Turn labels at this point."""
@@ -838,6 +874,19 @@ class KiCadSheet(Sheet):
             else:
                 at.items.append(Sym(_fmt(turn)))
         return len(found)
+
+    def rotate_label_by_id(self, uuid: str, rotation: float) -> Label:
+        """Turn exactly one label by stable identity."""
+        node = self._label_node(uuid)
+        at = node.get("at")
+        if at is None:
+            raise LookupError(f"label {uuid!r} has no position")
+        turn = _quarter_turn(rotation)
+        if len(at.items) > 3:
+            _set(at, 2, turn)
+        else:
+            at.items.append(Sym(_fmt(turn)))
+        return self._label_from_node(node)
 
     def remove_junction(self, x: float, y: float) -> int:
         """Delete junctions at this point."""
@@ -989,7 +1038,7 @@ class KiCadSheet(Sheet):
         return at
 
     def label(self, x: float, y: float, text: str, *, kind: str = "local",
-              rotation: float = 0.0, justify: str = "left") -> Point:
+              rotation: float = 0.0, justify: str = "left") -> Label:
         """Attach a net name at a point."""
         if kind not in _LABEL_NODE:
             raise ValueError(f"label kind must be one of {list(_LABEL_NODE)}")
@@ -1008,6 +1057,7 @@ class KiCadSheet(Sheet):
         sides = [Sym(justify)]
         if kind == "local":
             sides.append(Sym("bottom"))
+        uid = self._uid_for(f"label:{kind}:{text}:{at.x},{at.y}")
         node = _node(_LABEL_NODE[kind], [
             text,
             _node("at", [at.x, at.y, rotation % 360.0]),
@@ -1015,8 +1065,7 @@ class KiCadSheet(Sheet):
                 _node("font", [_node("size", [1.27, 1.27])]),
                 _node("justify", sides),
             ]),
-            _node("uuid", [self._uid_for(
-                f"label:{kind}:{text}:{at.x},{at.y}")]),
+            _node("uuid", [uid]),
         ])
         if kind != "local":
             # After the text, not before it: items[0] is the node's own name,
@@ -1025,7 +1074,7 @@ class KiCadSheet(Sheet):
             # parses without complaint and then does not match to a sheet pin.
             node.items.insert(2, _node("shape", [Sym("input")]))
         self._tree.items.append(node)
-        return at
+        return self._label_from_node(node)
 
     def power(self, x: float, y: float, net: str, *,
               rotation: float = 0.0) -> Part:
@@ -1093,18 +1142,12 @@ class KiCadSheet(Sheet):
                             Point(_f(xy[1], 0), _f(xy[1], 1))))
         return out
 
-    def labels(self) -> list[dict[str, object]]:
-        """Every label, as ``{x, y, text, kind, rotation}``."""
-        out: list[dict[str, object]] = []
-        for kind, name in _LABEL_NODE.items():
+    def labels(self) -> list[Label]:
+        """Every label, including stable identity for later editing."""
+        out: list[Label] = []
+        for name in _LABEL_NODE.values():
             for node in self._tree.get_all(name):
-                at = node.get("at")
-                just = node.get("effects")
-                just = just.get("justify") if just is not None else None
-                out.append({"text": _text(node), "kind": kind,
-                            "x": _f(at, 0), "y": _f(at, 1),
-                            "rotation": _f(at, 2),
-                            "justify": _text(just) if just is not None else ""})
+                out.append(self._label_from_node(node))
         return out
 
     @contextlib.contextmanager
@@ -1213,8 +1256,8 @@ class KiCadSheet(Sheet):
                 if near(pin.at.x, pin.at.y)]
         ends = sum(1 for a, b in self.wires()
                    if near(a.x, a.y) or near(b.x, b.y))
-        labels = [lab for lab in self.labels()
-                  if near(float(lab["x"]), float(lab["y"]))]  # type: ignore[arg-type]
+        labels = [lab.as_dict() for lab in self.labels()
+                  if near(lab.at.x, lab.at.y)]
         return {"x": round(x, 3), "y": round(y, 3), "pins": pins,
                 "wire_ends": ends, "labels": labels,
                 "connected": len(pins) + ends + len(labels) > 1}

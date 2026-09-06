@@ -173,6 +173,21 @@ class Board(ABC):
         """Every non-copper shape, optionally restricted to one layer."""
 
     @abstractmethod
+    def outline_polygon(self, *, inset: float, max_error: float) -> tuple[Point, ...]:
+        """The single outside board contour as polygon points.
+
+        Curves are approximated so their maximum chord error is no greater
+        than *max_error*.  *inset* moves the contour inward.  Both values are
+        explicit because the required copper-to-edge distance and geometric
+        fidelity are caller decisions; interpreting the outline is a fact the
+        backend must provide.
+
+        Raises:
+            ValueError: If the outline is open, ambiguous, collapses under the
+                inset, or either numeric argument is invalid.
+        """
+
+    @abstractmethod
     def move_graphic(self, uuid: str, dx: float, dy: float) -> Graphic:
         """Shift one shape by an offset and return its new geometry."""
 

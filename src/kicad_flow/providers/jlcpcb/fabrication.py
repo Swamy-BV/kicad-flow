@@ -9,6 +9,7 @@ from typing import Any
 
 from ..api import FabricationProvider
 from ..types import (
+    FabricationCapabilities,
     FabricationProfile,
     FabricationSelection,
     ManufacturingLimits,
@@ -45,6 +46,36 @@ class JlcpcbFabricationProvider(FabricationProvider):
     def name(self) -> str:
         """The provider registry name."""
         return "jlcpcb"
+
+    def capabilities(self) -> FabricationCapabilities:
+        """Return exact choices from the dated local capability snapshot."""
+        data = self._data
+        layers = tuple(int(item) for item in data["supported_layers"])
+        outer = tuple(
+            (count, tuple(float(value) for value in data["outer_copper_oz"][
+                "2" if count == 2 else "multilayer"
+            ]))
+            for count in layers
+        )
+        return FabricationCapabilities(
+            provider=self.name,
+            board_types=("rigid_fr4",),
+            materials=("FR-4",),
+            layers=layers,
+            thicknesses=tuple(float(item) for item in data["thickness_mm"]),
+            outer_copper_oz=outer,
+            inner_copper_oz=tuple(
+                float(item) for item in data["inner_copper_oz"]
+            ),
+            finishes=tuple(str(item) for item in data["finishes"]),
+            soldermask_colors=tuple(
+                str(item) for item in data["soldermask_colors"]
+            ),
+            outline_processes=("routed",),
+            tiers=("recommended", "minimum"),
+            source_url=str(data["source_url"]),
+            retrieved_at=str(data["retrieved_at"]),
+        )
 
     def resolve(self, selection: FabricationSelection) -> FabricationProfile:
         """Validate the selected process and calculate its applicable limits."""
@@ -113,12 +144,11 @@ class JlcpcbFabricationProvider(FabricationProvider):
 
         width = float(data["track_width_spacing_mm"][group][f"{outer:g}"])
         via = data["via_mm"][tier]
-        if outer >= 2.0:
-            annular = 0.254
-        elif selection.layers == 2:
-            annular = 0.25 if tier == "recommended" else 0.18
-        else:
-            annular = 0.20 if tier == "recommended" else 0.15
+        # KiCad's board-wide annular setting is specifically the VIA annular
+        # width.  JLC's larger 0.18/0.25 mm figures describe PTH component
+        # pads, not vias.  Applying them here made JLC's own preferred
+        # 0.35/0.20 mm via impossible: its radial ring is 0.075 mm.
+        annular = (float(via["diameter"]) - float(via["drill"])) / 2
         mask = data["soldermask_bridge_mm"]
         if outer >= 2.0:
             mask_bridge = float(mask["two_oz"])
@@ -162,7 +192,8 @@ class JlcpcbFabricationProvider(FabricationProvider):
         }.items()))
         notes = (
             "Through-vias only; blind and buried vias are not enabled.",
-            "PTH/NPTH and plated-slot subtype checks need future hole APIs.",
+            "The annular-width limit applies to vias. PTH/NPTH pad annular "
+            "rings and plated-slot subtype checks need future hole APIs.",
             "Impedance control records eligibility; select a published JLC "
             "stackup before claiming an impedance value.",
         )

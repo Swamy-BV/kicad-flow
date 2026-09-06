@@ -122,6 +122,46 @@ class FabricationSelection:
 
 
 @dataclass(frozen=True)
+class FabricationCapabilities:
+    """Discoverable fabrication choices, independent of a CAD backend."""
+
+    provider: str
+    board_types: tuple[str, ...]
+    materials: tuple[str, ...]
+    layers: tuple[int, ...]
+    thicknesses: tuple[float, ...]
+    outer_copper_oz: tuple[tuple[int, tuple[float, ...]], ...]
+    inner_copper_oz: tuple[float, ...]
+    finishes: tuple[str, ...]
+    soldermask_colors: tuple[str, ...]
+    outline_processes: tuple[str, ...]
+    tiers: tuple[str, ...]
+    source_url: str
+    retrieved_at: str
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return exact accepted spellings and layer-dependent copper choices."""
+        return {
+            "provider": self.provider,
+            "board_types": list(self.board_types),
+            "materials": list(self.materials),
+            "layers": list(self.layers),
+            "thicknesses": list(self.thicknesses),
+            "outer_copper_oz": {
+                str(layers): list(values)
+                for layers, values in self.outer_copper_oz
+            },
+            "inner_copper_oz": list(self.inner_copper_oz),
+            "finishes": list(self.finishes),
+            "soldermask_colors": list(self.soldermask_colors),
+            "outline_processes": list(self.outline_processes),
+            "tiers": list(self.tiers),
+            "source_url": self.source_url,
+            "retrieved_at": self.retrieved_at,
+        }
+
+
+@dataclass(frozen=True)
 class ManufacturingLimits:
     """Provider facts that can be projected onto a board's neutral limits."""
 
@@ -187,6 +227,7 @@ class ImportedLibrary:
 
 
 __all__ = [
+    "FabricationCapabilities",
     "FabricationProfile",
     "FabricationSelection",
     "ImportedLibrary",

@@ -627,6 +627,33 @@ class KiCadBoard(Board):
                 out.append(found)
         return out
 
+    def outline_polygon(self, *, inset: float, max_error: float) -> tuple[Point, ...]:
+        """Return KiCad's resolved outside contour as bounded-error points."""
+        if inset < 0:
+            raise ValueError("outline inset cannot be negative")
+        if max_error <= 0:
+            raise ValueError("outline max_error must be positive")
+
+        from ._runner import run_pcbnew
+
+        scratch = self._path.with_name(
+            f".{self._path.stem}.outline-{_uid()}{self._path.suffix}"
+        )
+        try:
+            scratch.parent.mkdir(parents=True, exist_ok=True)
+            scratch.write_text(dumps(self._tree) + "\n", encoding="utf-8")
+            result = run_pcbnew(_OUTLINE_POLYGON, {
+                "board_path": str(scratch),
+                "inset": inset,
+                "max_error": max_error,
+            })
+        finally:
+            scratch.unlink(missing_ok=True)
+        raw = result.get("points")
+        if not isinstance(raw, list) or len(raw) < 3:
+            raise ValueError("board outline did not produce a usable polygon")
+        return tuple(Point(float(item[0]), float(item[1])) for item in raw)
+
     def move_graphic(self, uuid: str, dx: float, dy: float) -> Graphic:
         """Shift one graphic primitive by an offset."""
         node = self._graphic_node(uuid)
@@ -795,7 +822,12 @@ class KiCadBoard(Board):
         if prop is None:
             node.items.append(_node("property", [
                 name, value, _node("at", [0, 0, 0]),
-                _node("layer", ["F.SilkS"]), _node("uuid", [_uid()]),
+                # A new custom property is BOM/fabrication metadata, not
+                # artwork.  Reference and Value already exist and retain the
+                # library's visibility; callers can explicitly expose a
+                # custom property with move_field(hide=False, layer=...).
+                _node("layer", ["F.Fab"]), _node("hide", [Sym("yes")]),
+                _node("uuid", [_uid()]),
             ]))
         else:
             _set(prop, 1, value)
@@ -1355,6 +1387,43 @@ board = pcbnew.LoadBoard(job["board_path"])
 zones = list(board.Zones())
 save_board(board, job["board_path"])
 print(json.dumps({"ok": True, "zones": len(zones)}))
+"""
+
+
+#: Resolve line/arc/circle Edge.Cuts with KiCad itself, offset the outside
+#: contour, then return the tessellated points the zone file format can store.
+#: This belongs in the backend: the public contract knows only that a board has
+#: an outline, never how a particular application represents one.
+_OUTLINE_POLYGON = r"""
+import json, sys
+import pcbnew
+
+job = json.load(open(sys.argv[1], encoding="utf-8"))
+board = pcbnew.LoadBoard(job["board_path"])
+error = pcbnew.FromMM(float(job["max_error"]))
+board.GetDesignSettings().m_MaxError = error
+outlines = pcbnew.SHAPE_POLY_SET()
+valid = board.GetBoardPolygonOutlines(
+    outlines, False, None, True, False
+)
+if not valid:
+    raise ValueError("Edge.Cuts is not a valid closed board outline")
+if outlines.OutlineCount() != 1:
+    raise ValueError(
+        "board-outline zones require exactly one outside contour; found "
+        + str(outlines.OutlineCount())
+    )
+inset = pcbnew.FromMM(float(job["inset"]))
+if inset:
+    outlines.Deflate(
+        inset, pcbnew.CORNER_STRATEGY_ALLOW_ACUTE_CORNERS, error
+    )
+if outlines.OutlineCount() != 1:
+    raise ValueError("board outline collapsed or split under the requested inset")
+chain = outlines.COutline(0)
+points = [[mm(chain.CPoint(i).x), mm(chain.CPoint(i).y)]
+          for i in range(chain.PointCount())]
+print(json.dumps({"ok": True, "points": points}))
 """
 
 

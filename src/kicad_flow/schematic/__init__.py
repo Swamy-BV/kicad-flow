@@ -15,7 +15,7 @@ facts -- where a pin is, what meets at a point -- and does what it is told.
 from __future__ import annotations
 
 from .api import GRID, Sheet, snap
-from .types import Finding, Net, NetPin, Part, Pin, Point, SheetRef, SymbolDef
+from .types import Finding, Label, Net, NetPin, Part, Pin, Point, SheetRef, SymbolDef
 
-__all__ = ["GRID", "Finding", "Net", "NetPin", "Part", "Pin", "Point", "Sheet",
-           "SheetRef", "SymbolDef", "snap"]
+__all__ = ["GRID", "Finding", "Label", "Net", "NetPin", "Part", "Pin", "Point",
+           "Sheet", "SheetRef", "SymbolDef", "snap"]

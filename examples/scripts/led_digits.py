@@ -584,8 +584,12 @@ async def build(client: Client) -> int:
     top, bot = rp["1"], rp["2"]
     await call("add_wires", path=scratch_sch, wires=[
         {"x1": top["x"], "y1": top["y"], "x2": top["x"], "y2": top["y"] - 10.16}])
-    await call("add_labels", path=scratch_sch, labels=[
+    label_result = await call("add_labels", path=scratch_sch, labels=[
         {"x": top["x"], "y": top["y"] - 10.16, "text": "TOP"}])
+    label_uuid = label_result.get("labels", [{}])[0].get("uuid", "")
+    labels = await call("list_labels", path=scratch_sch)
+    same("list_labels keeps the uuid",
+         labels.get("labels", [{}])[0].get("uuid"), label_uuid)
     await call("add_junctions", path=scratch_sch,
                points=[{"x": bot["x"], "y": bot["y"]}])
     await call("add_no_connects", path=scratch_sch, points=[{"x": 90, "y": 90}])
@@ -620,18 +624,19 @@ async def build(client: Client) -> int:
             "x2": top["x"] + 2.54, "y2": top["y"] - 10.16,
             "dx": -2.54, "dy": 0}])).get("moved"), 1)
 
-    # move the label, then put it back, and check it landed where it started
+    # UUID editing stays valid when nearby parts move or mirror; coordinates
+    # remain supported for older callers, but are not an object's identity.
     same("move_labels found one",
          (await call("move_labels", path=scratch_sch, moves=[
-             {"x": top["x"], "y": top["y"] - 10.16, "dx": 2.54, "dy": 0}]))
+             {"uuid": label_uuid, "dx": 2.54, "dy": 0}]))
          .get("moved"), 1)
     same("move_labels back",
          (await call("move_labels", path=scratch_sch, moves=[
-             {"x": top["x"] + 2.54, "y": top["y"] - 10.16, "dx": -2.54, "dy": 0}]))
+             {"uuid": label_uuid, "dx": -2.54, "dy": 0}]))
          .get("moved"), 1)
     same("rotate_labels found one",
          (await call("rotate_labels", path=scratch_sch, turns=[
-             {"x": top["x"], "y": top["y"] - 10.16, "rotation": 90}]))
+             {"uuid": label_uuid, "rotation": 90}]))
          .get("turned"), 1)
 
     # a sheet box moves without its identity changing -- that is the point of
@@ -648,7 +653,7 @@ async def build(client: Client) -> int:
 
     # and the removers, each reporting what it actually found
     for tool, kw, key, want in (
-        ("remove_labels", {"points": [{"x": top["x"], "y": top["y"] - 10.16}]},
+        ("remove_labels", {"points": [{"uuid": label_uuid}]},
          "removed", 1),
         ("remove_wires", {"wires": [{"x1": top["x"], "y1": top["y"],
                                      "x2": top["x"], "y2": top["y"] - 10.16}]},
@@ -743,6 +748,9 @@ async def build(client: Client) -> int:
              "min_track_width", "min_via_drill", "min_solder_mask_bridge")},
          {"min_track_width": 0.12, "min_via_drill": 0.18,
           "min_solder_mask_bridge": 0.10})
+    capabilities = await call("get_fabrication_capabilities", provider="jlcpcb")
+    same("fabrication choices expose exact board type",
+         capabilities.get("capabilities", {}).get("board_types"), ["rigid_fr4"])
     applied_profile = await call(
         "set_fabrication_profile", path=scratch, provider="jlcpcb",
         board_type="rigid_fr4", material="FR-4", outer_copper_oz=1.0,
@@ -756,16 +764,35 @@ async def build(client: Client) -> int:
     same("fabrication profile application",
          active_profile.get("profile"), applied_profile.get("profile"))
     graphic_result = await call("add_graphics", path=scratch, graphics=[
-        {"kind": "rectangle", "layer": "Edge.Cuts",
-         "x1": 0, "y1": 0, "x2": 20, "y2": 20},
+        {"kind": "line", "layer": "Edge.Cuts",
+         "x1": 2, "y1": 0, "x2": 18, "y2": 0},
+        {"kind": "arc", "layer": "Edge.Cuts", "x1": 18, "y1": 0,
+         "xm": 19.414214, "ym": 0.585786, "x2": 20, "y2": 2},
+        {"kind": "line", "layer": "Edge.Cuts",
+         "x1": 20, "y1": 2, "x2": 20, "y2": 18},
+        {"kind": "arc", "layer": "Edge.Cuts", "x1": 20, "y1": 18,
+         "xm": 19.414214, "ym": 19.414214, "x2": 18, "y2": 20},
+        {"kind": "line", "layer": "Edge.Cuts",
+         "x1": 18, "y1": 20, "x2": 2, "y2": 20},
+        {"kind": "arc", "layer": "Edge.Cuts", "x1": 2, "y1": 20,
+         "xm": 0.585786, "ym": 19.414214, "x2": 0, "y2": 18},
+        {"kind": "line", "layer": "Edge.Cuts",
+         "x1": 0, "y1": 18, "x2": 0, "y2": 2},
+        {"kind": "arc", "layer": "Edge.Cuts", "x1": 0, "y1": 2,
+         "xm": 0.585786, "ym": 0.585786, "x2": 2, "y2": 0},
         {"kind": "circle", "layer": "F.SilkS", "x": 10, "y": 10,
          "radius": 2, "fill": True},
     ])
-    graphic_uuid = graphic_result.get("graphics", [{}, {}])[1].get("uuid", "")
+    graphic_uuid = graphic_result.get("graphics", [{}])[-1].get("uuid", "")
     await call("list_graphics", path=scratch, layer="F.SilkS")
     await call("move_graphics", path=scratch, moves=[{
         "uuid": graphic_uuid, "dx": 1, "dy": 0}])
     await call("remove_graphics", path=scratch, uuids=[graphic_uuid])
+    outline_zone = await call("add_zones", path=scratch, zones=[{
+        "boundary": "board_outline", "inset": 0.2, "max_error": 0.02,
+        "layer": "B.Cu"}])
+    same("rounded outline zone has bounded curve sampling",
+         len(outline_zone.get("zones", [{}])[0].get("points", [])) > 20, True)
     await call("add_tracks", path=scratch, tracks=[{
         "x1": 2, "y1": 2, "x2": 18, "y2": 2,
         "layer": "F.Cu", "width": 0.25, "net": "N1"}])
@@ -774,7 +801,7 @@ async def build(client: Client) -> int:
     # Under the initial project minimum. The rules API is exercised below;
     # this first check proves the board reports the rule it currently has.
     await call("add_vias", path=scratch, vias=[{
-        "x": 14, "y": 2, "net": "N1", "diameter": 0.45, "drill": 0.20}])
+        "x": 14, "y": 2, "net": "N1", "diameter": 0.35, "drill": 0.20}])
     # The other end of the sweep -- a via too big for its room -- is NOT
     # demonstrated here. Two 0.9 mm vias 0.9 mm apart on different nets were
     # tried and DRC returned only `via_dangling`, no clearance error, because
@@ -784,6 +811,7 @@ async def build(client: Client) -> int:
     sdrc = await call("check_board", path=scratch)
     small = [f for f in sdrc.get("findings", [])
              if "drill" in f["kind"] or "annular" in f["kind"]]
+    same("JLC preferred 0.35/0.20 via passes its own profile", len(small), 0)
     # The removers, where removing something costs nothing.
     await call("place_footprints", path=scratch, footprints=[{
         "fp_id": LED_FP, "ref": "DX", "x": 4, "y": 15,

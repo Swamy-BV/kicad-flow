@@ -19,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..backend import create_board, load_board
 from ..pcb.api import Board
@@ -240,13 +240,42 @@ class NewZone(BaseModel):
     """One copper pour or keep-out polygon."""
 
     points: list[list[float]] = Field(
-        description="Polygon as [[x, y], ...], with at least 3 points.")
+        default_factory=list,
+        description="Explicit polygon as [[x, y], ...], with at least 3 points.")
+    boundary: Literal["points", "board_outline"] = Field(
+        default="points",
+        description="Use explicit points or derive the boundary from Edge.Cuts.")
+    inset: float | None = Field(
+        default=None,
+        description="Required inward offset in mm for a board_outline boundary.")
+    max_error: float = Field(
+        default=0.02,
+        description="Maximum curve-to-polygon chord error in mm.")
     layer: str = Field(description="Copper layer name.")
     net: str = Field(default="", description="Pour net, or empty for no net.")
     clearance: float = Field(default=0.0, description="Clearance in mm.")
     forbids: list[str] = Field(
         default_factory=list,
         description="For a keep-out: tracks, vias, pads, pours, footprints.")
+
+    @model_validator(mode="after")
+    def valid_boundary(self) -> NewZone:
+        """Require exactly one explicit, unambiguous boundary source."""
+        if self.boundary == "points":
+            if len(self.points) < 3:
+                raise ValueError("a points boundary needs at least 3 points")
+            if self.inset is not None:
+                raise ValueError("inset is only valid for a board_outline boundary")
+        else:
+            if self.points:
+                raise ValueError("board_outline boundary cannot also supply points")
+            if self.inset is None:
+                raise ValueError("board_outline boundary requires an explicit inset")
+            if self.inset < 0:
+                raise ValueError("board_outline inset cannot be negative")
+        if self.max_error <= 0:
+            raise ValueError("max_error must be positive")
+        return self
 
 
 class NewBoardText(BaseModel):
@@ -981,6 +1010,11 @@ def add_vias(path: str, vias: list[NewVia]) -> dict[str, Any]:
 def add_zones(path: str, zones: list[NewZone]) -> dict[str, Any]:
     """Add copper pours or keep-out polygons in order.
 
+    A zone can use caller-supplied polygon *points*, or an explicit
+    ``boundary="board_outline"`` with an inward *inset*. Curved Edge.Cuts are
+    converted to the polygon KiCad zones actually store, within *max_error*;
+    the generated points are returned for inspection.
+
     With *forbids* it is a KEEP-OUT instead -- a region refusing any of
     ``tracks``, ``vias``, ``pads``, ``pours``, ``footprints``.
 
@@ -994,8 +1028,16 @@ def add_zones(path: str, zones: list[NewZone]) -> dict[str, Any]:
     out: list[dict[str, Any]] = []
     for i, zone in enumerate(zones):
         try:
+            if zone.boundary == "board_outline":
+                assert zone.inset is not None
+                boundary = board.outline_polygon(
+                    inset=zone.inset, max_error=zone.max_error
+                )
+                points = [(point.x, point.y) for point in boundary]
+            else:
+                points = [(point[0], point[1]) for point in zone.points]
             made = board.zone(
-                [(p[0], p[1]) for p in zone.points], layer=zone.layer,
+                points, layer=zone.layer,
                 net=zone.net, clearance=zone.clearance,
                 forbids=tuple(zone.forbids))
         except (IndexError, *_ERRORS) as exc:

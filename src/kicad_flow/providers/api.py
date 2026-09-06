@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from .types import (
+    FabricationCapabilities,
     FabricationProfile,
     FabricationSelection,
     ImportedLibrary,
@@ -21,6 +22,10 @@ class FabricationProvider(ABC):
     @abstractmethod
     def name(self) -> str:
         """The stable provider name accepted by MCP tools."""
+
+    @abstractmethod
+    def capabilities(self) -> FabricationCapabilities:
+        """Return exact caller choices and their source provenance."""
 
     @abstractmethod
     def resolve(self, selection: FabricationSelection) -> FabricationProfile:

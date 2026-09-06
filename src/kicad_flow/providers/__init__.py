@@ -5,6 +5,7 @@ from __future__ import annotations
 from .api import FabricationProvider, PartsProvider, ProjectLibrary
 from .jlcpcb import JlcpcbFabricationProvider, JlcpcbPartsProvider
 from .types import (
+    FabricationCapabilities,
     FabricationProfile,
     FabricationSelection,
     ImportedLibrary,
@@ -37,6 +38,7 @@ def part_provider_names() -> tuple[str, ...]:
 
 
 __all__ = [
+    "FabricationCapabilities",
     "FabricationProfile",
     "FabricationProvider",
     "FabricationSelection",

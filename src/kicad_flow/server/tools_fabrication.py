@@ -18,6 +18,21 @@ def _fail(exc: Exception) -> dict[str, Any]:
     return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def get_fabrication_capabilities(provider: str = "jlcpcb") -> dict[str, Any]:
+    """Return exact supported choices before applying a fabrication profile.
+
+    The provider owns these facts and their provenance. This tool does not
+    inspect or mutate a board, and the MCP layer contains no provider-specific
+    enum list.
+    """
+    try:
+        capabilities = fabrication_provider(provider).capabilities()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "capabilities": capabilities.as_dict()}
+
+
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def set_fabrication_profile(
     path: str,
@@ -74,4 +89,5 @@ def get_fabrication_profile(path: str) -> dict[str, Any]:
     return {"ok": True, "active": profile is not None, "profile": profile}
 
 
-__all__ = ["get_fabrication_profile", "set_fabrication_profile"]
+__all__ = ["get_fabrication_capabilities", "get_fabrication_profile",
+           "set_fabrication_profile"]
