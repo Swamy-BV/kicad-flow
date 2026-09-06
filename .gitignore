@@ -43,6 +43,10 @@ examples/led_digits/*.kicad_sch
 examples/led_digits/*.kicad_pro
 examples/led_digits/led_digits-[0-9]*.png
 !examples/led_digits/led_digits-3d.png
+examples/led_digits/kicad-flow-libraries/
+examples/led_digits/sym-lib-table
+examples/led_digits/fp-lib-table
+examples/led_digits/fixture_bundle.zip
 
 # The art-board source is generated; its renders are the reviewable artefacts.
 examples/art_board/*.kicad_pcb

@@ -206,6 +206,165 @@ class Zone:
 
 
 @dataclass(frozen=True)
+class StackupLayer:
+    """One physical or surface layer in the manufactured board stackup."""
+
+    name: str
+    kind: str
+    thickness: float | None = None
+    material: str = ""
+    epsilon_r: float | None = None
+    loss_tangent: float | None = None
+    color: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete layer, omitting properties the board does not state."""
+        out: dict[str, Any] = {"name": self.name, "kind": self.kind}
+        for name, value in (
+            ("thickness", self.thickness),
+            ("material", self.material or None),
+            ("epsilon_r", self.epsilon_r),
+            ("loss_tangent", self.loss_tangent),
+            ("color", self.color or None),
+        ):
+            if value is not None:
+                out[name] = value
+        return out
+
+
+@dataclass(frozen=True)
+class Stackup:
+    """The ordered physical construction and fabrication options of a board."""
+
+    layers: tuple[StackupLayer, ...]
+    copper_finish: str = ""
+    dielectric_constraints: bool = False
+    edge_connector: str = ""
+    castellated_pads: bool = False
+    edge_plating: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        """A JSON-ready stackup description."""
+        return {
+            "layers": [layer.as_dict() for layer in self.layers],
+            "copper_finish": self.copper_finish,
+            "dielectric_constraints": self.dielectric_constraints,
+            "edge_connector": self.edge_connector,
+            "castellated_pads": self.castellated_pads,
+            "edge_plating": self.edge_plating,
+        }
+
+
+@dataclass(frozen=True)
+class BoardLimits:
+    """Provider-neutral board-wide manufacturing limits, in millimetres."""
+
+    min_clearance: float | None = None
+    min_track_width: float | None = None
+    min_via_diameter: float | None = None
+    min_via_drill: float | None = None
+    min_annular_width: float | None = None
+    min_hole_clearance: float | None = None
+    min_hole_to_hole: float | None = None
+    min_copper_edge_clearance: float | None = None
+    min_silk_clearance: float | None = None
+    min_text_height: float | None = None
+    min_text_thickness: float | None = None
+    min_groove_width: float | None = None
+    solder_mask_to_copper_clearance: float | None = None
+    min_solder_mask_bridge: float | None = None
+
+    def as_dict(self) -> dict[str, float]:
+        """Return only limits the board explicitly states."""
+        return {
+            name: value for name, value in vars(self).items()
+            if value is not None
+        }
+
+
+@dataclass(frozen=True)
+class NetClass:
+    """Routing dimensions shared by a named set of nets, in millimetres."""
+
+    name: str
+    clearance: float | None = None
+    track_width: float | None = None
+    via_diameter: float | None = None
+    via_drill: float | None = None
+    microvia_diameter: float | None = None
+    microvia_drill: float | None = None
+    diff_pair_width: float | None = None
+    diff_pair_gap: float | None = None
+    diff_pair_via_gap: float | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """The class name and every dimension it explicitly defines."""
+        out: dict[str, Any] = {"name": self.name}
+        for name in (
+            "clearance", "track_width", "via_diameter", "via_drill",
+            "microvia_diameter", "microvia_drill", "diff_pair_width",
+            "diff_pair_gap", "diff_pair_via_gap",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        return out
+
+
+@dataclass(frozen=True)
+class NetClassAssignment:
+    """One net's membership in one netclass."""
+
+    net: str
+    net_class: str
+
+    def as_dict(self) -> dict[str, str]:
+        """The assignment as JSON."""
+        return {"net": self.net, "net_class": self.net_class}
+
+
+@dataclass(frozen=True)
+class Constraint:
+    """One numeric design constraint, with millimetre limits."""
+
+    kind: str
+    minimum: float | None = None
+    optimum: float | None = None
+    maximum: float | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """The constraint and every bound it states."""
+        out: dict[str, Any] = {"kind": self.kind}
+        for name, key in (("minimum", "min"), ("optimum", "opt"),
+                          ("maximum", "max")):
+            value = getattr(self, name)
+            if value is not None:
+                out[key] = value
+        return out
+
+
+@dataclass(frozen=True)
+class BoardRule:
+    """A named conditional group of design constraints."""
+
+    name: str
+    condition: str
+    constraints: tuple[Constraint, ...]
+    layer: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete rule as JSON."""
+        out: dict[str, Any] = {
+            "name": self.name,
+            "condition": self.condition,
+            "constraints": [item.as_dict() for item in self.constraints],
+        }
+        if self.layer:
+            out["layer"] = self.layer
+        return out
+
+
+@dataclass(frozen=True)
 class NetPad:
     """One pad sitting on a net."""
 
@@ -288,5 +447,6 @@ class Finding:
         return out
 
 
-__all__ = ["Connection", "Finding", "Footprint", "FootprintDef", "Net",
-           "NetPad", "Pad", "Point", "Track", "Via", "Zone"]
+__all__ = ["BoardRule", "Connection", "Constraint", "Finding", "Footprint",
+           "FootprintDef", "Net", "NetClass", "NetClassAssignment", "NetPad",
+           "Pad", "Point", "Stackup", "StackupLayer", "Track", "Via", "Zone"]

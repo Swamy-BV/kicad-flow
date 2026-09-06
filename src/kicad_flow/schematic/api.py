@@ -94,8 +94,14 @@ class Sheet(ABC):
         """
 
     @abstractmethod
-    def save(self) -> Path:
-        """Write the sheet to disk and return its path."""
+    def save(self, *, validate: bool = False) -> Path:
+        """Write the sheet to disk and return its path.
+
+        When *validate* is true, the implementation must prove that its native
+        application can load the serialized result before replacing the
+        destination. Rule violations do not make a structurally valid design
+        unsavable.
+        """
 
     # -- the library ------------------------------------------------------
 

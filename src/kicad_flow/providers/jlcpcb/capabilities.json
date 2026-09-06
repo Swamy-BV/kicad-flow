@@ -1,0 +1,42 @@
+{
+  "provider": "jlcpcb",
+  "profile": "rigid-fr4-8-layer",
+  "retrieved_at": "2026-09-05",
+  "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities/",
+  "supported_layers": [2, 4, 6, 8],
+  "thickness_mm": [0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0],
+  "outer_copper_oz": {
+    "2": [1.0, 2.0, 2.5, 3.5, 4.5],
+    "multilayer": [1.0, 2.0]
+  },
+  "inner_copper_oz": [0.5, 1.0, 2.0],
+  "finishes": ["HASL leaded", "HASL lead-free", "ENIG", "OSP"],
+  "soldermask_colors": ["green", "purple", "red", "yellow", "blue", "white", "black"],
+  "maximum_size_mm": {
+    "2": [670.0, 600.0],
+    "4": [663.0, 593.0],
+    "multilayer": [656.0, 586.0]
+  },
+  "minimum_size_mm": [3.0, 3.0],
+  "track_width_spacing_mm": {
+    "2": {"1": 0.10, "2": 0.16, "2.5": 0.20, "3.5": 0.25, "4.5": 0.30},
+    "multilayer": {"1": 0.09, "2": 0.15}
+  },
+  "via_mm": {
+    "minimum": {"drill": 0.15, "diameter": 0.25},
+    "recommended": {"drill": 0.20, "diameter": 0.35}
+  },
+  "routed_edge_clearance_mm": 0.20,
+  "hole_clearance_mm": 0.20,
+  "hole_to_hole_mm": 0.20,
+  "silkscreen_line_width_mm": 0.15,
+  "silkscreen_text_height_mm": 1.0,
+  "silkscreen_pad_clearance_mm": 0.15,
+  "soldermask_to_copper_mm": 0.09,
+  "soldermask_bridge_mm": {
+    "one_oz_color": 0.10,
+    "one_oz_black_white": 0.13,
+    "two_oz": 0.20
+  },
+  "non_plated_slot_width_mm": 1.0
+}

@@ -151,7 +151,7 @@ def _render_3d(board: Path) -> Path | None:
     with contextlib.suppress(Exception):
         render.render_board(
             board, out, width=1400, height=1000, rotate="-30,0,25",
-            perspective=True, quality="basic", background="opaque")
+            perspective=True, quality="basic", background="opaque", zoom=0.85)
     return out if out.is_file() and out.stat().st_size > 0 else None
 
 

@@ -33,13 +33,18 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from .types import (
+    BoardLimits,
+    BoardRule,
     Connection,
     Finding,
     Footprint,
     FootprintDef,
     Graphic,
     Net,
+    NetClass,
+    NetClassAssignment,
     Point,
+    Stackup,
     Track,
     Via,
     Zone,
@@ -86,8 +91,66 @@ class Board(ABC):
         """
 
     @abstractmethod
-    def save(self) -> Path:
-        """Write the board to disk and return its path."""
+    def save(self, *, validate: bool = False) -> Path:
+        """Write the board to disk and return its path.
+
+        When *validate* is true, the implementation must prove that its native
+        application can load the serialized result before replacing the
+        destination. Rule violations do not make a structurally valid design
+        unsavable.
+        """
+
+    @abstractmethod
+    def set_stackup(self, stackup: Stackup) -> Stackup:
+        """Replace the physical stackup and return what the board records.
+
+        Layer order, materials and dimensions are caller decisions. The
+        implementation verifies that the copper entries agree with the
+        board's actual copper-layer table and updates total board thickness.
+        """
+
+    @abstractmethod
+    def stackup(self) -> Stackup:
+        """The board's physical layer construction and fabrication options."""
+
+    @property
+    @abstractmethod
+    def thickness(self) -> float:
+        """The finished board thickness stated by the design, in mm."""
+
+    @abstractmethod
+    def set_limits(self, limits: BoardLimits) -> BoardLimits:
+        """Set explicitly supplied board-wide manufacturing limits."""
+
+    @abstractmethod
+    def limits(self) -> BoardLimits:
+        """Read every supported board-wide manufacturing limit."""
+
+    @abstractmethod
+    def set_net_classes(self, classes: tuple[NetClass, ...]) -> list[NetClass]:
+        """Create or replace named routing classes and return those classes."""
+
+    @abstractmethod
+    def net_classes(self) -> list[NetClass]:
+        """Every routing class stored with the board's project."""
+
+    @abstractmethod
+    def assign_net_classes(
+            self, assignments: tuple[NetClassAssignment, ...]
+    ) -> list[NetClassAssignment]:
+        """Replace each named net's netclass memberships and return them."""
+
+    @abstractmethod
+    def net_class_assignments(self) -> list[NetClassAssignment]:
+        """Every explicit net-to-netclass assignment in the project."""
+
+    @abstractmethod
+    def set_rules(self, rules: tuple[BoardRule, ...]) -> list[BoardRule]:
+        """Create or replace named conditional design rules."""
+
+    @abstractmethod
+    def rules(self) -> list[BoardRule]:
+        """Every supported numeric custom design rule for the board."""
 
     @abstractmethod
     def graphic(self, kind: str, points: list[tuple[float, float]], *,

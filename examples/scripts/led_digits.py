@@ -37,7 +37,9 @@ Run it: ``python examples/scripts/led_digits.py``
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -48,6 +50,7 @@ from fastmcp import Client
 from kicad_flow.server import mcp
 
 OUT = Path("examples/led_digits")
+LOCAL_COMPONENT = Path("examples/assets/local_component")
 VCC, GND = "+3V3", "GND"
 
 #: Ten numerals as 5 x 7 bitmaps, sixteen lit cells in every one -- so each
@@ -123,6 +126,24 @@ def cell_xy(digit: str, col: int, row: int) -> tuple[float, float]:
     return (round(dx + 2.8 + col * PITCH, 3), round(dy + 3.2 + row * PITCH, 3))
 
 
+def provider_fixture(path: Path) -> None:
+    """Make the tiny catalogue input used to exercise the real SQLite adapter."""
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE jlc_components ("
+            "lcsc INTEGER PRIMARY KEY, mfr TEXT, package TEXT, manufacturer TEXT, "
+            "library_type TEXT, preferred INTEGER, description TEXT, "
+            "datasheet TEXT, stock INTEGER, price TEXT, category TEXT, "
+            "subcategory TEXT, basic INTEGER)"
+        )
+        connection.execute(
+            "INSERT INTO jlc_components VALUES "
+            "(2040, 'RP2040', 'QFN-56', 'Raspberry Pi', 'expand', 1, "
+            "'Dual-core microcontroller', 'https://example.invalid/rp2040.pdf', "
+            "90000, '1-9:0.8,10-:0.7', 'Processors', 'Microcontrollers', 0)"
+        )
+
+
 async def build(client: Client) -> int:
     """Build both halves and report. Returns a non-zero failure count."""
     failures = 0
@@ -155,12 +176,79 @@ async def build(client: Client) -> int:
 
     if OUT.exists():
         shutil.rmtree(OUT)
+    OUT.mkdir(parents=True)
+    fixture_database = (OUT / "jlcpcb-mini.sqlite3").resolve()
+    provider_fixture(fixture_database)
+    os.environ["KICAD_FLOW_JLCPCB_DATABASE"] = str(fixture_database)
+    fixture_bundle = Path(
+        shutil.make_archive(
+            str((OUT / "fixture_bundle").resolve()), "zip", LOCAL_COMPONENT
+        )
+    )
     started = time.time()
 
     # -- 1. the root: ten boxes and nothing else ---------------------------
     root = str(OUT / "led_digits.kicad_sch")
     await call("new_sheet", path=root, paper="A4",
                title="0-9 in LEDs -- root")
+    provider = await call("get_parts_provider_status", provider="jlcpcb")
+    choices = await call(
+        "search_parts", provider="jlcpcb", query="RP2040", limit=5,
+        package="QFN", assembly_type="preferred", min_stock=100,
+    )
+    imported = await call(
+        "import_project_library", project_dir=str(OUT), name="FixtureAssets",
+        source="example", source_path=str(fixture_bundle),
+        source_url="https://example.invalid/fixture",
+    )
+    local_libraries = await call("list_project_libraries", project_dir=str(OUT))
+    local_symbols = await call(
+        "find_symbol", query="Fixture_LED", project_dir=str(OUT), limit=5,
+    )
+    local_footprint = await call(
+        "footprint_pads", fp_id="FixtureAssets:Fixture_LED",
+        project_dir=str(OUT),
+    )
+    local_sheet = str(OUT / "project_local.kicad_sch")
+    local_board = str(OUT / "project_local.kicad_pcb")
+    await call("new_sheet", path=local_sheet, title="Project-local asset check")
+    placed_local_symbol = await call(
+        "add_components", path=local_sheet,
+        parts=[{"lib_id": "FixtureAssets:Fixture_LED", "ref": "D1",
+                "x": 25.4, "y": 25.4}],
+    )
+    local_pins = placed_local_symbol.get("parts", [{}])[0].get("pins", [])
+    await call(
+        "add_no_connects", path=local_sheet,
+        points=[{"x": pin["x"], "y": pin["y"]} for pin in local_pins],
+    )
+    await call("save_sheet", path=local_sheet)
+    await call("new_board", path=local_board, layers=2)
+    placed_local_footprint = await call(
+        "place_footprints", path=local_board,
+        footprints=[{"fp_id": "FixtureAssets:Fixture_LED", "ref": "D1",
+                     "x": 25.4, "y": 25.4}],
+    )
+    await call(
+        "add_graphics", path=local_board,
+        graphics=[{"kind": "rectangle", "layer": "Edge.Cuts",
+                   "x1": 20.0, "y1": 20.0, "x2": 30.0, "y2": 30.0}],
+    )
+    await call("save_board", path=local_board)
+    if not provider.get("available") or choices.get("count") != 1:
+        print("  FAILED provider fixture was not reported/searchable")
+        failures += 1
+    if not imported or local_libraries.get("count") != 1:
+        print("  FAILED project-local library was not recorded")
+        failures += 1
+    if len(local_symbols.get("symbols", [])) != 1 or not local_footprint.get("pads"):
+        print("  FAILED imported symbol/footprint was not usable through MCP")
+        failures += 1
+    if not placed_local_symbol.get("parts") or not placed_local_footprint.get(
+        "footprints"
+    ):
+        print("  FAILED imported assets could not be placed through MCP")
+        failures += 1
     boxes: dict[str, dict[str, Any]] = {}
     for i, digit in enumerate(DIGITS):
         got = await call("add_sheets", path=root, sheets=[{
@@ -647,6 +735,26 @@ async def build(client: Client) -> int:
     # the design above, so it gets a scratch board that is deleted after.
     scratch = str(OUT / "_scratch.kicad_pcb")
     await call("new_board", path=scratch, layers=2)
+    await call("set_board_limits", path=scratch, min_track_width=0.12,
+               min_via_drill=0.18, min_solder_mask_bridge=0.10)
+    initial_limits = await call("get_board_limits", path=scratch)
+    same("board limits round trip",
+         {key: initial_limits.get("limits", {}).get(key) for key in (
+             "min_track_width", "min_via_drill", "min_solder_mask_bridge")},
+         {"min_track_width": 0.12, "min_via_drill": 0.18,
+          "min_solder_mask_bridge": 0.10})
+    applied_profile = await call(
+        "set_fabrication_profile", path=scratch, provider="jlcpcb",
+        board_type="rigid_fr4", material="FR-4", outer_copper_oz=1.0,
+        finish="ENIG",
+        soldermask_color="green", outline_process="routed",
+        impedance_control=False, tier="recommended")
+    active_profile = await call("get_fabrication_profile", path=scratch)
+    same("fabrication profile is active", active_profile.get("active"), True)
+    same("fabrication profile provider",
+         active_profile.get("profile", {}).get("provider"), "jlcpcb")
+    same("fabrication profile application",
+         active_profile.get("profile"), applied_profile.get("profile"))
     graphic_result = await call("add_graphics", path=scratch, graphics=[
         {"kind": "rectangle", "layer": "Edge.Cuts",
          "x1": 0, "y1": 0, "x2": 20, "y2": 20},
@@ -663,8 +771,8 @@ async def build(client: Client) -> int:
         "layer": "F.Cu", "width": 0.25, "net": "N1"}])
     await call("add_vias", path=scratch, vias=[{
         "x": 10, "y": 2, "net": "N1", "diameter": 0.60, "drill": 0.30}])
-    # Under the minimum the board was created with. Nothing on the contract
-    # can change that minimum, which is the gap -- the finding is the point.
+    # Under the initial project minimum. The rules API is exercised below;
+    # this first check proves the board reports the rule it currently has.
     await call("add_vias", path=scratch, vias=[{
         "x": 14, "y": 2, "net": "N1", "diameter": 0.45, "drill": 0.20}])
     # The other end of the sweep -- a via too big for its room -- is NOT
@@ -702,17 +810,70 @@ async def build(client: Client) -> int:
     c_after = (await call("list_components", path=spare)).get("count", 0)
     same("remove_components dropped one", c_before - c_after, 1)
 
-    grew = await call("set_board_layers", path=scratch, count=4)
+    grew = await call("set_board_layers", path=scratch, count=8)
+    stale_profile = await call("check_board", path=scratch)
+    same("layer change invalidates active fabrication profile",
+         any(item.get("kind") == "provider_layer_count"
+             for item in stale_profile.get("findings", [])), True)
+    await call("set_board_layers", path=scratch, count=4)
+    await call("set_fabrication_profile", path=scratch, provider="jlcpcb",
+               outer_copper_oz=1.0, inner_copper_oz=0.5, finish="ENIG",
+               soldermask_color="green", tier="recommended")
     gone = await call("remove_copper", path=scratch, net="N1", layer="F.Cu")
     left = await call("list_copper", path=scratch)
+    stackup_layers = [
+        {"name": "F.Cu", "kind": "copper", "thickness": 0.035},
+        {"name": "dielectric 1", "kind": "prepreg", "thickness": 0.2,
+         "material": "FR4", "epsilon_r": 4.2, "loss_tangent": 0.02},
+        {"name": "In1.Cu", "kind": "copper", "thickness": 0.035},
+        {"name": "dielectric 2", "kind": "core", "thickness": 1.06,
+         "material": "FR4", "epsilon_r": 4.3, "loss_tangent": 0.02},
+        {"name": "In2.Cu", "kind": "copper", "thickness": 0.035},
+        {"name": "dielectric 3", "kind": "prepreg", "thickness": 0.2,
+         "material": "FR4", "epsilon_r": 4.2, "loss_tangent": 0.02},
+        {"name": "B.Cu", "kind": "copper", "thickness": 0.035},
+    ]
+    await call("set_stackup", path=scratch, layers=stackup_layers,
+               copper_finish="ENIG", dielectric_constraints=True)
+    stackup = await call("get_stackup", path=scratch)
+    same("stackup round trip", stackup.get("layers"), stackup_layers)
+    await call("set_net_classes", path=scratch, classes=[{
+        "name": "USB", "clearance": 0.15, "track_width": 0.18,
+        "via_diameter": 0.45, "via_drill": 0.2,
+        "diff_pair_width": 0.18, "diff_pair_gap": 0.15,
+        "diff_pair_via_gap": 0.2}])
+    classes = await call("list_net_classes", path=scratch)
+    same("USB netclass exists",
+         any(item.get("name") == "USB" for item in classes.get("classes", [])),
+         True)
+    await call("assign_net_classes", path=scratch, assignments=[
+        {"net": "N1", "net_class": "USB"}])
+    assigned = await call("list_net_class_assignments", path=scratch)
+    same("N1 netclass assignment", assigned.get("assignments"),
+         [{"net": "N1", "net_class": "USB"}])
+    usb_rule = {
+        "name": "USB geometry", "condition": "A.NetClass == 'USB'",
+        "layer": "outer", "constraints": [
+            {"kind": "track_width", "min": 0.15, "opt": 0.18, "max": 0.2},
+            {"kind": "diff_pair_gap", "min": 0.12, "opt": 0.15,
+             "max": 0.2},
+            {"kind": "diff_pair_uncoupled", "max": 5.0},
+            {"kind": "skew", "max": 0.5},
+        ]}
+    await call("set_board_constraints", path=scratch, rules=[usb_rule])
+    rules = await call("list_board_constraints", path=scratch)
+    same("USB rule round trip", rules.get("rules"), [usb_rule])
     print(f"scratch: a 0.2 mm drill -> {len(small)} finding(s), graded "
-          f"against a minimum nothing on this contract can set. "
+          f"against the initial project minimum. "
           f"set_board_layers 2 -> "
           f"{len(grew.get('layers', []))}; remove_copper took "
           f"{gone.get('removed', '?')}, leaving "
           f"{len(left.get('tracks', []))} track(s) and "
           f"{len(left.get('vias', []))} via(s)")
     Path(scratch).unlink(missing_ok=True)
+    Path(scratch).with_suffix(".kicad_pro").unlink(missing_ok=True)
+    Path(scratch).with_suffix(".kicad_dru").unlink(missing_ok=True)
+    Path(scratch).with_suffix(".kicad-flow.json").unlink(missing_ok=True)
     Path(spare).unlink(missing_ok=True)
     await call("render_board", path=board,
                output_file=str(OUT / "led_digits-top.png"), side="top")

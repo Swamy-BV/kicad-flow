@@ -399,7 +399,7 @@ class KiCadSheet(Sheet):
                         instance_path=f"{self._where}/{uid}",
                         pins=tuple(pins))
 
-    def save(self) -> Path:
+    def save(self, *, validate: bool = False) -> Path:
         """Write the sheet to disk and return its path.
 
         Written to a neighbouring temp file and moved into place, so the sheet
@@ -407,11 +407,25 @@ class KiCadSheet(Sheet):
         on, this runs after every write rather than once at the end, and
         something else may be reading -- the monitor renders the file the
         moment it changes, and KiCad may have it open.
+
+        If *validate* is true, KiCad parses the complete temporary file before
+        it replaces the last known-good destination. ERC findings are allowed;
+        failure to load or parse is not.
         """
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        scratch = self._path.with_name(f".{self._path.name}.writing")
-        scratch.write_text(dumps(self._tree) + "\n", encoding="utf-8")
-        os.replace(scratch, self._path)          # atomic on the same volume
+        scratch = self._path.with_name(
+            f".{self._path.stem}.writing{self._path.suffix}"
+        )
+        try:
+            scratch.write_text(dumps(self._tree) + "\n", encoding="utf-8")
+            if validate:
+                from ..cli import cli
+
+                cli.erc(scratch)
+            os.replace(scratch, self._path)      # atomic on the same volume
+        except Exception:
+            scratch.unlink(missing_ok=True)
+            raise
         return self._path
 
     # -- the library ------------------------------------------------------
@@ -426,21 +440,17 @@ class KiCadSheet(Sheet):
         """
         found: list[SymbolDef] = []
         needle = query.lower()
-        for lib in library.symbol_dirs():
-            # Not a plain glob: KiCad 10 keeps a library as a `.kicad_symdir`
-            # FOLDER, and looking only for single files finds nothing at all on
-            # a stock install.
-            for file in library._libraries_in(lib):
-                for name in library._library_symbol_names(str(file)):
-                    lib_id = f"{file.stem}:{name}"
-                    if needle not in lib_id.lower():
-                        continue
-                    try:
-                        found.append(self.symbol(lib_id))
-                    except (LookupError, ValueError):
-                        continue
-                    if len(found) >= limit:
-                        return found
+        for nickname, file in library.symbol_libraries(self._path.parent).items():
+            for name in library._library_symbol_names(str(file)):
+                lib_id = f"{nickname}:{name}"
+                if needle not in lib_id.lower():
+                    continue
+                try:
+                    found.append(self.symbol(lib_id))
+                except (LookupError, ValueError):
+                    continue
+                if len(found) >= limit:
+                    return found
         return found
 
     def symbol(self, lib_id: str, *, unit: int = 1) -> SymbolDef:
@@ -479,7 +489,7 @@ class KiCadSheet(Sheet):
     def _load(self, lib_id: str) -> library.LibrarySymbol:
         """Load and cache a library symbol."""
         if lib_id not in self._defs:
-            self._defs[lib_id] = library.load_symbol(lib_id)
+            self._defs[lib_id] = library.load_symbol(lib_id, self._path.parent)
         return self._defs[lib_id]
 
     # -- parts ------------------------------------------------------------

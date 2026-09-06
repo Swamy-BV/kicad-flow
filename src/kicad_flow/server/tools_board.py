@@ -23,6 +23,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..backend import create_board, load_board
 from ..pcb.api import Board
+from ..pcb.types import (
+    BoardLimits,
+    BoardRule,
+    Constraint,
+    NetClass,
+    NetClassAssignment,
+    Stackup,
+    StackupLayer,
+)
 from . import _meta
 from ._app import mcp
 
@@ -252,6 +261,73 @@ class NewBoardText(BaseModel):
     mirror: bool = Field(default=False, description="Mirror the text.")
 
 
+class StackupLayerSpec(BaseModel):
+    """One explicitly ordered physical or surface stackup layer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Layer name, e.g. F.Cu or dielectric 1.")
+    kind: str = Field(description="Layer type, e.g. copper, core or prepreg.")
+    thickness: float | None = Field(
+        default=None, description="Layer thickness in mm when applicable.")
+    material: str = Field(default="", description="Laminate/material name.")
+    epsilon_r: float | None = Field(
+        default=None, description="Relative dielectric constant.")
+    loss_tangent: float | None = Field(
+        default=None, description="Dielectric loss tangent.")
+    color: str = Field(default="", description="Optional mask/silkscreen color.")
+
+
+class NetClassSpec(BaseModel):
+    """One named collection of routing dimensions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    clearance: float | None = None
+    track_width: float | None = None
+    via_diameter: float | None = None
+    via_drill: float | None = None
+    microvia_diameter: float | None = None
+    microvia_drill: float | None = None
+    diff_pair_width: float | None = None
+    diff_pair_gap: float | None = None
+    diff_pair_via_gap: float | None = None
+
+
+class NetClassAssignmentSpec(BaseModel):
+    """One net's membership in a netclass."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    net: str
+    net_class: str
+
+
+class NumericConstraintSpec(BaseModel):
+    """One millimetre-valued DRC constraint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(
+        description="KiCad constraint name, e.g. track_width, skew or length.")
+    min: float | None = None
+    opt: float | None = None
+    max: float | None = None
+
+
+class BoardRuleSpec(BaseModel):
+    """One named custom DRC rule."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    condition: str = Field(description="DRC condition selecting rule objects.")
+    constraints: list[NumericConstraintSpec]
+    layer: str = Field(
+        default="", description="Optional board layer, outer or inner selector.")
+
+
 # -- the board ------------------------------------------------------------
 
 
@@ -266,7 +342,7 @@ def new_board(path: str, layers: int = 2,
 
     Args:
         path: Where the board will be written.
-        layers: Copper layers -- 2, 4 or 6.
+        layers: Copper layers -- 2, 4, 6 or 8.
         thickness: Board thickness in mm.
 
     Returns:
@@ -285,7 +361,7 @@ def save_board(path: str) -> dict[str, Any]:
     """Write the open board to disk."""
     try:
         board = _board(path)
-        written = board.save()
+        written = board.save(validate=True)
     except _ERRORS as exc:
         return _fail(exc)
     return {"ok": True, "path": str(written),
@@ -384,7 +460,7 @@ def remove_graphics(path: str, uuids: list[str]) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def set_board_layers(path: str, count: int) -> dict[str, Any]:
-    """Set the copper layer count (2, 4 or 6). Do this before routing."""
+    """Set the copper layer count (2, 4, 6 or 8). Do this before routing."""
     try:
         return {"ok": True, "layers": list(_board(path).set_layers(count))}
     except _ERRORS as exc:
@@ -395,14 +471,15 @@ def set_board_layers(path: str, count: int) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
-def find_footprint(query: str, limit: int = 20) -> dict[str, Any]:
+def find_footprint(query: str, limit: int = 20,
+                   project_dir: str = "") -> dict[str, Any]:
     """Search the footprint libraries for a land pattern.
 
     Matched against ``Library:Footprint`` ids -- search by package or family,
     ``"0603"``, ``"LQFP-64"``, ``"PinHeader_1x06"``.
     """
     try:
-        found = _blank().find_footprints(query, limit=limit)
+        found = _blank(project_dir).find_footprints(query, limit=limit)
     except _ERRORS as exc:
         return _fail(exc)
     return {"ok": True, "footprints": [
@@ -411,7 +488,7 @@ def find_footprint(query: str, limit: int = 20) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
-def footprint_pads(fp_id: str) -> dict[str, Any]:
+def footprint_pads(fp_id: str, project_dir: str = "") -> dict[str, Any]:
     """A library footprint's pads and size, before it is placed anywhere.
 
     Use the COURTYARD to decide how much room to leave -- not the bounding
@@ -420,15 +497,16 @@ def footprint_pads(fp_id: str) -> dict[str, Any]:
     `place_footprints` returns.
     """
     try:
-        found = _blank().footprint_def(fp_id)
+        found = _blank(project_dir).footprint_def(fp_id)
     except _ERRORS as exc:
         return _fail(exc)
     return {"ok": True, **found.as_dict()}
 
 
-def _blank() -> Board:
+def _blank(project_dir: str = "") -> Board:
     """A throwaway board, for library queries that need no file."""
-    return create_board(Path.cwd() / "_query.kicad_pcb")
+    directory = Path(project_dir).resolve() if project_dir else Path.cwd()
+    return create_board(directory / "_query.kicad_pcb")
 
 
 # -- parts ----------------------------------------------------------------
@@ -463,6 +541,192 @@ def place_footprints(path: str,
             return _partial(exc, i, "footprints", out)
         out.append(made.as_dict())
     return {"ok": True, "count": len(out), "footprints": out}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def set_stackup(path: str, layers: list[StackupLayerSpec],
+                copper_finish: str = "", dielectric_constraints: bool = False,
+                edge_connector: str = "", castellated_pads: bool = False,
+                edge_plating: bool = False) -> dict[str, Any]:
+    """Set the board's complete ordered physical stackup.
+
+    Copper entries must exactly match the layers reported by `new_board` or
+    `set_board_layers`. Include every layer the manufacturer specifies:
+    copper, dielectric core/prepreg and optional mask/silkscreen/paste layers.
+    No impedance dimensions are inferred from materials or thicknesses.
+    """
+    try:
+        made = _board(path).set_stackup(Stackup(
+            layers=tuple(StackupLayer(
+                name=item.name, kind=item.kind, thickness=item.thickness,
+                material=item.material, epsilon_r=item.epsilon_r,
+                loss_tangent=item.loss_tangent, color=item.color)
+                for item in layers),
+            copper_finish=copper_finish,
+            dielectric_constraints=dielectric_constraints,
+            edge_connector=edge_connector,
+            castellated_pads=castellated_pads,
+            edge_plating=edge_plating,
+        ))
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, **made.as_dict()}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def get_stackup(path: str) -> dict[str, Any]:
+    """Read the complete stackup currently stored in the board."""
+    try:
+        found = _board(path).stackup()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, **found.as_dict()}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def set_board_limits(
+    path: str,
+    min_clearance: float | None = None,
+    min_track_width: float | None = None,
+    min_via_diameter: float | None = None,
+    min_via_drill: float | None = None,
+    min_annular_width: float | None = None,
+    min_hole_clearance: float | None = None,
+    min_hole_to_hole: float | None = None,
+    min_copper_edge_clearance: float | None = None,
+    min_silk_clearance: float | None = None,
+    min_text_height: float | None = None,
+    min_text_thickness: float | None = None,
+    min_groove_width: float | None = None,
+    solder_mask_to_copper_clearance: float | None = None,
+    min_solder_mask_bridge: float | None = None,
+) -> dict[str, Any]:
+    """Set explicitly supplied board-wide manufacturing limits.
+
+    Omitted values stay unchanged. These are provider-neutral physical limits,
+    not routing decisions; all dimensions are millimetres.
+    """
+    try:
+        made = _board(path).set_limits(BoardLimits(
+            min_clearance=min_clearance,
+            min_track_width=min_track_width,
+            min_via_diameter=min_via_diameter,
+            min_via_drill=min_via_drill,
+            min_annular_width=min_annular_width,
+            min_hole_clearance=min_hole_clearance,
+            min_hole_to_hole=min_hole_to_hole,
+            min_copper_edge_clearance=min_copper_edge_clearance,
+            min_silk_clearance=min_silk_clearance,
+            min_text_height=min_text_height,
+            min_text_thickness=min_text_thickness,
+            min_groove_width=min_groove_width,
+            solder_mask_to_copper_clearance=solder_mask_to_copper_clearance,
+            min_solder_mask_bridge=min_solder_mask_bridge,
+        ))
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "limits": made.as_dict()}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def get_board_limits(path: str) -> dict[str, Any]:
+    """Read every supported board-wide manufacturing limit."""
+    try:
+        found = _board(path).limits()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "limits": found.as_dict()}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def set_net_classes(path: str, classes: list[NetClassSpec]) -> dict[str, Any]:
+    """Create or update named routing classes without changing other classes.
+
+    Omitted dimensions remain unchanged on an existing class. A newly created
+    named class may omit dimensions and inherit the project's Default class.
+    """
+    try:
+        made = _board(path).set_net_classes(tuple(NetClass(**item.model_dump())
+                                                  for item in classes))
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(made),
+            "classes": [item.as_dict() for item in made]}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def list_net_classes(path: str) -> dict[str, Any]:
+    """List every routing class in the board's project."""
+    try:
+        found = _board(path).net_classes()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(found),
+            "classes": [item.as_dict() for item in found]}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def assign_net_classes(path: str,
+                       assignments: list[NetClassAssignmentSpec]
+                       ) -> dict[str, Any]:
+    """Assign mentioned nets to classes, preserving all other assignments.
+
+    Repeat a net with different classes to give it multiple memberships.
+    Every referenced class must already exist.
+    """
+    try:
+        made = _board(path).assign_net_classes(tuple(
+            NetClassAssignment(item.net, item.net_class)
+            for item in assignments))
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(made),
+            "assignments": [item.as_dict() for item in made]}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def list_net_class_assignments(path: str) -> dict[str, Any]:
+    """List every explicit net-to-netclass membership in the project."""
+    try:
+        found = _board(path).net_class_assignments()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(found),
+            "assignments": [item.as_dict() for item in found]}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def set_board_constraints(path: str, rules: list[BoardRuleSpec]
+                          ) -> dict[str, Any]:
+    """Create or replace named numeric custom DRC rules.
+
+    Each condition explicitly selects the objects governed by its constraints.
+    Bounds are millimetres. Supported examples include `track_width`,
+    `diff_pair_gap`, `diff_pair_uncoupled`, `length`, `skew`, `clearance`,
+    `hole_size` and `via_diameter`. Untouched rules and comments are preserved.
+    """
+    try:
+        made = _board(path).set_rules(tuple(BoardRule(
+            name=rule.name, condition=rule.condition, layer=rule.layer,
+            constraints=tuple(Constraint(
+                kind=item.kind, minimum=item.min, optimum=item.opt,
+                maximum=item.max) for item in rule.constraints))
+            for rule in rules))
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(made),
+            "rules": [item.as_dict() for item in made]}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def list_board_constraints(path: str) -> dict[str, Any]:
+    """List numeric custom DRC rules from the board's rules document."""
+    try:
+        found = _board(path).rules()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(found),
+            "rules": [item.as_dict() for item in found]}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -849,7 +1113,13 @@ def check_board(path: str) -> dict[str, Any]:
     ``something at (25.46, 10.45)``.
     """
     try:
-        found = _board(path).check()
+        board = _board(path)
+        found = board.check()
+        from ._fabrication import profile_findings, read_profile
+
+        profile = read_profile(path)
+        if profile is not None:
+            found.extend(profile_findings(board, profile))
     except _ERRORS as exc:
         return _fail(exc)
     return {"ok": True,
@@ -922,17 +1192,23 @@ __all__ = [
     "add_tracks",
     "add_vias",
     "add_zones",
+    "assign_net_classes",
     "check_board",
     "find_footprint",
     "flip_footprints",
     "footprint_pads",
+    "get_board_limits",
     "get_footprint",
     "get_footprint_fields",
     "get_pad",
+    "get_stackup",
+    "list_board_constraints",
     "list_board_nets",
     "list_copper",
     "list_footprints",
     "list_graphics",
+    "list_net_class_assignments",
+    "list_net_classes",
     "move_footprint_fields",
     "move_footprints",
     "move_graphics",
@@ -945,9 +1221,13 @@ __all__ = [
     "render_board",
     "rotate_footprints",
     "save_board",
+    "set_board_constraints",
     "set_board_layers",
+    "set_board_limits",
     "set_footprint_fields",
+    "set_net_classes",
     "set_pad_nets",
+    "set_stackup",
     "unrouted_connections",
     "what_is_on_board",
 ]

@@ -16,10 +16,11 @@ The order is the order the work happens in.
 
 from __future__ import annotations
 
+from .parts import PARTS
 from .pcb import PCB
 from .schematic import SCHEMATIC
 
 #: The whole instruction text handed to :class:`~fastmcp.FastMCP`.
-INSTRUCTIONS = SCHEMATIC + PCB
+INSTRUCTIONS = PARTS + SCHEMATIC + PCB
 
-__all__ = ["INSTRUCTIONS", "PCB", "SCHEMATIC"]
+__all__ = ["INSTRUCTIONS", "PARTS", "PCB", "SCHEMATIC"]

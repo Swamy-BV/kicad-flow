@@ -31,6 +31,19 @@ is the standing debt to clear when the board side gets its own ABC.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from kicad_flow.providers.api import ProjectLibrary
+
 from .kicad import PAPER, create, create_board, load, load_board
 
-__all__ = ["PAPER", "create", "create_board", "load", "load_board"]
+
+def project_library(project_dir: str | Path) -> ProjectLibrary:
+    """Construct the KiCad implementation of a project-local CAD library."""
+    from .kicad.project_library import KiCadProjectLibrary
+
+    return KiCadProjectLibrary(Path(project_dir))
+
+__all__ = [
+    "PAPER", "create", "create_board", "load", "load_board", "project_library"
+]

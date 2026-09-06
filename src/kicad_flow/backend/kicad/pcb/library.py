@@ -70,7 +70,7 @@ def _parse_fp_table(path: Path, project_dir: Path | None) -> dict[str, Path]:
 
 
 @cache
-def _libraries() -> dict[str, Path]:
+def _global_libraries() -> dict[str, Path]:
     """Every footprint-library nickname mapped to its ``.pretty`` folder.
 
     Merges (later wins): KiCad's stock ``.pretty`` dirs, then the global
@@ -86,7 +86,18 @@ def _libraries() -> dict[str, Path]:
     return libs
 
 
-def search(query: str, limit: int = 20) -> list[str]:
+def _libraries(project_dir: Path | None = None) -> dict[str, Path]:
+    """Every visible library, with project nicknames taking precedence."""
+    libraries = dict(_global_libraries())
+    if project_dir is not None:
+        table = project_dir / "fp-lib-table"
+        if table.is_file():
+            libraries.update(_parse_fp_table(table, project_dir))
+    return libraries
+
+
+def search(query: str, limit: int = 20,
+           project_dir: Path | None = None) -> list[str]:
     """``Library:Footprint`` ids containing *query*, case-insensitively.
 
     Matching is on the id alone. Reading every footprint's description would
@@ -95,7 +106,7 @@ def search(query: str, limit: int = 20) -> list[str]:
     """
     needle = query.lower()
     out: list[str] = []
-    for nickname, folder in sorted(_libraries().items()):
+    for nickname, folder in sorted(_libraries(project_dir).items()):
         if not folder.is_dir():
             continue
         for file in sorted(folder.glob("*.kicad_mod")):
@@ -107,7 +118,7 @@ def search(query: str, limit: int = 20) -> list[str]:
     return out
 
 
-def load(fp_id: str) -> Node:
+def load(fp_id: str, project_dir: Path | None = None) -> Node:
     """Parse ``Library:Footprint`` and return its tree.
 
     Raises:
@@ -117,7 +128,7 @@ def load(fp_id: str) -> Node:
         raise LookupError(f"footprint id must be 'Library:Footprint', "
                           f"not {fp_id!r}")
     nickname, name = fp_id.split(":", 1)
-    folder = _libraries().get(nickname)
+    folder = _libraries(project_dir).get(nickname)
     if folder is None:
         raise LookupError(f"no footprint library {nickname!r}")
     file = folder / f"{name}.kicad_mod"

@@ -25,3 +25,5 @@ SCH_PRIMARY = {"schematic", "primary"}
 SCH_INSPECT = {"schematic", "inspect"}
 PCB_PRIMARY = {"pcb", "primary"}
 PCB_INSPECT = {"pcb", "inspect"}
+PARTS_PRIMARY = {"parts", "primary"}
+PARTS_INSPECT = {"parts", "inspect"}

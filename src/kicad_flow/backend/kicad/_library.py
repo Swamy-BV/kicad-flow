@@ -52,12 +52,50 @@ def _symbol_dirs_cached() -> tuple[Path, ...]:
     return tuple(dirs)
 
 
-def find_library(nickname: str) -> Path:
+def _project_symbol_libraries(project_dir: Path | None) -> dict[str, Path]:
+    """Resolve one project's ``sym-lib-table`` without changing global state."""
+    if project_dir is None:
+        return {}
+    table = project_dir / "sym-lib-table"
+    if not table.is_file():
+        return {}
+    try:
+        root = sexpr.loads(table.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    found: dict[str, Path] = {}
+    for entry in root.get_all("lib"):
+        name, uri = entry.get("name"), entry.get("uri")
+        if name is None or uri is None or len(name.items) < 2 or len(uri.items) < 2:
+            continue
+        value = str(uri.items[1]).replace("${KIPRJMOD}", str(project_dir))
+        found[str(name.items[1])] = Path(os.path.expandvars(value))
+    return found
+
+
+def symbol_libraries(project_dir: Path | None = None) -> dict[str, Path]:
+    """Map every visible symbol-library nickname to its source file."""
+    found: dict[str, Path] = {}
+    for directory in symbol_dirs():
+        for path in _libraries_in(directory):
+            found[path.stem] = path
+    found.update(_project_symbol_libraries(project_dir))
+    return found
+
+
+def find_library(nickname: str, project_dir: Path | None = None) -> Path:
     """Locate the ``<nickname>.kicad_sym`` file for a library nickname.
 
     Raises:
         FileNotFoundError: If no matching library file is found.
     """
+    project = _project_symbol_libraries(project_dir).get(nickname)
+    if project is not None:
+        if project.is_file():
+            return project
+        raise FileNotFoundError(
+            f"project symbol library {nickname!r} points to missing file {project}"
+        )
     return _find_library_cached(nickname, _symbol_dirs_cached())
 
 
@@ -292,7 +330,7 @@ def _load_library_tree(path_str: str) -> Node:
     return sexpr.loads(Path(path_str).read_text(encoding="utf-8"))
 
 
-def load_symbol(lib_id: str) -> LibrarySymbol:
+def load_symbol(lib_id: str, project_dir: Path | None = None) -> LibrarySymbol:
     """Load a symbol by its ``Library:Symbol`` id.
 
     The returned :class:`LibrarySymbol` is **shared**, not a private copy --
@@ -305,6 +343,7 @@ def load_symbol(lib_id: str) -> LibrarySymbol:
 
     Args:
         lib_id: e.g. ``"Device:R"`` or ``"power:GND"``.
+        project_dir: Optional project whose local ``sym-lib-table`` is visible.
 
     Returns:
         A shared :class:`LibrarySymbol` with the re-keyed definition and metadata.
@@ -314,17 +353,20 @@ def load_symbol(lib_id: str) -> LibrarySymbol:
         FileNotFoundError: If the library file is missing.
         KeyError: If the symbol (or an extended base) is not present.
     """
-    return _load_symbol_cached(lib_id, _symbol_dirs_cached())
+    if ":" not in lib_id:
+        raise ValueError(f"lib_id must be 'Library:Symbol', got {lib_id!r}")
+    nickname = lib_id.split(":", 1)[0]
+    return _load_symbol_cached(lib_id, str(find_library(nickname, project_dir)))
 
 
 @cache
-def _load_symbol_cached(lib_id: str, _dirs: tuple[Path, ...]) -> LibrarySymbol:
-    """Materialize a symbol for a fixed search path (cached; see load_symbol)."""
+def _load_symbol_cached(lib_id: str, library_path: str) -> LibrarySymbol:
+    """Materialize a symbol from one resolved library path."""
     if ":" not in lib_id:
         raise ValueError(f"lib_id must be 'Library:Symbol', got {lib_id!r}")
     nickname, symbol_name = lib_id.split(":", 1)
 
-    lib = _load_library_tree(str(find_library(nickname)))
+    lib = _load_library_tree(library_path)
     match = _find_symbol(lib, symbol_name)
     if match is None:
         raise KeyError(f"symbol {symbol_name!r} not found in library {nickname!r}")

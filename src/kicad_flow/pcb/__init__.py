@@ -22,18 +22,27 @@ from __future__ import annotations
 
 from .api import Board
 from .types import (
+    BoardLimits,
+    BoardRule,
     Connection,
+    Constraint,
     Finding,
     Footprint,
     FootprintDef,
     Net,
+    NetClass,
+    NetClassAssignment,
     NetPad,
     Pad,
     Point,
+    Stackup,
+    StackupLayer,
     Track,
     Via,
     Zone,
 )
 
-__all__ = ["Board", "Connection", "Finding", "Footprint", "FootprintDef",
-           "Net", "NetPad", "Pad", "Point", "Track", "Via", "Zone"]
+__all__ = ["Board", "BoardLimits", "BoardRule", "Connection", "Constraint", "Finding",
+           "Footprint", "FootprintDef", "Net", "NetClass",
+           "NetClassAssignment", "NetPad", "Pad", "Point", "Stackup",
+           "StackupLayer", "Track", "Via", "Zone"]

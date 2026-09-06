@@ -17,6 +17,8 @@ from __future__ import annotations
 from . import (  # noqa: F401  (register)
     tools_batch,
     tools_board,
+    tools_fabrication,
+    tools_parts,
     tools_schematic,
 )
 from ._app import mcp
@@ -30,11 +32,6 @@ mcp.add_middleware(ActivityMiddleware())
 # Put every change on disk as it happens, so the monitor has something
 # current to render. A sheet used to reach disk only on `save_sheet`,
 # which is why the preview sat still while a design was being built.
-mcp.add_middleware(AutosaveMiddleware())
-
-# Put every change on disk as it happens, so the monitor has something current
-# to render. A sheet used to reach disk only on `save_sheet`, which is why the
-# preview sat still while a design was being built.
 mcp.add_middleware(AutosaveMiddleware())
 
 
