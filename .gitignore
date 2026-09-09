@@ -1,0 +1,67 @@
+.venv/
+.venv-release/
+/build/
+/dist/
+out/
+__pycache__/
+*.egg-info/
+*.pyc
+*-erc.rpt
+*.kicad_prl
+fp-info-cache
+
+# Downloaded LCSC/JLC parts catalogue (defaults to ~/.kicad-flow/, but ignore
+# any copy that lands in the tree) and its partial downloads.
+*.sqlite3
+*.sqlite3.part
+.kicad-flow/
+
+# Generated manufacturing files (BOM / pick-and-place).
+*-bom.csv
+*-pos.csv
+*-cpl.csv
+
+# Runtime logs (freerouting, etc.) -- never commit these.
+logs/
+**/.history/
+
+# Rendered previews written during development
+*.png
+# ...except the example showcases, which are the point of examples/<name>/.
+# Regenerate with render.export_png on the built sheet; see the README.
+!examples/*/*.png
+
+# Rebuilt by the example scripts on every run (each rmtree-s its own folder
+# first). The script is the artefact; the folder is its output.
+
+# The board example rebuilds its output; only the render is worth keeping.
+
+# The LED example rebuilds its boards; the renders are the artefact.
+
+# The LED example rebuilds its boards; the renders are the artefact.
+# led_digits is 320 parts: 11 schematic pages and a board of generated
+# geometry. The board renders are what is worth reading; the rest is
+# rebuilt by the script in 23 seconds.
+examples/led_digits/*.kicad_pcb
+examples/led_digits/*.kicad_sch
+examples/led_digits/*.kicad_pro
+examples/led_digits/led_digits-[0-9]*.png
+!examples/led_digits/led_digits-3d.png
+examples/led_digits/kicad-flow-libraries/
+examples/led_digits/sym-lib-table
+examples/led_digits/fp-lib-table
+examples/led_digits/fixture_bundle.zip
+
+# The art-board source is generated; its renders are the reviewable artefacts.
+examples/art_board/*.kicad_pcb
+
+# Batman is rebuilt from its MCP-only example script.
+examples/batman/*.kicad_pcb
+examples/batman/*.kicad_sch
+examples/batman/*.kicad_pro
+
+# Keep the ESC root schematic preview and PCB views; child-page renders are
+# generated for inspection and do not belong in the showcase.
+examples/esc4in1/esc4in1-[2-9].png
+
+# The digits board rebuilds itself; its renders are the artefact.

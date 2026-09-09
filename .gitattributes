@@ -1,0 +1,7 @@
+# Shell scripts must keep LF endings or the shebang breaks on macOS/Linux.
+*.sh text eol=lf
+# Git hooks are shell scripts with no extension, so *.sh does not cover them --
+# and a CRLF hook fails with "bad interpreter" on a macOS/Linux clone.
+.githooks/* text eol=lf
+# PowerShell is fine either way; keep CRLF on Windows checkouts.
+*.ps1 text eol=crlf

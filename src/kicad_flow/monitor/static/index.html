@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kicad-flow live</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="main">
+  <div id="bar">
+    <button id="b2d" class="active">2D</button>
+    <button id="b3d" disabled title="3D view (boards only)">3D</button>
+    <span class="sep"></span>
+    <span id="zoomctl">
+      <button id="fit" title="Fit to view (double-click)">Fit</button>
+      <button id="zout" title="Zoom out" aria-label="Zoom out">&minus;</button>
+      <button id="zin" title="Zoom in" aria-label="Zoom in">+</button>
+      <span id="zoom">100%</span>
+    </span>
+    <span class="grow"></span>
+    <small id="hint">scroll to zoom &middot; drag to pan &middot; double-click to fit</small>
+    <button id="theme" title="Toggle light / dark">&#9789;</button>
+  </div>
+
+  <div id="view">
+    <div id="stage"><img id="img" alt="Preview of the active design" draggable="false"></div>
+    <div id="spin">rendering&hellip;</div>
+  </div>
+</div>
+
+<div id="side">
+  <div id="head">
+    <b>MCP activity</b>
+    <small id="active"></small>
+    <span class="grow"></span>
+    <button id="clear" title="Clear the activity feed and the preview">Clear</button>
+  </div>
+  <div class="filters">
+    <input id="q" type="search" placeholder="Filter by tool, argument or result&hellip;"
+           autocomplete="off" aria-label="Filter activity">
+    <button id="only-bad" title="Show failed calls only">Errors</button>
+    <span id="count" class="tally"></span>
+  </div>
+  <div id="feed" role="log" aria-live="polite" aria-label="MCP tool calls"></div>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

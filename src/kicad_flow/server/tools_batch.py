@@ -1,0 +1,129 @@
+"""Run a list of tool calls in one request.
+
+A design is mostly repetition -- 180 wires on a flight controller, 480 on ten
+LED digits -- and every one of those was a separate round trip. That is fine for
+a script and expensive for an agent, where a call is a conversational turn.
+
+This adds NO new capability. `batch` runs the same primitives, with the same
+arguments, and returns what each one returned; there is nothing you can express
+here that you could not express as N calls. It is a transport for mixing
+different operations. Repeatable writes already take typed lists.
+
+**Placement and wiring cannot go in the same request, and should not.** A wire
+is drawn to a coordinate that `add_components` returns, so the caller has to see
+the pins before it can compute the wire. Place everything, read the pins out of
+the reply, then draw everything.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Annotated, Any
+
+from pydantic import Field, ValidationError, validate_call
+
+from . import _meta, tools_board, tools_schematic
+from ._app import mcp
+from .activity import record_nested_tool
+
+
+def _registry() -> dict[str, Any]:
+    """Every primitive `batch` may call, by tool name.
+
+    Wrapped in :func:`~pydantic.validate_call`, because the arguments arriving
+    here are plain JSON. A tool that takes a list of models -- `add_wires`
+    takes `list[Segment]` -- was handed a list of dicts and failed with
+    ``'dict' object has no attribute 'x1'``. The direct path never saw this:
+    FastMCP coerces against the signature before calling. This does the same,
+    so the two paths agree.
+    """
+    out: dict[str, Any] = {}
+    for module in (tools_schematic, tools_board):
+        for name in module.__all__:
+            fn = getattr(module, name)
+            out[name] = validate_call(getattr(fn, "fn", fn))
+    return out
+
+
+@mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
+def batch(
+    ops: Annotated[list[dict[str, Any]], Field(
+        description="Calls to run in order, each "
+                    '`{"tool": "save_board", "args": {"path": ...}}`. '
+                    "Any schematic or board tool except `batch` itself.")],
+    stop_on_error: Annotated[bool, Field(
+        description="Stop at the first refusal (default), or run the rest and "
+                    "report every failure. Stop for a chain where a later call "
+                    "depends on an earlier one; continue for independent work "
+                    "you want a full report on.")] = True,
+) -> dict[str, Any]:
+    """Run several tool calls in one request, in order.
+
+    Same primitives, same arguments, same replies -- one round trip instead of
+    N. Repeatable writes already accept typed lists; use this when one request
+    needs several different, independent operations.
+
+    The activity log and monitor show each enclosed primitive under its own
+    tool name. The `batch` wrapper is transport only and is not shown when its
+    operations can be recorded individually.
+
+    **Two requests, not one.** `add_components` and `place_footprints` return the
+    pin and pad positions that later calls must aim at, so place first, read
+    the reply, then send the wires or tracks as a second typed list call. A wire
+    drawn to a coordinate you guessed instead of one the server reported looks
+    connected and is not.
+
+    Args:
+        ops: The calls, in order.
+        stop_on_error: Stop at the first refusal, or run everything and report.
+
+    Returns:
+        `results`, one entry per op that ran, in order -- each exactly what
+        that tool would have returned on its own. `failed` lists the index,
+        tool and error of every op that refused, so a failure is locatable
+        without matching replies up by hand.
+    """
+    known = _registry()
+    results: list[Any] = []
+    failed: list[dict[str, Any]] = []
+    for i, op in enumerate(ops):
+        if not isinstance(op, dict) or "tool" not in op:
+            error = 'each op needs a "tool" key and an "args" object'
+            failed.append({"index": i, "tool": "", "error": error})
+            record_nested_tool("invalid_batch_op", {},
+                               {"ok": False, "error": error}, 0.0)
+            if stop_on_error:
+                break
+            continue
+        name = str(op["tool"])
+        arguments = op.get("args") or {}
+        fn = known.get(name)
+        if fn is None:
+            error = f"no tool {name!r}" + (
+                " (batch cannot call itself)" if name == "batch" else ""
+            )
+            failed.append({"index": i, "tool": name, "error": error})
+            record_nested_tool(name, arguments,
+                               {"ok": False, "error": error}, 0.0)
+            if stop_on_error:
+                break
+            continue
+        start = time.perf_counter()
+        try:
+            got = fn(**arguments)
+        except (TypeError, ValidationError) as exc:   # wrong or missing args
+            got = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        record_nested_tool(
+            name, arguments, got, (time.perf_counter() - start) * 1000
+        )
+        results.append(got)
+        if isinstance(got, dict) and got.get("ok") is not True:
+            failed.append({"index": i, "tool": name,
+                           "error": got.get("error", "refused")})
+            if stop_on_error:
+                break
+    return {"ok": not failed, "count": len(ops), "ran": len(results),
+            "results": results, "failed": failed}
+
+
+__all__ = ["batch"]

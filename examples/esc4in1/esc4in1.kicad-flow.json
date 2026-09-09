@@ -1,0 +1,49 @@
+{
+  "fabrication_profile": {
+    "provider": "jlcpcb",
+    "selection": {
+      "board_type": "rigid_fr4",
+      "layers": 4,
+      "thickness": 1.6,
+      "material": "FR-4",
+      "outer_copper_oz": 2.0,
+      "inner_copper_oz": 1.0,
+      "finish": "ENIG",
+      "soldermask_color": "black",
+      "outline_process": "routed",
+      "impedance_control": false,
+      "tier": "recommended"
+    },
+    "limits": {
+      "min_clearance": 0.15,
+      "min_track_width": 0.15,
+      "min_via_diameter": 0.35,
+      "min_via_drill": 0.2,
+      "min_annular_width": 0.07499999999999998,
+      "min_hole_clearance": 0.2,
+      "min_hole_to_hole": 0.2,
+      "min_copper_edge_clearance": 0.2,
+      "min_silk_clearance": 0.15,
+      "min_text_height": 1.0,
+      "min_text_thickness": 0.15,
+      "min_groove_width": 1.0,
+      "solder_mask_to_copper_clearance": 0.09,
+      "min_solder_mask_bridge": 0.2
+    },
+    "minimum_size": [
+      3.0,
+      3.0
+    ],
+    "maximum_size": [
+      656.0,
+      586.0
+    ],
+    "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities/",
+    "retrieved_at": "2026-09-05",
+    "notes": [
+      "Through-vias only; blind and buried vias are not enabled.",
+      "The annular-width limit applies to vias. PTH/NPTH pad annular rings and plated-slot subtype checks need future hole APIs.",
+      "Impedance control records eligibility; select a published JLC stackup before claiming an impedance value."
+    ]
+  }
+}
