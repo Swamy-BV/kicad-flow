@@ -40,6 +40,9 @@
     ],
     "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities/",
     "retrieved_at": "2026-09-05",
+    "via_kinds": [
+      "through"
+    ],
     "notes": [
       "Through-vias only; blind and buried vias are not enabled.",
       "The annular-width limit applies to vias. PTH/NPTH pad annular rings and plated-slot subtype checks need future hole APIs.",

@@ -20,11 +20,14 @@ and are read too, but nothing here writes one.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import itertools
 import math
 import os
 import uuid as _uuid
+from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +35,9 @@ from kicad_flow.pcb.api import Board
 from kicad_flow.pcb.types import (
     BoardLimits,
     BoardRule,
+    ConnectedPad,
     Connection,
+    ConnectivityGroup,
     Finding,
     Footprint,
     FootprintDef,
@@ -40,6 +45,7 @@ from kicad_flow.pcb.types import (
     Net,
     NetClass,
     NetClassAssignment,
+    NetConnectivity,
     NetPad,
     Pad,
     PlacementEdge,
@@ -48,6 +54,7 @@ from kicad_flow.pcb.types import (
     PlacementOverlap,
     PlacementProposal,
     Point,
+    RouteMetric,
     Stackup,
     StackupLayer,
     Track,
@@ -86,11 +93,40 @@ _STACKUP_KINDS = {
     "Top Silk Screen", "Top Solder Paste", "Top Solder Mask",
     "Bottom Solder Mask", "Bottom Solder Paste", "Bottom Silk Screen",
 }
+_VIA_KINDS = {"through": "", "blind_buried": "blind", "microvia": "micro"}
+_ISLAND_MODES = {"always": 0, "never": 1, "area": 2}
+_ISLAND_MODES_BY_NUMBER = {value: key for key, value in _ISLAND_MODES.items()}
 
 
 def _uid() -> str:
     """A fresh UUID, as KiCad writes them."""
     return str(_uuid.uuid4())
+
+
+def _find_root(parents: list[int], index: int) -> int:
+    """Find one disjoint-set root while compressing its path."""
+    while parents[index] != index:
+        parents[index] = parents[parents[index]]
+        index = parents[index]
+    return index
+
+
+def _refresh_uuids(node: Node) -> None:
+    """Give every object in a copied library tree its own identity.
+
+    Library footprints carry stable UUIDs for their pads and graphics. Those
+    IDs identify the library definition; multiple placed instances cannot
+    reuse them. KiCad otherwise reports a real violation against an arbitrary
+    sibling instance sharing the child UUID, so its reference and coordinates
+    disagree with the geometry that actually failed.
+    """
+    for item in node.items:
+        if not isinstance(item, Node):
+            continue
+        if item.name in {"uuid", "tstamp"}:
+            item.items[1:] = [_uid()]
+        else:
+            _refresh_uuids(item)
 
 
 def _fmt(value: float) -> str:
@@ -563,6 +599,18 @@ class KiCadBoard(Board):
             raise
         return self._path
 
+    @contextlib.contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Rollback the in-memory board if a composed primitive write fails."""
+        tree = copy.deepcopy(self._tree)
+        definitions = copy.deepcopy(self._defs)
+        try:
+            yield
+        except Exception:
+            self._tree = tree
+            self._defs = definitions
+            raise
+
     def set_stackup(self, stackup: Stackup) -> Stackup:
         """Replace only the board's stackup, preserving all other setup."""
         if not stackup.layers:
@@ -830,7 +878,14 @@ class KiCadBoard(Board):
                 "max_error": max_error,
             })
         finally:
-            scratch.unlink(missing_ok=True)
+            for artifact in (
+                scratch,
+                scratch.with_suffix(".kicad_pro"),
+                scratch.with_suffix(".kicad_prl"),
+                scratch.with_suffix(".kicad_dru"),
+                Path(f"{scratch}-bak"),
+            ):
+                artifact.unlink(missing_ok=True)
         raw = result.get("points")
         if not isinstance(raw, list) or len(raw) < 3:
             raise ValueError("board outline did not produce a usable polygon")
@@ -952,7 +1007,9 @@ class KiCadBoard(Board):
             node, "at", [origin.x, origin.y, rotation % 360.0]
         )
         _turn_pads(node, rotation % 360.0)
-        self._set_child(node, "uuid", [_uid()])
+        _refresh_uuids(node)
+        if node.get("uuid") is None:
+            node.items.append(_node("uuid", [_uid()]))
         self._set_property(node, "Reference", ref)
         self._set_property(node, "Value", value or fp_id.split(":")[-1])
         for pad in node.get_all("pad"):
@@ -1369,10 +1426,20 @@ class KiCadBoard(Board):
 
     def via(self, x: float, y: float, *, net: str = "",
             diameter: float = 0.6, drill: float = 0.3,
-            layers: tuple[str, str] = ("F.Cu", "B.Cu")) -> Via:
-        """Drill a plated via joining *layers* and return it."""
+            layers: tuple[str, str] = ("F.Cu", "B.Cu"),
+            kind: str = "through") -> Via:
+        """Drill an explicitly typed plated via joining *layers*."""
+        if kind not in _VIA_KINDS:
+            raise ValueError(f"via kind must be one of {sorted(_VIA_KINDS)}")
+        if len(layers) != 2 or layers[0] == layers[1]:
+            raise ValueError("via layers must name two different copper layers")
         for name in layers:
             self._require_layer(name)
+        first, last = (self.layers.index(name) for name in layers)
+        if kind == "through" and {first, last} != {0, len(self.layers) - 1}:
+            raise ValueError("a through via must span F.Cu to B.Cu")
+        if kind == "microvia" and abs(first - last) != 1:
+            raise ValueError("a microvia must span adjacent copper layers")
         values = (float(x), float(y), float(diameter), float(drill))
         if not all(math.isfinite(value) for value in values):
             raise ValueError("via coordinates and dimensions must be finite")
@@ -1382,41 +1449,97 @@ class KiCadBoard(Board):
             raise ValueError("via drill must be smaller than its diameter")
         uid = _uid()
         made = Via(Point(float(x), float(y)), float(diameter), float(drill),
-                   net, layers, uid)
-        self._tree.items.append(_node("via", [
+                   net, layers, kind, uid)
+        items: list[Any] = [
             _node("at", [made.at.x, made.at.y]),
             _node("size", [made.diameter]),
             _node("drill", [made.drill]),
             _node("layers", list(layers)),
             _node("net", [net]),
             _node("uuid", [uid]),
-        ]))
+        ]
+        native_kind = _VIA_KINDS[kind]
+        if native_kind:
+            # KiCad stores the type as a bare token: ``(via blind ...)``.
+            items.insert(0, Sym(native_kind))
+        self._tree.items.append(_node("via", items))
         return made
 
     def zone(self, points: list[tuple[float, float]], *, layer: str,
-             net: str = "", clearance: float = 0.0,
+             net: str = "", clearance: float = 0.5,
+             pad_connection: str = "thermal",
+             min_thickness: float = 0.25, thermal_gap: float = 0.5,
+             thermal_spoke_width: float = 0.5, priority: int = 0,
+             island_removal: str = "always", min_island_area: float = 0.0,
              forbids: tuple[str, ...] = ()) -> Zone:
         """Pour copper inside *points* on *layer*, or fence a region off."""
         if len(points) < 3:
             raise ValueError("a zone needs at least 3 points")
         self._require_layer(layer)
-        made = Zone(net, layer, tuple(Point(float(x), float(y))
-                                      for x, y in points), False, forbids)
+        if pad_connection not in {"thermal", "solid", "none"}:
+            raise ValueError(
+                "pad_connection must be 'thermal', 'solid', or 'none'"
+            )
+        if island_removal not in _ISLAND_MODES:
+            raise ValueError(
+                f"island_removal must be one of {sorted(_ISLAND_MODES)}"
+            )
+        numeric = (clearance, min_thickness, thermal_gap,
+                   thermal_spoke_width, min_island_area)
+        if not all(math.isfinite(float(value)) for value in numeric):
+            raise ValueError("zone dimensions must be finite")
+        if clearance < 0 or min_island_area < 0:
+            raise ValueError(
+                "zone clearance and minimum island area cannot be negative"
+            )
+        if min_thickness <= 0 or thermal_gap <= 0 or thermal_spoke_width <= 0:
+            raise ValueError("zone thickness and thermal dimensions must be positive")
+        if priority < 0:
+            raise ValueError("zone priority cannot be negative")
+        uid = _uid()
+        made = Zone(
+            net=net,
+            layer=layer,
+            points=tuple(Point(float(x), float(y)) for x, y in points),
+            filled=False,
+            pad_connection=pad_connection,
+            clearance=float(clearance),
+            min_thickness=float(min_thickness),
+            thermal_gap=float(thermal_gap),
+            thermal_spoke_width=float(thermal_spoke_width),
+            priority=int(priority),
+            island_removal=island_removal,
+            min_island_area=float(min_island_area),
+            forbids=forbids,
+            uuid=uid,
+        )
         polygon = _node("polygon", [
             _node("pts", [_node("xy", [p.x, p.y]) for p in made.points])
         ])
         items: list[Any] = [
             _node("net", [net]),
             _node("layer", [layer]),
-            _node("uuid", [_uid()]),
+            _node("uuid", [uid]),
             _node("hatch", [Sym("edge"), 0.5]),
-            _node("connect_pads", [_node("clearance", [clearance or 0.5])]),
-            _node("min_thickness", [0.25]),
+            _node(
+                "connect_pads",
+                ([] if pad_connection == "thermal" else [
+                    Sym("yes" if pad_connection == "solid" else "no")
+                ]) + [_node("clearance", [clearance])],
+            ),
+            _node("min_thickness", [min_thickness]),
             _node("fill", [Sym("yes"),
-                           _node("thermal_gap", [0.5]),
-                           _node("thermal_bridge_width", [0.5])]),
+                           _node("thermal_gap", [thermal_gap]),
+                           _node("thermal_bridge_width", [thermal_spoke_width]),
+                           _node("island_removal_mode", [
+                               _ISLAND_MODES[island_removal]
+                           ]),
+                           *([_node("island_area_min", [min_island_area])]
+                             if island_removal == "area" else [])]),
             polygon,
         ]
+        if priority:
+            items.insert(3, _node("priority", [priority]))
         if forbids:
             allowed = {"tracks", "vias", "pads", "pours", "footprints"}
             bad = set(forbids) - allowed
@@ -1478,12 +1601,24 @@ class KiCadBoard(Board):
         return at
 
     def remove_copper(self, *, uuid: str = "", net: str = "", layer: str = "",
-                      tracks: bool = True, vias: bool = True) -> int:
+                      tracks: bool = True, vias: bool = True,
+                      zones: bool = False, all: bool = False) -> int:
         """Delete one UUID, or copper filtered by net and layer."""
+        if not uuid and not net and not layer and not all:
+            raise ValueError(
+                "select uuid, net or layer; use all=True to remove all selected kinds"
+            )
+        if all and (uuid or net or layer):
+            raise ValueError("all=True cannot be combined with selectors")
         if uuid and (net or layer):
             raise ValueError("uuid selection cannot be combined with net or layer")
-        kinds = ([("segment", "layer")] if tracks else []) + \
-                ([("via", "layers")] if vias else [])
+        kinds = (
+            [("segment", "layer"), ("via", "layers"), ("zone", "layer")]
+            if uuid else
+            ([("segment", "layer")] if tracks else [])
+            + ([("via", "layers")] if vias else [])
+            + ([("zone", "layer")] if zones else [])
+        )
         gone = 0
         for name, layer_key in kinds:
             for node in list(self._tree.get_all(name)):
@@ -1530,11 +1665,22 @@ class KiCadBoard(Board):
             at = node.get("at")
             layers = node.get("layers")
             names = [str(x) for x in (layers.items[1:] if layers else [])]
+            native_kind = (
+                str(node.items[1])
+                if len(node.items) > 1
+                and not isinstance(node.items[1], Node)
+                and str(node.items[1]) in {"blind", "micro"}
+                else ""
+            )
+            kind = {"blind": "blind_buried", "micro": "microvia"}.get(
+                native_kind, "through"
+            )
             out.append(Via(
                 Point(_f(at, 0), _f(at, 1)),
                 _f(node.get("size"), 0), _f(node.get("drill"), 0),
                 _net_name(node.get("net")),
                 (names[0], names[-1]) if names else ("F.Cu", "B.Cu"),
+                kind,
                 _text(node.get("uuid")),
             ))
         return out
@@ -1548,6 +1694,10 @@ class KiCadBoard(Board):
             points = tuple(Point(_f(xy, 0), _f(xy, 1))
                            for xy in (pts.get_all("xy") if pts else []))
             keepout = node.get("keepout")
+            connect = node.get("connect_pads")
+            fill = node.get("fill")
+            island_number = int(_f(fill.get("island_removal_mode"), 0)) \
+                if fill is not None and fill.get("island_removal_mode") else 0
             forbids = tuple(
                 name for name, key in (("tracks", "tracks"), ("vias", "vias"),
                                        ("pads", "pads"), ("pours", "copperpour"),
@@ -1556,8 +1706,39 @@ class KiCadBoard(Board):
                 and _text(keepout.get(key)) == "not_allowed"
             )
             out.append(Zone(
-                _net_name(node.get("net")), _text(node.get("layer")),
-                points, node.get("filled_polygon") is not None, forbids,
+                net=_net_name(node.get("net")),
+                layer=_text(node.get("layer")),
+                points=points,
+                filled=node.get("filled_polygon") is not None,
+                pad_connection={"yes": "solid", "no": "none"}.get(
+                    _text(connect), "thermal"
+                ),
+                clearance=(
+                    _f(connect.get("clearance"), 0)
+                    if connect is not None and connect.get("clearance") else 0.0
+                ),
+                min_thickness=_f(node.get("min_thickness"), 0),
+                thermal_gap=(
+                    _f(fill.get("thermal_gap"), 0)
+                    if fill is not None and fill.get("thermal_gap") else 0.0
+                ),
+                thermal_spoke_width=(
+                    _f(fill.get("thermal_bridge_width"), 0)
+                    if fill is not None and fill.get("thermal_bridge_width") else 0.0
+                ),
+                priority=(
+                    int(_f(node.get("priority"), 0))
+                    if node.get("priority") is not None else 0
+                ),
+                island_removal=_ISLAND_MODES_BY_NUMBER.get(
+                    island_number, "always"
+                ),
+                min_island_area=(
+                    _f(fill.get("island_area_min"), 0)
+                    if fill is not None and fill.get("island_area_min") else 0.0
+                ),
+                forbids=forbids,
+                uuid=_text(node.get("uuid")),
             ))
         return out
 
@@ -1572,91 +1753,217 @@ class KiCadBoard(Board):
         return [Net(name, tuple(pads))
                 for name, pads in sorted(found.items())]
 
-    def unrouted(self) -> list[Connection]:
-        """Every pair of pads on a net with no copper between them.
-
-        Connectivity is walked here rather than asked of KiCad: pads, track
-        ends and vias join when they share a point, and **a filled plane joins
-        everything of its own net that it covers**. That last one is not a
-        refinement -- without it a board whose power and ground are planes
-        reports every pad on them as unrouted, which on a 160-LED board was
-        25,760 connections that were all in fact copper.
-        """
-        out: list[Connection] = []
-        # One pass for every pad position, rather than a lookup per pair: the
-        # pairs are quadratic in the pads on a net and a plane net has
-        # hundreds of them.
-        where = {(f.ref, p.number): p.at
-                 for f in self.footprints() for p in f.pads}
+    def connectivity(self, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
+        """Return pad-bearing connected copper groups without selecting routes."""
+        wanted = set(nets)
+        where = {(part.ref, pad.number): pad
+                 for part in self.footprints() for pad in part.pads}
+        out: list[NetConnectivity] = []
         for net in self.nets():
-            if len(net.pads) < 2:
+            if wanted and net.name not in wanted:
                 continue
-            groups = self._groups_of(net.name)
-            index: dict[tuple[float, float], int] = {}
-            for n, group in enumerate(groups):
-                for point in group:
-                    index[point] = n
-            seen: set[tuple[str, str]] = set()
-            for i, a in enumerate(net.pads):
-                for b in net.pads[i + 1:]:
-                    pa = where[(a.ref, a.pad)]
-                    pb = where[(b.ref, b.pad)]
-                    ga = index.get((round(pa.x, 3), round(pa.y, 3)))
-                    gb = index.get((round(pb.x, 3), round(pb.y, 3)))
-                    if ga is not None and ga == gb:
-                        continue
-                    pair = (f"{a.ref}.{a.pad}", f"{b.ref}.{b.pad}")
-                    if pair in seen:
-                        continue
-                    seen.add(pair)
-                    out.append(Connection(
-                        net.name, a, b,
-                        math.dist((pa.x, pa.y), (pb.x, pb.y))))
+            copper_groups = self._groups_of(net.name)
+            node_group = {
+                node: index
+                for index, group in enumerate(copper_groups)
+                for node in group
+            }
+            grouped_pads: dict[int, list[ConnectedPad]] = {}
+            for item in net.pads:
+                pad = where[(item.ref, item.pad)]
+                indexes = {
+                    node_group[node]
+                    for layer in self._pad_copper_layers(pad)
+                    if (node := (
+                        round(pad.at.x, 3), round(pad.at.y, 3), layer
+                    )) in node_group
+                }
+                # _groups_of always creates nodes for net pads. Keep a guarded
+                # fallback so malformed imported boards remain inspectable.
+                index = min(indexes) if indexes else len(copper_groups)
+                grouped_pads.setdefault(index, []).append(ConnectedPad(
+                    item.ref, item.pad, pad.at, self._pad_copper_layers(pad)
+                ))
+
+            ordered = sorted(
+                grouped_pads.items(),
+                key=lambda item: min(
+                    (pad.ref, pad.pad) for pad in item[1]
+                ),
+            )
+            groups: list[ConnectivityGroup] = []
+            for public_index, (source_index, pads) in enumerate(ordered):
+                nodes = (
+                    copper_groups[source_index]
+                    if source_index < len(copper_groups) else set()
+                )
+                groups.append(ConnectivityGroup(
+                    index=public_index,
+                    pads=tuple(sorted(pads, key=lambda pad: (pad.ref, pad.pad))),
+                    layers=tuple(sorted({node[2] for node in nodes})),
+                    copper_nodes=len(nodes),
+                ))
+            out.append(NetConnectivity(net.name, tuple(groups)))
         return out
 
-    def _groups_of(self, net: str) -> list[set[tuple[float, float]]]:
-        """Points on *net* joined by copper, as connected groups."""
-        edges: list[tuple[tuple[float, float], tuple[float, float]]] = []
-        # A filled plane is copper. Everything of its own net inside its
-        # outline is joined to everything else, with no track between them.
+    def route_metrics(self, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
+        """Measure authored copper on each intended net."""
+        connectivity = {item.net: item for item in self.connectivity(nets)}
+        wanted = set(nets)
+        net_names = [net.name for net in self.nets()
+                     if not wanted or net.name in wanted]
+        pad_counts = {net.name: len(net.pads) for net in self.nets()}
+        tracks = self.tracks()
+        vias = self.vias()
+        out: list[RouteMetric] = []
+        for name in net_names:
+            net_tracks = [track for track in tracks if track.net == name]
+            by_layer: dict[str, float] = {}
+            for track in net_tracks:
+                length = math.dist(
+                    (track.start.x, track.start.y),
+                    (track.end.x, track.end.y),
+                )
+                by_layer[track.layer] = by_layer.get(track.layer, 0.0) + length
+            widths = [track.width for track in net_tracks]
+            out.append(RouteMetric(
+                net=name,
+                pad_count=pad_counts[name],
+                track_count=len(net_tracks),
+                track_length=sum(by_layer.values()),
+                length_by_layer=tuple(sorted(by_layer.items())),
+                via_count=sum(via.net == name for via in vias),
+                minimum_width=min(widths) if widths else None,
+                connected_groups=len(connectivity[name].groups),
+            ))
+        return out
+
+    def unrouted(self) -> list[Connection]:
+        """A minimum set of pad-group separations, nearest endpoints first.
+
+        Connected-component membership is factual. The nearest pad pair is a
+        distance measurement returned to identify each separation; it is not
+        a proposed track or a routing choice.
+        """
+        out: list[Connection] = []
+        for net in self.connectivity():
+            if len(net.groups) < 2:
+                continue
+            edges: list[tuple[float, int, int, ConnectedPad, ConnectedPad]] = []
+            for index, first in enumerate(net.groups):
+                for second in net.groups[index + 1:]:
+                    candidates = [
+                        (math.dist((a.at.x, a.at.y), (b.at.x, b.at.y)), a, b)
+                        for a in first.pads for b in second.pads
+                    ]
+                    distance, a, b = min(
+                        candidates,
+                        key=lambda item: (
+                            item[0], item[1].ref, item[1].pad,
+                            item[2].ref, item[2].pad,
+                        ),
+                    )
+                    edges.append((distance, first.index, second.index, a, b))
+
+            parent = list(range(len(net.groups)))
+
+            for distance, first_index, second_index, a, b in sorted(
+                edges,
+                key=lambda item: (
+                    item[0], item[3].ref, item[3].pad,
+                    item[4].ref, item[4].pad,
+                ),
+            ):
+                left = _find_root(parent, first_index)
+                right = _find_root(parent, second_index)
+                if left == right:
+                    continue
+                parent[left] = right
+                out.append(Connection(
+                    net.net, NetPad(a.ref, a.pad), NetPad(b.ref, b.pad), distance
+                ))
+        return out
+
+    def _pad_copper_layers(self, pad: Pad) -> tuple[str, ...]:
+        """Copper layers a pad actually reaches."""
+        if pad.kind == "pth" or "*.Cu" in pad.layers:
+            return self.layers
+        return tuple(layer for layer in pad.layers if layer in self.layers)
+
+    def _via_copper_layers(self, via: Via) -> tuple[str, ...]:
+        """Copper layers inside a via's declared span."""
+        try:
+            first = self.layers.index(via.layers[0])
+            last = self.layers.index(via.layers[-1])
+        except ValueError:
+            return ()
+        low, high = sorted((first, last))
+        return self.layers[low:high + 1]
+
+    def _groups_of(self, net: str) -> list[set[tuple[float, float, str]]]:
+        """Layer-aware copper nodes on *net*, grouped by connectivity."""
+        node = tuple[float, float, str]
+        edges: list[tuple[node, node]] = []
+        nodes: set[node] = set()
+
+        def key(point: Point, layer: str) -> node:
+            return (round(point.x, 3), round(point.y, 3), layer)
+
+        # A plated pad joins its layers internally. Coincident pads join only
+        # on a copper layer both can actually reach.
+        seen_at: dict[node, node] = {}
+        for part in self.footprints():
+            for pad in part.pads:
+                if pad.net != net:
+                    continue
+                pad_nodes = [key(pad.at, layer)
+                             for layer in self._pad_copper_layers(pad)]
+                nodes.update(pad_nodes)
+                for other in pad_nodes[1:]:
+                    edges.append((pad_nodes[0], other))
+                for pad_node in pad_nodes:
+                    if pad_node in seen_at:
+                        edges.append((seen_at[pad_node], pad_node))
+                    seen_at[pad_node] = pad_node
+
+        tracks = [track for track in self.tracks() if track.net == net]
+        for track in tracks:
+            start = key(track.start, track.layer)
+            end = key(track.end, track.layer)
+            nodes.update((start, end))
+            edges.append((start, end))
+        # Same-layer copper joins at crossings and T intersections even when
+        # neither caller supplied the intersection as an endpoint.
+        for index, first in enumerate(tracks):
+            for second in tracks[index + 1:]:
+                if first.layer == second.layer and _segments_intersect(
+                        first.start, first.end, second.start, second.end):
+                    edges.append((key(first.start, first.layer),
+                                  key(second.start, second.layer)))
+
+        for via in self.vias():
+            if via.net != net:
+                continue
+            via_nodes = [key(via.at, layer)
+                         for layer in self._via_copper_layers(via)]
+            nodes.update(via_nodes)
+            for other in via_nodes[1:]:
+                edges.append((via_nodes[0], other))
+
+        # A filled plane joins conductive objects on ITS layer only. An SMD
+        # pad on F.Cu does not reach an In1.Cu plane without a via.
         for zone in self.zones():
             if zone.net != net or not zone.filled or zone.forbids:
                 continue
-            poly = [(p.x, p.y) for p in zone.points]
-            inside: list[tuple[float, float]] = []
-            for part in self.footprints():
-                for pd in part.pads:
-                    if pd.net == net and _point_in_polygon(
-                            (pd.at.x, pd.at.y), poly):
-                        inside.append((round(pd.at.x, 3), round(pd.at.y, 3)))
-            for v in self.vias():
-                if v.net == net and _point_in_polygon((v.at.x, v.at.y), poly):
-                    inside.append((round(v.at.x, 3), round(v.at.y, 3)))
-            for point in inside[1:]:
-                edges.append((inside[0], point))
-        # Pads of one net that share a point are one point. A USB-C receptacle
-        # duplicates VBUS and GND across both rows at identical coordinates,
-        # and without this they are reported as needing 0.0 mm of track.
-        seen_at: dict[tuple[float, float], tuple[float, float]] = {}
-        for part in self.footprints():
-            for pd in part.pads:
-                if pd.net != net:
-                    continue
-                key = (round(pd.at.x, 3), round(pd.at.y, 3))
-                if key in seen_at:
-                    edges.append((seen_at[key], key))
-                seen_at[key] = key
-        for t in self.tracks():
-            if t.net == net:
-                edges.append(((round(t.start.x, 3), round(t.start.y, 3)),
-                              (round(t.end.x, 3), round(t.end.y, 3))))
-        for v in self.vias():
-            if v.net == net:
-                key = (round(v.at.x, 3), round(v.at.y, 3))
-                edges.append((key, key))
-        parent: dict[tuple[float, float], tuple[float, float]] = {}
+            poly = [(point.x, point.y) for point in zone.points]
+            inside = [item for item in nodes if item[2] == zone.layer
+                      and _point_in_polygon((item[0], item[1]), poly)]
+            for item in inside[1:]:
+                edges.append((inside[0], item))
 
-        def find(k: tuple[float, float]) -> tuple[float, float]:
+        parent: dict[node, node] = {item: item for item in nodes}
+
+        def find(k: node) -> node:
             parent.setdefault(k, k)
             while parent[k] != k:
                 parent[k] = parent[parent[k]]
@@ -1665,7 +1972,7 @@ class KiCadBoard(Board):
 
         for a, b in edges:
             parent[find(a)] = find(b)
-        groups: dict[tuple[float, float], set[tuple[float, float]]] = {}
+        groups: dict[node, set[node]] = {}
         for k in list(parent):
             groups.setdefault(find(k), set()).add(k)
         return list(groups.values())
@@ -1778,31 +2085,265 @@ class KiCadBoard(Board):
                                            ("", "")), at))
                 (ref, number), at = refs[0]
                 other = refs[1][0][0] if len(refs) > 1 else ""
+                first_uuid = str(items[0].get("uuid") or "")
+                other_uuid = (
+                    str(items[1].get("uuid") or "")
+                    if len(items) > 1 else ""
+                )
                 out.append(Finding(
                     severity=str(violation.get("severity", "error")),
                     kind=str(violation.get("type", kind)),
                     message=str(violation.get("description", "")),
                     ref=ref, pad=number, at=at, other_ref=other,
+                    uuid=first_uuid, other_uuid=other_uuid,
                 ))
         out.extend(self._routing_findings())
         return out
 
-    def at(self, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
-        """What is at a point: pads, track ends, vias and zones."""
-        def near(px: float, py: float) -> bool:
-            return abs(px - x) <= radius and abs(py - y) <= radius
+    def check_proposed(self, tracks: tuple[Track, ...] = (),
+                       vias: tuple[Via, ...] = (),
+                       zones: tuple[Zone, ...] = ()) -> list[Finding]:
+        """Check caller-supplied copper on a temporary board copy."""
+        scratch = self._path.with_name(
+            f".{self._path.stem}.route-check-{_uid()}{self._path.suffix}"
+        )
+        candidate = KiCadBoard(scratch, copy.deepcopy(self._tree))
+        inputs: dict[str, tuple[str, int]] = {}
+        try:
+            # A filled zone is cached copper, not merely a declaration. Loading
+            # a scratch board containing that stale fill plus newly proposed
+            # copper lets pcbnew build connectivity before the filler runs and
+            # can permanently reassign a proposed via to the plane net. Keep
+            # the zone rules, but discard cached geometry before adding copper.
+            for zone_node in candidate._tree.get_all("zone"):
+                zone_node.items[:] = [
+                    item
+                    for item in zone_node.items
+                    if not (
+                        isinstance(item, Node)
+                        and item.name in {"filled_polygon", "fill_segments"}
+                    )
+                ]
+            for index, track_item in enumerate(tracks):
+                made_track = candidate.track(
+                    track_item.start.x, track_item.start.y,
+                    track_item.end.x, track_item.end.y,
+                    layer=track_item.layer, width=track_item.width,
+                    net=track_item.net,
+                )
+                inputs[made_track.uuid] = ("tracks", index)
+            for index, via_item in enumerate(vias):
+                made_via = candidate.via(
+                    via_item.at.x, via_item.at.y, net=via_item.net,
+                    diameter=via_item.diameter, drill=via_item.drill,
+                    layers=via_item.layers, kind=via_item.kind,
+                )
+                inputs[made_via.uuid] = ("vias", index)
+            for index, zone_item in enumerate(zones):
+                made_zone = candidate.zone(
+                    [(point.x, point.y) for point in zone_item.points],
+                    layer=zone_item.layer,
+                    net=zone_item.net,
+                    clearance=zone_item.clearance,
+                    pad_connection=zone_item.pad_connection,
+                    min_thickness=zone_item.min_thickness,
+                    thermal_gap=zone_item.thermal_gap,
+                    thermal_spoke_width=zone_item.thermal_spoke_width,
+                    priority=zone_item.priority,
+                    island_removal=zone_item.island_removal,
+                    min_island_area=zone_item.min_island_area,
+                    forbids=zone_item.forbids,
+                )
+                inputs[made_zone.uuid] = ("zones", index)
+            if candidate.zones():
+                candidate.refill()
+            found = candidate.check()
+            attributed: list[Finding] = []
+            for finding in found:
+                first = inputs.get(finding.uuid)
+                second = inputs.get(finding.other_uuid)
+                attributed.append(replace(
+                    finding,
+                    input_kind=first[0] if first else "",
+                    input_index=first[1] if first else None,
+                    other_input_kind=second[0] if second else "",
+                    other_input_index=second[1] if second else None,
+                ))
+            return attributed
+        finally:
+            for artifact in (
+                scratch,
+                scratch.with_suffix(".kicad_pro"),
+                scratch.with_suffix(".kicad_prl"),
+                scratch.with_suffix(".kicad_dru"),
+                Path(f"{scratch}-bak"),
+            ):
+                artifact.unlink(missing_ok=True)
 
-        pads = [{"ref": f.ref, "pad": p.number, "net": p.net,
-                 "layers": list(p.layers)}
-                for f in self.footprints() for p in f.pads
-                if near(p.at.x, p.at.y)]
-        ends = [{"layer": t.layer, "net": t.net, "uuid": t.uuid}
-                for t in self.tracks()
-                if near(t.start.x, t.start.y) or near(t.end.x, t.end.y)]
-        vias = [v.as_dict() for v in self.vias() if near(v.at.x, v.at.y)]
-        return {"x": round(x, 3), "y": round(y, 3), "pads": pads,
-                "track_ends": ends, "vias": vias,
-                "connected": len(pads) + len(ends) + len(vias) > 1}
+    def at(self, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
+        """What geometrically touches a point, including track interiors."""
+        if radius < 0 or not all(math.isfinite(value)
+                                 for value in (x, y, radius)):
+            raise ValueError("point coordinates must be finite and radius non-negative")
+
+        def segment_distance(track: Track) -> float:
+            dx = track.end.x - track.start.x
+            dy = track.end.y - track.start.y
+            length_squared = dx * dx + dy * dy
+            if not length_squared:
+                return math.dist((x, y), (track.start.x, track.start.y))
+            position = max(0.0, min(1.0, (
+                (x - track.start.x) * dx + (y - track.start.y) * dy
+            ) / length_squared))
+            return math.dist(
+                (x, y),
+                (track.start.x + position * dx,
+                 track.start.y + position * dy),
+            )
+
+        pads = [
+            {"ref": footprint.ref, **pad.as_dict()}
+            for footprint in self.footprints() for pad in footprint.pads
+            if abs(pad.at.x - x) <= pad.size[0] / 2 + radius
+            and abs(pad.at.y - y) <= pad.size[1] / 2 + radius
+        ]
+        tracks = [
+            track.as_dict() for track in self.tracks()
+            if segment_distance(track) <= track.width / 2 + radius
+        ]
+        track_ends = [
+            {"layer": track.layer, "net": track.net, "uuid": track.uuid}
+            for track in self.tracks()
+            if math.dist((x, y), (track.start.x, track.start.y)) <= radius
+            or math.dist((x, y), (track.end.x, track.end.y)) <= radius
+        ]
+        vias = [
+            via.as_dict() for via in self.vias()
+            if math.dist((x, y), (via.at.x, via.at.y))
+            <= via.diameter / 2 + radius
+        ]
+        zones = [
+            {"uuid": zone.uuid, "net": zone.net, "layer": zone.layer,
+             "filled": zone.filled}
+            for zone in self.zones()
+            if _point_in_polygon((x, y), [(p.x, p.y) for p in zone.points])
+        ]
+        count = len(pads) + len(tracks) + len(vias) + len(zones)
+        return {"x": round(x, 3), "y": round(y, 3), "radius": radius,
+                "pads": pads, "tracks": tracks, "vias": vias, "zones": zones,
+                "track_ends": track_ends,
+                "connected": count > 1}
+
+    def region(self, x1: float, y1: float, x2: float, y2: float, *,
+               layers: tuple[str, ...] = ()) -> dict[str, object]:
+        """Return objects whose conservative bounds intersect a rectangle."""
+        if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+            raise ValueError("region coordinates must be finite")
+        left, right = sorted((float(x1), float(x2)))
+        top, bottom = sorted((float(y1), float(y2)))
+        wanted = set(layers)
+        unknown = wanted - set(self.layers) - set(_GRAPHIC_LAYERS)
+        if unknown:
+            raise ValueError(
+                f"unknown region layers {sorted(unknown)}; board copper is "
+                f"{list(self.layers)} and graphics are {list(_GRAPHIC_LAYERS)}"
+            )
+
+        def intersects(bounds: tuple[float, float, float, float]) -> bool:
+            bx1, by1, bx2, by2 = bounds
+            return not (bx2 < left or bx1 > right or by2 < top or by1 > bottom)
+
+        footprints = []
+        pads = []
+        for footprint in self.footprints():
+            if not wanted or f"{footprint.side}.Cu" in wanted:
+                polygon = footprint.courtyard_polygon
+                bounds = (
+                    min(point.x for point in polygon),
+                    min(point.y for point in polygon),
+                    max(point.x for point in polygon),
+                    max(point.y for point in polygon),
+                )
+                if intersects(bounds):
+                    footprints.append({
+                        "ref": footprint.ref,
+                        "side": footprint.side,
+                        "courtyard_polygon": [
+                            point.as_dict() for point in polygon
+                        ],
+                    })
+            for pad in footprint.pads:
+                pad_layers = set(self._pad_copper_layers(pad))
+                if wanted and not wanted.intersection(pad_layers):
+                    continue
+                half = max(pad.size) / 2
+                if intersects((pad.at.x - half, pad.at.y - half,
+                               pad.at.x + half, pad.at.y + half)):
+                    pads.append({"ref": footprint.ref, **pad.as_dict()})
+
+        tracks = []
+        for track in self.tracks():
+            if wanted and track.layer not in wanted:
+                continue
+            half = track.width / 2
+            if intersects((min(track.start.x, track.end.x) - half,
+                           min(track.start.y, track.end.y) - half,
+                           max(track.start.x, track.end.x) + half,
+                           max(track.start.y, track.end.y) + half)):
+                tracks.append(track.as_dict())
+
+        vias = []
+        for via in self.vias():
+            if wanted and not wanted.intersection(self._via_copper_layers(via)):
+                continue
+            half = via.diameter / 2
+            if intersects((via.at.x - half, via.at.y - half,
+                           via.at.x + half, via.at.y + half)):
+                vias.append(via.as_dict())
+
+        zones = []
+        for zone in self.zones():
+            if wanted and zone.layer not in wanted:
+                continue
+            xs = [point.x for point in zone.points]
+            ys = [point.y for point in zone.points]
+            if xs and intersects((min(xs), min(ys), max(xs), max(ys))):
+                zones.append(zone.as_dict())
+
+        graphics = []
+        for graphic in self.graphics():
+            if wanted and graphic.layer not in wanted:
+                continue
+            points = (
+                _arc_extrema(graphic.points)
+                if graphic.kind == "arc" else list(graphic.points)
+            )
+            if graphic.kind == "circle":
+                centre, rim = graphic.points
+                circle_radius = math.dist(
+                    (centre.x, centre.y), (rim.x, rim.y)
+                )
+                bounds = (centre.x - circle_radius, centre.y - circle_radius,
+                          centre.x + circle_radius, centre.y + circle_radius)
+            else:
+                bounds = (min(point.x for point in points),
+                          min(point.y for point in points),
+                          max(point.x for point in points),
+                          max(point.y for point in points))
+            if intersects(bounds):
+                graphics.append(graphic.as_dict())
+
+        return {
+            "bounds": {"x1": left, "y1": top, "x2": right, "y2": bottom},
+            "layers": list(layers),
+            "selection": "bounds_intersect",
+            "footprints": footprints,
+            "pads": pads,
+            "tracks": tracks,
+            "vias": vias,
+            "zones": zones,
+            "graphics": graphics,
+        }
 
     def render(self, output_file: str | Path, *, side: str = "top",
                width: int = 1200, height: int = 1200,

@@ -24,7 +24,9 @@ from .api import Board
 from .types import (
     BoardLimits,
     BoardRule,
+    ConnectedPad,
     Connection,
+    ConnectivityGroup,
     Constraint,
     Finding,
     Footprint,
@@ -32,6 +34,7 @@ from .types import (
     Net,
     NetClass,
     NetClassAssignment,
+    NetConnectivity,
     NetPad,
     Pad,
     PlacementEdge,
@@ -40,6 +43,7 @@ from .types import (
     PlacementOverlap,
     PlacementProposal,
     Point,
+    RouteMetric,
     Stackup,
     StackupLayer,
     Track,
@@ -47,9 +51,12 @@ from .types import (
     Zone,
 )
 
-__all__ = ["Board", "BoardLimits", "BoardRule", "Connection", "Constraint", "Finding",
+__all__ = ["Board", "BoardLimits", "BoardRule", "ConnectedPad", "Connection",
+           "ConnectivityGroup", "Constraint", "Finding",
            "Footprint", "FootprintDef", "Net", "NetClass",
-           "NetClassAssignment", "NetPad", "Pad", "PlacementEdge",
+           "NetClassAssignment", "NetConnectivity", "NetPad", "Pad",
+           "PlacementEdge",
            "PlacementMeasurement", "PlacementNetLength", "PlacementOverlap",
-           "PlacementProposal", "Point", "Stackup", "StackupLayer", "Track",
+           "PlacementProposal", "Point", "RouteMetric", "Stackup",
+           "StackupLayer", "Track",
            "Via", "Zone"]

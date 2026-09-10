@@ -303,6 +303,7 @@ class Via:
     drill: float
     net: str = ""
     layers: tuple[str, str] = ("F.Cu", "B.Cu")
+    kind: str = "through"
     uuid: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -310,6 +311,7 @@ class Via:
         return {"x": round(self.at.x, 3), "y": round(self.at.y, 3),
                 "diameter": self.diameter, "drill": self.drill,
                 "net": self.net, "layers": list(self.layers),
+                "kind": self.kind,
                 "uuid": self.uuid}
 
 
@@ -321,15 +323,113 @@ class Zone:
     layer: str
     points: tuple[Point, ...]
     filled: bool = False
+    #: How same-net pads join the pour: thermal spokes, solid copper, or not.
+    pad_connection: str = "thermal"
+    clearance: float = 0.5
+    min_thickness: float = 0.25
+    thermal_gap: float = 0.5
+    thermal_spoke_width: float = 0.5
+    priority: int = 0
+    island_removal: str = "always"
+    min_island_area: float = 0.0
     #: What the pour refuses to contain, for a keep-out: ``tracks``, ``vias``,
     #: ``pads``, ``pours``, ``footprints``. Empty for an ordinary pour.
     forbids: tuple[str, ...] = ()
+    uuid: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """The zone as JSON."""
         return {"net": self.net, "layer": self.layer, "filled": self.filled,
+                "pad_connection": self.pad_connection,
+                "clearance": self.clearance,
+                "min_thickness": self.min_thickness,
+                "thermal_gap": self.thermal_gap,
+                "thermal_spoke_width": self.thermal_spoke_width,
+                "priority": self.priority,
+                "island_removal": self.island_removal,
+                "min_island_area": self.min_island_area,
                 "forbids": list(self.forbids),
+                "uuid": self.uuid,
                 "points": [p.as_dict() for p in self.points]}
+
+
+@dataclass(frozen=True)
+class ConnectedPad:
+    """One pad and its factual membership in a connected copper group."""
+
+    ref: str
+    pad: str
+    at: Point
+    layers: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the pad identity, position and reachable copper layers."""
+        return {"ref": self.ref, "pad": self.pad, **self.at.as_dict(),
+                "layers": list(self.layers)}
+
+
+@dataclass(frozen=True)
+class ConnectivityGroup:
+    """Pads already joined by copper on one net."""
+
+    index: int
+    pads: tuple[ConnectedPad, ...]
+    layers: tuple[str, ...]
+    copper_nodes: int
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return this group without choosing how another group should join."""
+        return {"index": self.index, "pad_count": len(self.pads),
+                "pads": [pad.as_dict() for pad in self.pads],
+                "layers": list(self.layers),
+                "copper_nodes": self.copper_nodes}
+
+
+@dataclass(frozen=True)
+class NetConnectivity:
+    """Every disconnected pad-bearing copper group on one intended net."""
+
+    net: str
+    groups: tuple[ConnectivityGroup, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return raw group membership; no route between groups is selected."""
+        return {"net": self.net, "complete": len(self.groups) <= 1,
+                "group_count": len(self.groups),
+                "groups": [group.as_dict() for group in self.groups]}
+
+
+@dataclass(frozen=True)
+class RouteMetric:
+    """Direct measurements of authored copper on one net."""
+
+    net: str
+    pad_count: int
+    track_count: int
+    track_length: float
+    length_by_layer: tuple[tuple[str, float], ...]
+    via_count: int
+    minimum_width: float | None
+    connected_groups: int
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return lengths in millimetres and counts without a quality score."""
+        return {
+            "net": self.net,
+            "pad_count": self.pad_count,
+            "track_count": self.track_count,
+            "track_length": round(self.track_length, 3),
+            "length_by_layer": {
+                layer: round(length, 3) for layer, length in self.length_by_layer
+            },
+            "via_count": self.via_count,
+            "minimum_width": (
+                None if self.minimum_width is None
+                else round(self.minimum_width, 3)
+            ),
+            "connected_groups": self.connected_groups,
+            "complete": self.connected_groups <= 1,
+        }
 
 
 @dataclass(frozen=True)
@@ -562,6 +662,11 @@ class Finding:
     #: Stable copper identities make a routing finding directly repairable.
     uuid: str = ""
     other_uuid: str = ""
+    #: Candidate-list attribution, present only for a non-mutating check.
+    input_kind: str = ""
+    input_index: int | None = None
+    other_input_kind: str = ""
+    other_input_index: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The finding as JSON."""
@@ -571,16 +676,24 @@ class Finding:
                             ("layer", self.layer),
                             ("other_ref", self.other_ref),
                             ("uuid", self.uuid),
-                            ("other_uuid", self.other_uuid)):
+                            ("other_uuid", self.other_uuid),
+                            ("input_kind", self.input_kind),
+                            ("other_input_kind", self.other_input_kind)):
             if value:
                 out[name] = value
+        if self.input_index is not None:
+            out["input_index"] = self.input_index
+        if self.other_input_index is not None:
+            out["other_input_index"] = self.other_input_index
         if self.at is not None:
             out.update(self.at.as_dict())
         return out
 
 
-__all__ = ["BoardRule", "Connection", "Constraint", "Finding", "Footprint",
-           "FootprintDef", "Net", "NetClass", "NetClassAssignment", "NetPad",
+__all__ = ["BoardRule", "ConnectedPad", "Connection", "ConnectivityGroup",
+           "Constraint", "Finding", "Footprint", "FootprintDef", "Net",
+           "NetClass", "NetClassAssignment", "NetConnectivity", "NetPad",
            "Pad", "PlacementEdge", "PlacementMeasurement",
            "PlacementNetLength", "PlacementOverlap", "PlacementProposal",
-           "Point", "Stackup", "StackupLayer", "Track", "Via", "Zone"]
+           "Point", "RouteMetric", "Stackup", "StackupLayer", "Track", "Via",
+           "Zone"]

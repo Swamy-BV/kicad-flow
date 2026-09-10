@@ -103,6 +103,64 @@ class Part:
 
 
 @dataclass(frozen=True)
+class PartPlacement:
+    """One caller-decided symbol pose to inspect without placing it."""
+
+    lib_id: str
+    ref: str
+    at: Point
+    value: str = ""
+    rotation: float = 0.0
+    mirror: str = ""
+    unit: int = 1
+
+
+@dataclass(frozen=True)
+class PlacementBounds:
+    """Axis-aligned sheet bounds for one predicted visible object."""
+
+    name: str
+    kind: str
+    ref: str
+    unit: int
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    def as_dict(self) -> dict[str, Any]:
+        """The visible extent as JSON."""
+        return {"name": self.name, "kind": self.kind, "ref": self.ref,
+                "unit": self.unit, "left": round(self.left, 3),
+                "top": round(self.top, 3), "right": round(self.right, 3),
+                "bottom": round(self.bottom, 3)}
+
+
+@dataclass(frozen=True)
+class PlacementMeasurement:
+    """Facts about a proposed placement, computed without changing the sheet."""
+
+    parts: tuple[Part, ...]
+    bounds: tuple[PlacementBounds, ...]
+    findings: tuple[LayoutFinding, ...]
+    page_size: tuple[float, float]
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete non-mutating measurement as JSON."""
+        overlap_count = sum(1 for item in self.findings
+                            if item.kind.endswith("_overlap"))
+        page_violation_count = sum(1 for item in self.findings
+                                   if item.kind == "page_bounds")
+        return {"clean": not self.findings, "part_count": len(self.parts),
+                "parts": [part.as_dict() for part in self.parts],
+                "bounds": [item.as_dict() for item in self.bounds],
+                "overlap_count": overlap_count,
+                "page_violation_count": page_violation_count,
+                "page_size": [self.page_size[0], self.page_size[1]],
+                "findings": [item.as_dict() for item in self.findings]}
+
+
+@dataclass(frozen=True)
 class SymbolDef:
     """What a library symbol offers, before it is placed anywhere.
 
@@ -266,4 +324,5 @@ class SheetRef:
 
 
 __all__ = ["Finding", "Label", "LayoutFinding", "Net", "NetPin", "Part",
-           "Pin", "Point", "SheetRef", "SymbolDef"]
+           "PartPlacement", "Pin", "PlacementBounds", "PlacementMeasurement",
+           "Point", "SheetRef", "SymbolDef"]

@@ -25,9 +25,21 @@ where they should be.**
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 from pathlib import Path
 
-from .types import Finding, Label, LayoutFinding, Net, Part, Point, SheetRef, SymbolDef
+from .types import (
+    Finding,
+    Label,
+    LayoutFinding,
+    Net,
+    Part,
+    PartPlacement,
+    PlacementMeasurement,
+    Point,
+    SheetRef,
+    SymbolDef,
+)
 
 #: KiCad's schematic grid. Every position a caller gives is snapped to it,
 #: because a wire end and a pin that differ by a fraction of a millimetre are
@@ -103,6 +115,14 @@ class Sheet(ABC):
         unsavable.
         """
 
+    @abstractmethod
+    def transaction(self) -> AbstractContextManager[None]:
+        """Rollback every in-memory mutation if a composed write fails.
+
+        This is backend bookkeeping used to make one plural API call atomic.
+        It is not a user-visible undo stack and it makes no design decision.
+        """
+
     # -- the library ------------------------------------------------------
 
     @abstractmethod
@@ -148,6 +168,17 @@ class Sheet(ABC):
             LookupError: If no library supplies *lib_id*.
             ValueError: If that unit of *ref* is already placed, or if
                 *rotation* is not a quarter turn.
+        """
+
+    @abstractmethod
+    def measure_placement(
+        self, placements: tuple[PartPlacement, ...]
+    ) -> PlacementMeasurement:
+        """Measure explicit proposed poses without changing the sheet.
+
+        The caller supplies every coordinate, rotation and mirror. The result
+        reports transformed pins, symbol and visible-field bounds, overlaps,
+        and page-boundary violations. It never chooses or repairs a pose.
         """
 
     @abstractmethod
