@@ -16,6 +16,7 @@ small calls rather than a re-parse each time. `save_board` writes.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -46,7 +47,7 @@ _OPEN: dict[str, Board] = {}
 
 def _key(path: str) -> str:
     """The dictionary key for a board path."""
-    return str(Path(path).resolve())
+    return os.path.normcase(str(Path(path).resolve()))
 
 
 def _board(path: str) -> Board:

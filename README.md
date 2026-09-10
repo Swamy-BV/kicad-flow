@@ -54,6 +54,8 @@ python -m venv .venv
 | HTTP | `.\.venv\Scripts\python.exe -m kicad_flow.server --http` | `http://127.0.0.1:8471/mcp` |
 
 Use stdio for desktop clients. Run with `--help` for server options.
+Add `--tool-search` to discover tool schemas on demand. See
+[execution and discovery](docs/mcp-execution.md) for behavior and benchmarks.
 
 The live monitor at `http://127.0.0.1:8472` shows the active design and tool calls.
 Set `KICAD_FLOW_MONITOR=0` to disable it, or use another port number.

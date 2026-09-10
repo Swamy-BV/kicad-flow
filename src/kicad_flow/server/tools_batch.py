@@ -17,36 +17,20 @@ the reply, then draw everything.
 
 from __future__ import annotations
 
-import time
 from typing import Annotated, Any
 
-from pydantic import Field, ValidationError, validate_call
+from fastmcp import Context
+from fastmcp.exceptions import DisabledError, FastMCPError, NotFoundError
+from pydantic import Field, ValidationError
 
 from . import _meta, tools_board, tools_schematic
 from ._app import mcp
 from .activity import record_nested_tool
 
 
-def _registry() -> dict[str, Any]:
-    """Every primitive `batch` may call, by tool name.
-
-    Wrapped in :func:`~pydantic.validate_call`, because the arguments arriving
-    here are plain JSON. A tool that takes a list of models -- `add_wires`
-    takes `list[Segment]` -- was handed a list of dicts and failed with
-    ``'dict' object has no attribute 'x1'``. The direct path never saw this:
-    FastMCP coerces against the signature before calling. This does the same,
-    so the two paths agree.
-    """
-    out: dict[str, Any] = {}
-    for module in (tools_schematic, tools_board):
-        for name in module.__all__:
-            fn = getattr(module, name)
-            out[name] = validate_call(getattr(fn, "fn", fn))
-    return out
-
-
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def batch(
+async def batch(
+    ctx: Context,
     ops: Annotated[list[dict[str, Any]], Field(
         description="Calls to run in order, each "
                     '`{"tool": "save_board", "args": {"path": ...}}`. '
@@ -74,6 +58,7 @@ def batch(
     connected and is not.
 
     Args:
+        ctx: MCP request context, injected by the server.
         ops: The calls, in order.
         stop_on_error: Stop at the first refusal, or run everything and report.
 
@@ -83,7 +68,8 @@ def batch(
         tool and error of every op that refused, so a failure is locatable
         without matching replies up by hand.
     """
-    known = _registry()
+    known = set(tools_schematic.__all__) | set(tools_board.__all__)
+    await ctx.report_progress(0, len(ops), "Starting batch")
     results: list[Any] = []
     failed: list[dict[str, Any]] = []
     for i, op in enumerate(ops):
@@ -92,30 +78,38 @@ def batch(
             failed.append({"index": i, "tool": "", "error": error})
             record_nested_tool("invalid_batch_op", {},
                                {"ok": False, "error": error}, 0.0)
+            await ctx.report_progress(i + 1, len(ops), f"Rejected operation {i + 1}")
             if stop_on_error:
                 break
             continue
         name = str(op["tool"])
-        arguments = op.get("args") or {}
-        fn = known.get(name)
-        if fn is None:
+        arguments = op.get("args", {})
+        if not isinstance(arguments, dict):
+            error = 'each op needs an "args" object'
+            failed.append({"index": i, "tool": name, "error": error})
+            record_nested_tool(name, {}, {"ok": False, "error": error}, 0.0)
+            await ctx.report_progress(i + 1, len(ops), f"Rejected operation {i + 1}")
+            if stop_on_error:
+                break
+            continue
+        if name not in known:
             error = f"no tool {name!r}" + (
                 " (batch cannot call itself)" if name == "batch" else ""
             )
             failed.append({"index": i, "tool": name, "error": error})
             record_nested_tool(name, arguments,
                                {"ok": False, "error": error}, 0.0)
+            await ctx.report_progress(i + 1, len(ops), f"Rejected operation {i + 1}")
             if stop_on_error:
                 break
             continue
-        start = time.perf_counter()
         try:
-            got = fn(**arguments)
-        except (TypeError, ValidationError) as exc:   # wrong or missing args
+            result = await mcp.call_tool(name, arguments)
+            got = result.structured_content
+        except (TypeError, ValidationError, FastMCPError,
+                NotFoundError, DisabledError) as exc:
             got = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        record_nested_tool(
-            name, arguments, got, (time.perf_counter() - start) * 1000
-        )
+        await ctx.report_progress(i + 1, len(ops), f"Finished operation {i + 1}")
         results.append(got)
         if isinstance(got, dict) and got.get("ok") is not True:
             failed.append({"index": i, "tool": name,

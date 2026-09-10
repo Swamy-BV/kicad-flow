@@ -24,6 +24,11 @@ from . import (  # noqa: F401  (register)
 from ._app import mcp
 from .activity import ActivityMiddleware
 from .autosave import AutosaveMiddleware
+from .execution import DesignAccessMiddleware, ProgressMiddleware
+
+# The first middleware is outermost: protect execution AND its autosave.
+mcp.add_middleware(DesignAccessMiddleware())
+mcp.add_middleware(ProgressMiddleware())
 
 # Log every tool call to the activity JSONL so the live monitor can show what
 # the agent is doing (best-effort; a logging failure never affects a tool call).
@@ -105,6 +110,8 @@ def main() -> None:
     )
     ap.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
     ap.add_argument("--port", type=int, default=8471, help="HTTP port (with --http)")
+    ap.add_argument("--tool-search", action="store_true",
+                    help="expose tools through on-demand search (opt-in)")
     args = ap.parse_args()
 
     if args.command == "doctor":
@@ -116,6 +123,10 @@ def main() -> None:
             raise SystemExit(1)
         return
 
+    if args.tool_search:
+        from fastmcp.server.transforms.search import RegexSearchTransform
+
+        mcp.add_transform(RegexSearchTransform(max_results=8))
     _maybe_start_monitor()
     try:
         if args.http:

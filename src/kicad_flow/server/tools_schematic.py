@@ -10,6 +10,7 @@ sequence of small calls rather than a re-parse each time. `save_sheet` writes.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,7 +29,7 @@ _OPEN: dict[str, Sheet] = {}
 
 def _key(path: str) -> str:
     """The dictionary key for a sheet path."""
-    return str(Path(path).resolve())
+    return os.path.normcase(str(Path(path).resolve()))
 
 
 def _sheet(path: str) -> Sheet:

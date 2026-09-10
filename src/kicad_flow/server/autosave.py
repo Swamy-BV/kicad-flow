@@ -33,7 +33,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 #: Tool-name prefixes that change a design. `save_*` is excluded because it
 #: has just written; `check_`, `get_`, `list_`, `find_` and `what_` read.
 _WRITES = ("add_", "move_", "remove_", "rotate_", "mirror_", "set_", "place_",
-           "flip_", "refill_", "new_", "batch")
+           "flip_", "refill_", "new_")
 
 
 def _enabled() -> bool:

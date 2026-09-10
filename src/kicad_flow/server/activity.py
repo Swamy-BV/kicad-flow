@@ -236,7 +236,10 @@ class ActivityMiddleware(Middleware):
             self._record(tool, argv, child_ok, child_error, _digest(result),
                          elapsed_ms)
 
-        token = _NESTED_LOGGER.set(log_nested) if name == "batch" else None
+        parent_logger = _NESTED_LOGGER.get()
+        wrapper = name in {"batch", "call_tool"}
+        token = (_NESTED_LOGGER.set(log_nested)
+                 if wrapper and parent_logger is None else None)
         try:
             result = await call_next(context)
             ok, error, digest = _outcome(result)
@@ -249,11 +252,13 @@ class ActivityMiddleware(Middleware):
                 _NESTED_LOGGER.reset(token)
             # A non-empty batch has already emitted the actual primitives.
             # Keep its wrapper only when nothing inside could be recorded.
-            if name != "batch" or nested[0] == 0:
-                self._record(
-                    name, arguments, ok, error, digest,
-                    (time.perf_counter() - start) * 1000,
-                )
+            if not wrapper or (parent_logger is None and nested[0] == 0):
+                elapsed = (time.perf_counter() - start) * 1000
+                if parent_logger is not None:
+                    parent_logger(name, arguments or {},
+                                  {"ok": ok, "error": error, **digest}, elapsed)
+                else:
+                    self._record(name, arguments, ok, error, digest, elapsed)
 
     def _record(self, name: str, arguments: dict[str, Any] | None, ok: bool,
                 error: str, digest: dict[str, Any], elapsed_ms: float) -> None:
