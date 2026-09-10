@@ -35,6 +35,8 @@ from kicad_flow.schematic.types import (
     PlacementBounds,
     PlacementMeasurement,
     Point,
+    SceneBounds,
+    SceneSnapshot,
     SheetRef,
     SymbolDef,
 )
@@ -1384,6 +1386,13 @@ class KiCadSheet(Sheet):
         return at
 
     # -- reading back -----------------------------------------------------
+
+    def scene(self, region: SceneBounds | None = None, *,
+              max_objects: int = 2000) -> SceneSnapshot:
+        """Return spatial objects and conservative bounds without rendering."""
+        from .scene import snapshot
+
+        return snapshot(self, region, max_objects=max_objects)
 
     def wires(self) -> list[tuple[Point, Point]]:
         """Every wire segment on the sheet."""

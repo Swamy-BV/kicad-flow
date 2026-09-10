@@ -27,11 +27,16 @@ from .types import (
     PlacementBounds,
     PlacementMeasurement,
     Point,
+    SceneBounds,
+    SceneFinding,
+    SceneObject,
+    SceneSnapshot,
     SheetRef,
     SymbolDef,
 )
 
 __all__ = ["GRID", "Finding", "Label", "LayoutFinding", "Net", "NetPin",
            "Part", "PartPlacement", "Pin", "PlacementBounds",
-           "PlacementMeasurement", "Point", "Sheet", "SheetRef", "SymbolDef",
+           "PlacementMeasurement", "Point", "SceneBounds", "SceneFinding",
+           "SceneObject", "SceneSnapshot", "Sheet", "SheetRef", "SymbolDef",
            "snap"]

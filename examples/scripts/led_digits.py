@@ -532,6 +532,13 @@ async def build(client: Client) -> int:
 
     # (a) the board's own inventory
     fps = await call("list_footprints", path=board)
+    # Inspect the existing hierarchy without changing the fixture's drawing.
+    scene = await call("inspect_schematic_scene", path=root)
+    same("scene child boxes", sum(obj["kind"] == "sheet"
+                                  for obj in scene.get("objects", [])), len(DIGITS))
+    scene_delta = await call("inspect_schematic_scene", path=root,
+                             since=scene["revision"])
+    same("unchanged scene delta", scene_delta.get("objects"), [])
     cop = await call("list_copper", path=board)
     bnets = await call("list_board_nets", path=board)
     same("list_footprints count", len(fps.get("footprints", [])), 2 * len(placed))

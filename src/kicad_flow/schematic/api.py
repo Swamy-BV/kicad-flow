@@ -37,6 +37,8 @@ from .types import (
     PartPlacement,
     PlacementMeasurement,
     Point,
+    SceneBounds,
+    SceneSnapshot,
     SheetRef,
     SymbolDef,
 )
@@ -330,6 +332,19 @@ class Sheet(ABC):
         """Mark a pin deliberately unconnected."""
 
     # -- reading back -----------------------------------------------------
+
+    @abstractmethod
+    def scene(self, region: SceneBounds | None = None, *,
+              max_objects: int = 2000) -> SceneSnapshot:
+        """Inspect local geometry with stable IDs, without rendering or saving.
+
+        Select objects whose bounds intersect *region*; return whole objects,
+        not clipped shapes. A parent ID can refer outside the selected region.
+        Child-sheet boxes expose their file references; children are not read.
+        Refuse over-budget observations rather than silently truncating them.
+        Findings are conservative geometric observations, not connectivity or
+        electrical verification. Revisions identify observed content.
+        """
 
     @abstractmethod
     def wires(self) -> list[tuple[Point, Point]]:

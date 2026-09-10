@@ -16,7 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..backend import create, load
-from ..schematic import PartPlacement, Point, Sheet
+from ..schematic import PartPlacement, Point, SceneBounds, Sheet
 from . import _meta
 from ._app import mcp
 
@@ -249,6 +249,59 @@ def get_fields(path: str, ref: str) -> dict[str, Any]:
 
 
 # -- reading back ---------------------------------------------------------
+
+
+@mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
+def inspect_schematic_scene(
+    path: str, x1: float | None = None, y1: float | None = None,
+    x2: float | None = None, y2: float | None = None,
+    since: str = "", max_objects: int = 2000,
+) -> dict[str, Any]:
+    """Inspect schematic geometry without images, saving or electrical inference.
+
+    Omit all rectangle coordinates for the sheet, or supply all four in mm.
+    Coordinates snap to the schematic grid. Select by bounds intersection;
+    return whole objects, not clipped fragments. A parent_id may be outside
+    the region. Child-sheet boxes name their files; inspect each child path
+    explicitly rather than loading the entire project into the model context.
+
+    Objects have stable IDs, bounds, exact connection anchors and properties.
+    Text bounds and spatial conflicts are conservative estimates. This is a
+    geometry view, not a replacement for list_nets or check_sheet; no electrical
+    connectivity is inferred from overlapping bounds or matching coordinates.
+
+    Pass the returned revision as since with the SAME path and rectangle to
+    receive only added/changed objects and findings, plus removed ID lists.
+    Apply deltas by ID; replace the local view on mode=full. An expired, unknown
+    or different-scope cursor returns a full reset, never a partial snapshot.
+    Each client keeps its own cursor. A region delta can remove an object that
+    moved outside the region without deleting it from the design.
+
+    max_objects limits the selected observation; exceeding it is an explicit
+    refusal, not silent truncation. Existing editing tools still take references
+    and coordinates as documented; scene IDs do not add another write API.
+    """
+    from ..schematic import snap
+    from .scene import history
+
+    try:
+        values = (x1, y1, x2, y2)
+        region = None
+        if any(value is not None for value in values):
+            if x1 is None or y1 is None or x2 is None or y2 is None:
+                raise ValueError("supply all of x1, y1, x2, y2 or omit all four")
+            import math
+
+            if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+                raise ValueError("region coordinates must be finite")
+            if x1 > x2 or y1 > y2:
+                raise ValueError("rectangle requires x1 <= x2 and y1 <= y2")
+            region = SceneBounds(snap(x1), snap(y1), snap(x2), snap(y2))
+        sheet = _sheet(path)
+        scene = sheet.scene(region, max_objects=max_objects)
+        return history.observe(_key(path), scene, since)
+    except (LookupError, ValueError, OSError) as exc:
+        return _fail(exc)
 
 
 @mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.WRITE)
@@ -1457,7 +1510,7 @@ __all__ = [
     "add_no_connects", "add_power", "add_power_flags",
     "add_sheets", "add_texts", "add_wires",
     "check_sheet", "check_sheet_layout", "find_symbol", "get_component",
-    "get_fields", "get_pin", "list_components",
+    "get_fields", "get_pin", "inspect_schematic_scene", "list_components",
     "list_labels", "list_nets", "list_wires",
     "measure_schematic_placement", "mirror_components",
     "move_components", "move_fields", "move_labels",

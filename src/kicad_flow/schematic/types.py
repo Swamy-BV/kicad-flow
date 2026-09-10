@@ -323,6 +323,82 @@ class SheetRef:
                 "pins": [p.as_dict() for p in self.pins]}
 
 
+@dataclass(frozen=True)
+class SceneBounds:
+    """An axis-aligned rectangle in sheet coordinates, including its edges."""
+
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    def intersects(self, other: SceneBounds) -> bool:
+        """Whether the rectangles share any point."""
+        return (self.left <= other.right and other.left <= self.right
+                and self.top <= other.bottom and other.top <= self.bottom)
+
+    def as_list(self) -> list[float]:
+        """Return left, top, right and bottom in millimetres."""
+        return [round(v, 3) for v in (
+            self.left, self.top, self.right, self.bottom)]
+
+
+@dataclass(frozen=True)
+class SceneObject:
+    """One addressable geometric object; bounds are not electrical evidence."""
+
+    id: str
+    kind: str
+    bounds: SceneBounds
+    at: Point
+    parent_id: str = ""
+    properties: tuple[tuple[str, str | float | int | bool], ...] = ()
+    points: tuple[Point, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return geometry and scalar properties without image data."""
+        out: dict[str, Any] = {
+            "id": self.id, "kind": self.kind,
+            "bounds": self.bounds.as_list(), **self.at.as_dict(),
+            "properties": dict(self.properties),
+        }
+        if self.parent_id:
+            out["parent_id"] = self.parent_id
+        if self.points:
+            out["points"] = [p.as_dict() for p in self.points]
+        return out
+
+
+@dataclass(frozen=True)
+class SceneFinding:
+    """A conservative spatial conflict naming stable scene object IDs."""
+
+    id: str
+    kind: str
+    objects: tuple[str, ...]
+    at: Point
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return an actionable geometric finding, not an ERC result."""
+        return {"id": self.id, "kind": self.kind,
+                "objects": list(self.objects), **self.at.as_dict(),
+                "severity": "warning"}
+
+
+@dataclass(frozen=True)
+class SceneSnapshot:
+    """A complete observation of one sheet or explicitly selected region."""
+
+    sheet_id: str
+    revision: str
+    page: SceneBounds
+    region: SceneBounds | None
+    objects: tuple[SceneObject, ...]
+    findings: tuple[SceneFinding, ...]
+    unsupported: tuple[str, ...] = ()
+
+
 __all__ = ["Finding", "Label", "LayoutFinding", "Net", "NetPin", "Part",
            "PartPlacement", "Pin", "PlacementBounds", "PlacementMeasurement",
-           "Point", "SheetRef", "SymbolDef"]
+           "Point", "SceneBounds", "SceneFinding", "SceneObject", "SceneSnapshot",
+           "SheetRef", "SymbolDef"]
