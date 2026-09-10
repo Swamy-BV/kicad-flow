@@ -80,14 +80,35 @@ layout findings and rendered previews.
 
 Board operations include footprints on either face, exact pad and courtyard
 geometry, placement measurements, stackups, net classes, numeric design rules,
-tracks, vias, zones, board outlines, silkscreen graphics, manufacturing limits,
-unrouted-connection readback, DRC, 2D plots and native KiCad 3D renders.
+tracks, layer-span vias, configurable zones, board outlines, silkscreen
+graphics, manufacturing limits, connected-group and route-metric readback,
+regional geometry inspection, DRC, 2D plots and native KiCad 3D renders.
 
 Placement is composed before it is applied. The MCP instructions require the
 caller to inventory exact symbol or footprint geometry, divide the page or board
 into functional regions, reserve wiring, routing, power and thermal space, and
 prepare explicit coordinates before placement. Validation reports facts; it
 does not guess, score, spread or repair a design.
+
+For schematics, `measure_schematic_placement` checks that explicit component
+list without changing the sheet, including transformed pins, visible bounds,
+overlaps and page limits. Schematic list writes are schema-strict and atomic: a
+bad element identifies its index and leaves none of that list applied.
+
+`inspect_schematic_scene` provides spatial context without images: stable object
+IDs, bounds, transformed pins, wires, fields and conservative overlap findings.
+Query one sheet or an explicit rectangle, then pass its revision as `since` to
+receive changes only. The monitor's **Geometry** view displays those same objects
+as vectors. See [scene queries and revision handling](docs/schematic-scenes.md)
+for limits, estimated text bounds and the distinction from electrical validation.
+
+For boards, `check_board` can dry-run caller-supplied tracks, vias and zones on
+an isolated copy and report newly introduced and resolved DRC findings. Findings
+are attributed to candidate list indexes when KiCad identifies the candidate
+object. PCB list writes are atomic, and destructive copper removal requires an
+explicit UUID/filter or `all=true`. The caller still chooses every coordinate;
+the preflight prevents connectivity progress from hiding shorts, crossings or
+clearance regressions.
 
 An operation returning `ok: true` means the operation executed. Inspection
 results have their own outcome fields such as `clean`, `complete` and `valid`.

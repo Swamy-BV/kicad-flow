@@ -74,6 +74,16 @@ def profile_findings(board: Board, profile: dict[str, Any]) -> list[Finding]:
             f"board thickness is {board.thickness:g} mm; active provider "
             f"profile was resolved for {selected_thickness:g} mm",
         ))
+    allowed_vias = profile.get("via_kinds")
+    if isinstance(allowed_vias, list):
+        for via in board.vias():
+            if via.kind not in allowed_vias:
+                out.append(Finding(
+                    "error", "provider_via_kind",
+                    f"active provider profile permits via kinds "
+                    f"{allowed_vias}, not {via.kind!r}",
+                    at=via.at, uuid=via.uuid,
+                ))
     width, height = board.size
     if width == 0.0 or height == 0.0:
         return out

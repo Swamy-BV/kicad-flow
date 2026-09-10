@@ -136,6 +136,7 @@ class FabricationCapabilities:
     soldermask_colors: tuple[str, ...]
     outline_processes: tuple[str, ...]
     tiers: tuple[str, ...]
+    via_kinds: tuple[str, ...]
     source_url: str
     retrieved_at: str
 
@@ -156,6 +157,7 @@ class FabricationCapabilities:
             "soldermask_colors": list(self.soldermask_colors),
             "outline_processes": list(self.outline_processes),
             "tiers": list(self.tiers),
+            "via_kinds": list(self.via_kinds),
             "source_url": self.source_url,
             "retrieved_at": self.retrieved_at,
         }
@@ -183,6 +185,7 @@ class FabricationProfile:
     maximum_size: tuple[float, float]
     source_url: str
     retrieved_at: str
+    via_kinds: tuple[str, ...] = ("through",)
     notes: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
@@ -195,6 +198,7 @@ class FabricationProfile:
             "maximum_size": list(self.maximum_size),
             "source_url": self.source_url,
             "retrieved_at": self.retrieved_at,
+            "via_kinds": list(self.via_kinds),
             "notes": list(self.notes),
         }
 

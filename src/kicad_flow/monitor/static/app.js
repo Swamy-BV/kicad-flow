@@ -1,11 +1,15 @@
 // kicad-flow live monitor -- native ES module, no build step, no dependencies.
 // Renders the active design (2D or 3D) on a pan/zoom stage and streams the MCP
 // tool-call feed over Server-Sent Events.
+import { sceneView } from './scene.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $("view"), stage = $("stage"), img = $("img"), spin = $("spin"),
   feed = $("feed"), active = $("active"), b2d = $("b2d"), b3d = $("b3d"),
   zlab = $("zoom"), q = $("q"), onlyBad = $("only-bad"), count = $("count");
+const bscene = $("bscene"), scene = $("scene"), sceneInfo = $("scene-info");
+const geometry = sceneView(scene, sceneInfo);
+let requestVersion = 0;
 
 let scale = 1, tx = 0, ty = 0, mode = "2d", nat = { w: 0, h: 0 },
   fitNext = true, kind = "";
@@ -42,10 +46,27 @@ const hideSpin = () => { clearTimeout(spinTimer); spin.classList.remove("on"); }
 // the visible image never blanks (no flash on every re-render). Only the slow 3D
 // render shows a spinner.
 function reload(refit) {
+  const request = ++requestVersion;
+  hideSpin();
   if (refit) fitNext = true;
+  img.hidden = mode === 'scene';
+  scene.toggleAttribute('hidden', mode !== 'scene');
+  sceneInfo.hidden = mode !== 'scene';
+  if (mode === 'scene') {
+    fetch('/scene.json?since=' + encodeURIComponent(geometry.revision))
+      .then(response => response.json()).then(data => {
+        if (request !== requestVersion || mode !== 'scene') return;
+        nat = geometry.update(data);
+        if (fitNext) { fit(); fitNext = false; }
+      }).catch(error => {
+        if (request === requestVersion) { geometry.clear(); sceneInfo.textContent = error.message; }
+      });
+    return;
+  }
   if (mode === "3d") showSpin();
   const next = new Image();
   next.onload = () => {
+    if (request !== requestVersion) return;
     img.src = next.src;
     nat = { w: next.naturalWidth, h: next.naturalHeight };
     if (fitNext) { fit(); fitNext = false; }
@@ -68,13 +89,18 @@ let drag = null;
 const endDrag = () => { drag = null; view.classList.remove("drag"); };
 view.addEventListener("pointerdown", (e) => {
   e.preventDefault();  // stop native image drag from swallowing pointerup
-  drag = { x: e.clientX, y: e.clientY, tx, ty };
+  drag = { x: e.clientX, y: e.clientY, tx, ty, captured: false };
   view.classList.add("drag");
-  view.setPointerCapture(e.pointerId);
 });
 view.addEventListener("pointermove", (e) => {
   if (!drag) return;
   if (e.buttons === 0) { endDrag(); return; }  // self-heal a missed pointerup
+  // Preserve a stationary click's SVG target; capture only when panning starts.
+  if (!drag.captured) {
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
+    view.setPointerCapture(e.pointerId);
+    drag.captured = true;
+  }
   tx = drag.tx + (e.clientX - drag.x);
   ty = drag.ty + (e.clientY - drag.y);
   apply();
@@ -92,13 +118,18 @@ $("zout").onclick = () => zoom(0.8);
 function setMode(m) {
   if (m === mode) return;
   mode = m;
-  for (const [btn, name] of [[b2d, "2d"], [b3d, "3d"]]) {
+  for (const [btn, name] of [[b2d, "2d"], [b3d, "3d"], [bscene, "scene"]]) {
     btn.classList.toggle("active", m === name);
   }
   reload(true);
 }
 b2d.onclick = () => setMode("2d");
 b3d.onclick = () => { if (!b3d.disabled) setMode("3d"); };
+bscene.onclick = () => {
+  if (bscene.disabled) return;
+  geometry.clear();
+  if (mode === 'scene') reload(true); else setMode('scene');
+};
 
 // --- theme ---------------------------------------------------------------
 const theme = $("theme");
@@ -282,7 +313,9 @@ es.addEventListener("active", (e) => {
   active.textContent = a.name;
   kind = a.kind;
   b3d.disabled = kind !== "board";
-  if (kind !== "board" && mode === "3d") setMode("2d");
+  bscene.disabled = kind !== "schematic";
+  geometry.clear();
+  if ((kind !== "board" && mode === "3d") || (kind !== "schematic" && mode === "scene")) setMode("2d");
   else reload(true);
 });
 es.addEventListener("activity", (e) => {

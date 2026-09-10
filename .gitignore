@@ -31,17 +31,9 @@ logs/
 # Regenerate with render.export_png on the built sheet; see the README.
 !examples/*/*.png
 
-# Rebuilt by the example scripts on every run (each rmtree-s its own folder
-# first). The script is the artefact; the folder is its output.
-
-# The board example rebuilds its output; only the render is worth keeping.
-
-# The LED example rebuilds its boards; the renders are the artefact.
-
 # The LED example rebuilds its boards; the renders are the artefact.
 # led_digits is 320 parts: 11 schematic pages and a board of generated
-# geometry. The board renders are what is worth reading; the rest is
-# rebuilt by the script in 23 seconds.
+# geometry. Keep the board renders; regenerate the design with its script.
 examples/led_digits/*.kicad_pcb
 examples/led_digits/*.kicad_sch
 examples/led_digits/*.kicad_pro
@@ -63,5 +55,3 @@ examples/batman/*.kicad_pro
 # Keep the ESC root schematic preview and PCB views; child-page renders are
 # generated for inspection and do not belong in the showcase.
 examples/esc4in1/esc4in1-[2-9].png
-
-# The digits board rebuilds itself; its renders are the artefact.

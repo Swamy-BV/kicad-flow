@@ -73,6 +73,7 @@ class JlcpcbFabricationProvider(FabricationProvider):
             ),
             outline_processes=("routed",),
             tiers=("recommended", "minimum"),
+            via_kinds=("through",),
             source_url=str(data["source_url"]),
             retrieved_at=str(data["retrieved_at"]),
         )
@@ -206,6 +207,7 @@ class JlcpcbFabricationProvider(FabricationProvider):
             maximum_size=(float(maximum[0]), float(maximum[1])),
             source_url=str(data["source_url"]),
             retrieved_at=str(data["retrieved_at"]),
+            via_kinds=("through",),
             notes=notes,
         )
 

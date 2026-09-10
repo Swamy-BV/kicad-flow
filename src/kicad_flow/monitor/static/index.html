@@ -11,6 +11,7 @@
   <div id="bar">
     <button id="b2d" class="active">2D</button>
     <button id="b3d" disabled title="3D view (boards only)">3D</button>
+    <button id="bscene" disabled title="Structured schematic geometry; no raster images">Geometry</button>
     <span class="sep"></span>
     <span id="zoomctl">
       <button id="fit" title="Fit to view (double-click)">Fit</button>
@@ -24,9 +25,10 @@
   </div>
 
   <div id="view">
-    <div id="stage"><img id="img" alt="Preview of the active design" draggable="false"></div>
+    <div id="stage"><img id="img" alt="Preview of the active design" draggable="false"><svg id="scene" hidden role="img" aria-label="Schematic objects and conservative occupied bounds"></svg></div>
     <div id="spin">rendering&hellip;</div>
   </div>
+  <div id="scene-info" hidden aria-live="polite"></div>
 </div>
 
 <div id="side">

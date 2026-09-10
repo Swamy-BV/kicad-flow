@@ -30,8 +30,12 @@ from ..pcb.types import (
     NetClass,
     NetClassAssignment,
     PlacementProposal,
+    Point,
     Stackup,
     StackupLayer,
+    Track,
+    Via,
+    Zone,
 )
 from . import _meta
 from ._app import mcp
@@ -66,13 +70,28 @@ def _fail(exc: Exception) -> dict[str, Any]:
 _ERRORS = (LookupError, ValueError, OSError, RuntimeError)
 
 
-def _partial(exc: Exception, index: int, key: str,
-             done: list[Any]) -> dict[str, Any]:
-    """A refusal that identifies the failed item and prior applied results."""
-    return {**_fail(exc), "index": index, key: done}
+def _atomic_items(board: Board, items: list[Any], key: str,
+                  each: Any) -> dict[str, Any]:
+    """Apply scalar board primitives as one all-or-nothing list write."""
+    out: list[Any] = []
+    _failed_index = 0
+    try:
+        with board.transaction():
+            for _failed_index, item in enumerate(items):
+                out.append(each(board, item))
+    except (IndexError, *_ERRORS) as exc:
+        return {**_fail(exc), "index": _failed_index,
+                "applied_count": 0, key: []}
+    return {"ok": True, "count": len(out), key: out}
 
 
-class _GraphicBase(BaseModel):
+class _StrictModel(BaseModel):
+    """One list item whose unknown or non-finite fields are refused."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class _GraphicBase(_StrictModel):
     """Fields shared by every outline and silkscreen primitive."""
 
     model_config = ConfigDict(extra="forbid")
@@ -140,7 +159,7 @@ GraphicSpec = Annotated[
 ]
 
 
-class GraphicMove(BaseModel):
+class GraphicMove(_StrictModel):
     """One graphical primitive and the offset to apply."""
 
     model_config = ConfigDict(extra="forbid")
@@ -150,7 +169,7 @@ class GraphicMove(BaseModel):
     dy: float = Field(description="Vertical offset in mm.")
 
 
-class NewFootprint(BaseModel):
+class NewFootprint(_StrictModel):
     """One footprint placement."""
 
     fp_id: str = Field(description="Library footprint id.")
@@ -166,7 +185,7 @@ class NewFootprint(BaseModel):
     value: str = Field(default="", description="Value field.")
 
 
-class FootprintMove(BaseModel):
+class FootprintMove(_StrictModel):
     """One footprint's new absolute position."""
 
     ref: str = Field(description="Reference designator to move.")
@@ -186,21 +205,21 @@ class PlacementCandidate(FootprintMove):
     )
 
 
-class FootprintTurn(BaseModel):
+class FootprintTurn(_StrictModel):
     """One footprint's new absolute rotation."""
 
     ref: str = Field(description="Reference designator to rotate.")
     rotation: float = Field(description="New absolute angle in degrees.")
 
 
-class FootprintFlip(BaseModel):
+class FootprintFlip(_StrictModel):
     """One footprint's requested board side."""
 
     ref: str = Field(description="Reference designator to flip.")
     side: str = Field(description="F or B.")
 
 
-class PadNet(BaseModel):
+class PadNet(_StrictModel):
     """One pad-to-net assignment."""
 
     ref: str = Field(description="Reference designator containing the pad.")
@@ -208,7 +227,7 @@ class PadNet(BaseModel):
     net: str = Field(description="Exact net name to assign.")
 
 
-class FootprintFieldValue(BaseModel):
+class FootprintFieldValue(_StrictModel):
     """One footprint field value."""
 
     ref: str = Field(description="Reference designator containing the field.")
@@ -216,7 +235,7 @@ class FootprintFieldValue(BaseModel):
     value: str = Field(description="New field value.")
 
 
-class FootprintFieldShift(BaseModel):
+class FootprintFieldShift(_StrictModel):
     """One footprint field placement."""
 
     ref: str = Field(description="Reference designator containing the field.")
@@ -231,7 +250,7 @@ class FootprintFieldShift(BaseModel):
         default=None, description="Visibility override, or preserve when omitted.")
 
 
-class NewTrack(BaseModel):
+class NewTrack(_StrictModel):
     """One straight copper segment."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -252,8 +271,8 @@ class NewTrack(BaseModel):
         return self
 
 
-class NewVia(BaseModel):
-    """One plated through-via."""
+class NewVia(_StrictModel):
+    """One explicitly typed plated via."""
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
@@ -264,16 +283,23 @@ class NewVia(BaseModel):
                             description="Positive finished diameter in mm.")
     drill: float = Field(default=0.3, gt=0,
                          description="Positive drill diameter in mm.")
+    layers: tuple[str, str] = Field(
+        default=("F.Cu", "B.Cu"),
+        description="Explicit start and end copper layers.",
+    )
+    kind: Literal["through", "blind_buried", "microvia"] = "through"
 
     @model_validator(mode="after")
     def valid_ring(self) -> NewVia:
         """A plated via needs copper outside its drill."""
         if self.drill >= self.diameter:
             raise ValueError("via drill must be smaller than its diameter")
+        if self.layers[0] == self.layers[1]:
+            raise ValueError("via layers must be different")
         return self
 
 
-class NewZone(BaseModel):
+class NewZone(_StrictModel):
     """One copper pour or keep-out polygon."""
 
     points: list[list[float]] = Field(
@@ -290,7 +316,17 @@ class NewZone(BaseModel):
         description="Maximum curve-to-polygon chord error in mm.")
     layer: str = Field(description="Copper layer name.")
     net: str = Field(default="", description="Pour net, or empty for no net.")
-    clearance: float = Field(default=0.0, description="Clearance in mm.")
+    clearance: float = Field(default=0.5, ge=0, description="Clearance in mm.")
+    pad_connection: Literal["thermal", "solid", "none"] = Field(
+        default="thermal",
+        description="How same-net pads join the pour.",
+    )
+    min_thickness: float = Field(default=0.25, gt=0)
+    thermal_gap: float = Field(default=0.5, gt=0)
+    thermal_spoke_width: float = Field(default=0.5, gt=0)
+    priority: int = Field(default=0, ge=0)
+    island_removal: Literal["always", "never", "area"] = "always"
+    min_island_area: float = Field(default=0.0, ge=0)
     forbids: list[str] = Field(
         default_factory=list,
         description="For a keep-out: tracks, vias, pads, pours, footprints.")
@@ -312,10 +348,73 @@ class NewZone(BaseModel):
                 raise ValueError("board_outline inset cannot be negative")
         if self.max_error <= 0:
             raise ValueError("max_error must be positive")
+        if self.island_removal == "area" and self.min_island_area <= 0:
+            raise ValueError(
+                "min_island_area must be positive when island_removal='area'"
+            )
         return self
 
 
-class NewBoardText(BaseModel):
+class NetPairSpec(_StrictModel):
+    """Two explicitly named nets whose authored lengths should be compared."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    first: str
+    second: str
+
+
+def _zone_value(board: Board, item: NewZone) -> Zone:
+    """Resolve one zone request to the format-neutral primitive value."""
+    if item.boundary == "board_outline":
+        assert item.inset is not None
+        points = board.outline_polygon(
+            inset=item.inset, max_error=item.max_error
+        )
+    else:
+        points = tuple(Point(point[0], point[1]) for point in item.points)
+    return Zone(
+        net=item.net,
+        layer=item.layer,
+        points=points,
+        pad_connection=item.pad_connection,
+        clearance=item.clearance,
+        min_thickness=item.min_thickness,
+        thermal_gap=item.thermal_gap,
+        thermal_spoke_width=item.thermal_spoke_width,
+        priority=item.priority,
+        island_removal=item.island_removal,
+        min_island_area=item.min_island_area,
+        forbids=tuple(item.forbids),
+    )
+
+
+def _provider_via_refusal(path: str, vias: list[NewVia]) -> dict[str, Any] | None:
+    """Return a precise active-profile refusal for unsupported via kinds."""
+    from ._fabrication import read_profile
+
+    profile = read_profile(path)
+    if profile is None:
+        return None
+    allowed = profile.get("via_kinds")
+    if not isinstance(allowed, list):
+        return None
+    for index, via in enumerate(vias):
+        if via.kind not in allowed:
+            return {
+                "ok": False,
+                "error": (
+                    f"ValueError: active fabrication profile permits via kinds "
+                    f"{allowed}, not {via.kind!r}"
+                ),
+                "index": index,
+                "applied_count": 0,
+                "vias": [],
+            }
+    return None
+
+
+class NewBoardText(_StrictModel):
     """One text item on a board layer."""
 
     x: float = Field(description="Anchor X in mm.")
@@ -327,7 +426,7 @@ class NewBoardText(BaseModel):
     mirror: bool = Field(default=False, description="Mirror the text.")
 
 
-class StackupLayerSpec(BaseModel):
+class StackupLayerSpec(_StrictModel):
     """One explicitly ordered physical or surface stackup layer."""
 
     model_config = ConfigDict(extra="forbid")
@@ -344,7 +443,7 @@ class StackupLayerSpec(BaseModel):
     color: str = Field(default="", description="Optional mask/silkscreen color.")
 
 
-class NetClassSpec(BaseModel):
+class NetClassSpec(_StrictModel):
     """One named collection of routing dimensions."""
 
     model_config = ConfigDict(extra="forbid")
@@ -361,7 +460,7 @@ class NetClassSpec(BaseModel):
     diff_pair_via_gap: float | None = None
 
 
-class NetClassAssignmentSpec(BaseModel):
+class NetClassAssignmentSpec(_StrictModel):
     """One net's membership in a netclass."""
 
     model_config = ConfigDict(extra="forbid")
@@ -370,7 +469,7 @@ class NetClassAssignmentSpec(BaseModel):
     net_class: str
 
 
-class NumericConstraintSpec(BaseModel):
+class NumericConstraintSpec(_StrictModel):
     """One millimetre-valued DRC constraint."""
 
     model_config = ConfigDict(extra="forbid")
@@ -382,7 +481,7 @@ class NumericConstraintSpec(BaseModel):
     max: float | None = None
 
 
-class BoardRuleSpec(BaseModel):
+class BoardRuleSpec(_StrictModel):
     """One named custom DRC rule."""
 
     model_config = ConfigDict(extra="forbid")
@@ -450,33 +549,32 @@ def add_graphics(path: str, graphics: list[GraphicSpec]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, shape in enumerate(graphics):
-        try:
-            if isinstance(shape, LineGraphic):
-                points = [(shape.x1, shape.y1), (shape.x2, shape.y2)]
-                fill = False
-            elif isinstance(shape, ArcGraphic):
-                points = [(shape.x1, shape.y1), (shape.xm, shape.ym),
-                          (shape.x2, shape.y2)]
-                fill = False
-            elif isinstance(shape, CircleGraphic):
-                points = [(shape.x, shape.y),
-                          (shape.x + shape.radius, shape.y)]
-                fill = shape.fill
-            elif isinstance(shape, RectangleGraphic):
-                points = [(shape.x1, shape.y1), (shape.x2, shape.y2)]
-                fill = shape.fill
-            else:
-                points = [(p[0], p[1]) for p in shape.points]
-                fill = shape.fill
-            made = board.graphic(shape.kind, points, layer=shape.layer,
-                                 width=shape.width, fill=fill)
-        except (IndexError, *_ERRORS) as exc:
-            return _partial(exc, i, "graphics", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "graphics": out,
-            "size": list(board.size)}
+    def each(target: Board, shape: GraphicSpec) -> dict[str, Any]:
+        if isinstance(shape, LineGraphic):
+            points = [(shape.x1, shape.y1), (shape.x2, shape.y2)]
+            fill = False
+        elif isinstance(shape, ArcGraphic):
+            points = [(shape.x1, shape.y1), (shape.xm, shape.ym),
+                      (shape.x2, shape.y2)]
+            fill = False
+        elif isinstance(shape, CircleGraphic):
+            points = [(shape.x, shape.y), (shape.x + shape.radius, shape.y)]
+            fill = shape.fill
+        elif isinstance(shape, RectangleGraphic):
+            points = [(shape.x1, shape.y1), (shape.x2, shape.y2)]
+            fill = shape.fill
+        else:
+            points = [(point[0], point[1]) for point in shape.points]
+            fill = shape.fill
+        return target.graphic(
+            shape.kind, points, layer=shape.layer,
+            width=shape.width, fill=fill,
+        ).as_dict()
+
+    result = _atomic_items(board, graphics, "graphics", each)
+    if result.get("ok"):
+        result["size"] = list(board.size)
+    return result
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
@@ -497,14 +595,12 @@ def move_graphics(path: str, moves: list[GraphicMove]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, move in enumerate(moves):
-        try:
-            out.append(board.move_graphic(
-                move.uuid, move.dx, move.dy).as_dict())
-        except _ERRORS as exc:
-            return _partial(exc, i, "moved", out)
-    return {"ok": True, "count": len(out), "moved": out}
+    return _atomic_items(
+        board, moves, "moved",
+        lambda target, move: target.move_graphic(
+            move.uuid, move.dx, move.dy
+        ).as_dict(),
+    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -514,14 +610,11 @@ def remove_graphics(path: str, uuids: list[str]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[str] = []
-    for i, uuid in enumerate(uuids):
-        try:
-            board.remove_graphic(uuid)
-        except _ERRORS as exc:
-            return _partial(exc, i, "removed", out)
-        out.append(uuid)
-    return {"ok": True, "count": len(out), "removed": out}
+    def each(target: Board, uuid: str) -> str:
+        target.remove_graphic(uuid)
+        return uuid
+
+    return _atomic_items(board, uuids, "removed", each)
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -604,15 +697,13 @@ def place_footprints(path: str,
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, p in enumerate(footprints):
-        try:
-            made = board.place(p.fp_id, p.ref, p.x, p.y, anchor=p.anchor,
-                               rotation=p.rotation, side=p.side, value=p.value)
-        except _ERRORS as exc:
-            return _partial(exc, i, "footprints", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "footprints": out}
+    return _atomic_items(
+        board, footprints, "footprints",
+        lambda target, item: target.place(
+            item.fp_id, item.ref, item.x, item.y, anchor=item.anchor,
+            rotation=item.rotation, side=item.side, value=item.value,
+        ).as_dict(),
+    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -822,23 +913,19 @@ def move_footprints(path: str,
     if moves is None and refs is None:
         return {"ok": False,
                 "error": "give either moves=[...] or refs=[...] with dx/dy"}
-    out: list[dict[str, Any]] = []
     if moves is not None:
-        for i, move in enumerate(moves):
-            try:
-                out.append(board.move(
-                    move.ref, move.x, move.y, anchor=move.anchor
-                ).as_dict())
-            except _ERRORS as exc:
-                return _partial(exc, i, "moved", out)
-    else:
-        for i, ref in enumerate(refs or []):
-            try:
-                was = board.footprint(ref).at
-                out.append(board.move(ref, was.x + dx, was.y + dy).as_dict())
-            except _ERRORS as exc:
-                return _partial(exc, i, "moved", out)
-    return {"ok": True, "count": len(out), "moved": out}
+        return _atomic_items(
+            board, moves, "moved",
+            lambda target, item: target.move(
+                item.ref, item.x, item.y, anchor=item.anchor
+            ).as_dict(),
+        )
+
+    def shift(target: Board, ref: str) -> dict[str, Any]:
+        was = target.footprint(ref).at
+        return target.move(ref, was.x + dx, was.y + dy).as_dict()
+
+    return _atomic_items(board, refs or [], "moved", shift)
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -849,13 +936,12 @@ def rotate_footprints(path: str,
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, turn in enumerate(turns):
-        try:
-            out.append(board.rotate(turn.ref, turn.rotation).as_dict())
-        except _ERRORS as exc:
-            return _partial(exc, i, "turned", out)
-    return {"ok": True, "count": len(out), "turned": out}
+    return _atomic_items(
+        board, turns, "turned",
+        lambda target, turn: target.rotate(
+            turn.ref, turn.rotation
+        ).as_dict(),
+    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -870,13 +956,10 @@ def flip_footprints(path: str,
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, flip in enumerate(flips):
-        try:
-            out.append(board.flip(flip.ref, flip.side).as_dict())
-        except _ERRORS as exc:
-            return _partial(exc, i, "flipped", out)
-    return {"ok": True, "count": len(out), "flipped": out}
+    return _atomic_items(
+        board, flips, "flipped",
+        lambda target, flip: target.flip(flip.ref, flip.side).as_dict(),
+    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -886,14 +969,11 @@ def remove_footprints(path: str, refs: list[str]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[str] = []
-    for i, ref in enumerate(refs):
-        try:
-            board.remove(ref)
-        except _ERRORS as exc:
-            return _partial(exc, i, "removed", out)
-        out.append(ref)
-    return {"ok": True, "count": len(out), "removed": out}
+    def each(target: Board, ref: str) -> str:
+        target.remove(ref)
+        return ref
+
+    return _atomic_items(board, refs, "removed", each)
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
@@ -997,14 +1077,11 @@ def set_pad_nets(path: str, pads: list[PadNet]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, str]] = []
-    for i, pad in enumerate(pads):
-        try:
-            net = board.set_net(pad.ref, pad.pad, pad.net)
-        except _ERRORS as exc:
-            return _partial(exc, i, "pads", out)
-        out.append({"ref": pad.ref, "pad": pad.pad, "net": net})
-    return {"ok": True, "count": len(out), "pads": out}
+    def each(target: Board, pad: PadNet) -> dict[str, str]:
+        net = target.set_net(pad.ref, pad.pad, pad.net)
+        return {"ref": pad.ref, "pad": pad.pad, "net": net}
+
+    return _atomic_items(board, pads, "pads", each)
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
@@ -1024,14 +1101,11 @@ def set_footprint_fields(path: str,
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, field in enumerate(fields):
-        try:
-            values = board.set_field(field.ref, field.name, field.value)
-        except _ERRORS as exc:
-            return _partial(exc, i, "fields", out)
-        out.append({"ref": field.ref, "fields": values})
-    return {"ok": True, "count": len(out), "fields": out}
+    def each(target: Board, field: FootprintFieldValue) -> dict[str, Any]:
+        values = target.set_field(field.ref, field.name, field.value)
+        return {"ref": field.ref, "fields": values}
+
+    return _atomic_items(board, fields, "fields", each)
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -1052,16 +1126,14 @@ def move_footprint_fields(
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, move in enumerate(moves):
-        try:
-            at = board.move_field(
-                move.ref, move.name, move.dx, move.dy,
-                rotation=move.rotation, layer=move.layer, hide=move.hide)
-        except _ERRORS as exc:
-            return _partial(exc, i, "moved", out)
-        out.append({"ref": move.ref, "field": move.name, **at.as_dict()})
-    return {"ok": True, "count": len(out), "moved": out}
+    def each(target: Board, move: FootprintFieldShift) -> dict[str, Any]:
+        at = target.move_field(
+            move.ref, move.name, move.dx, move.dy,
+            rotation=move.rotation, layer=move.layer, hide=move.hide,
+        )
+        return {"ref": move.ref, "field": move.name, **at.as_dict()}
+
+    return _atomic_items(board, moves, "moved", each)
 
 
 # -- copper ---------------------------------------------------------------
@@ -1085,43 +1157,36 @@ def add_tracks(path: str, tracks: list[NewTrack]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    # Preflight the whole list before placing its first item. Layer validity is
-    # a board fact unavailable to Pydantic, and a late failure must not leave a
-    # caller with half a route.
-    for i, track in enumerate(tracks):
-        if track.layer not in board.layers:
-            return _fail(ValueError(
-                f"tracks[{i}].layer {track.layer!r} is not one of "
-                f"{list(board.layers)}"
-            ))
-    out: list[dict[str, Any]] = []
-    for i, track in enumerate(tracks):
-        try:
-            made = board.track(
-                track.x1, track.y1, track.x2, track.y2,
-                layer=track.layer, width=track.width, net=track.net)
-        except _ERRORS as exc:
-            return _partial(exc, i, "tracks", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "tracks": out}
+    return _atomic_items(
+        board, tracks, "tracks",
+        lambda target, track: target.track(
+            track.x1, track.y1, track.x2, track.y2,
+            layer=track.layer, width=track.width, net=track.net,
+        ).as_dict(),
+    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def add_vias(path: str, vias: list[NewVia]) -> dict[str, Any]:
-    """Drill plated through-vias joining front to back, returning UUIDs."""
+    """Drill caller-typed vias across explicit copper-layer spans."""
     try:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, via in enumerate(vias):
-        try:
-            made = board.via(via.x, via.y, net=via.net,
-                             diameter=via.diameter, drill=via.drill)
-        except _ERRORS as exc:
-            return _partial(exc, i, "vias", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "vias": out}
+    try:
+        refusal = _provider_via_refusal(path, vias)
+    except _ERRORS as exc:
+        return _fail(exc)
+    if refusal is not None:
+        return refusal
+    return _atomic_items(
+        board, vias, "vias",
+        lambda target, via: target.via(
+            via.x, via.y, net=via.net,
+            diameter=via.diameter, drill=via.drill,
+            layers=via.layers, kind=via.kind,
+        ).as_dict(),
+    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -1143,25 +1208,24 @@ def add_zones(path: str, zones: list[NewZone]) -> dict[str, Any]:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, zone in enumerate(zones):
-        try:
-            if zone.boundary == "board_outline":
-                assert zone.inset is not None
-                boundary = board.outline_polygon(
-                    inset=zone.inset, max_error=zone.max_error
-                )
-                points = [(point.x, point.y) for point in boundary]
-            else:
-                points = [(point[0], point[1]) for point in zone.points]
-            made = board.zone(
-                points, layer=zone.layer,
-                net=zone.net, clearance=zone.clearance,
-                forbids=tuple(zone.forbids))
-        except (IndexError, *_ERRORS) as exc:
-            return _partial(exc, i, "zones", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "zones": out}
+    def each(target: Board, zone: NewZone) -> dict[str, Any]:
+        value = _zone_value(target, zone)
+        return target.zone(
+            [(point.x, point.y) for point in value.points],
+            layer=value.layer,
+            net=value.net,
+            clearance=value.clearance,
+            pad_connection=value.pad_connection,
+            min_thickness=value.min_thickness,
+            thermal_gap=value.thermal_gap,
+            thermal_spoke_width=value.thermal_spoke_width,
+            priority=value.priority,
+            island_removal=value.island_removal,
+            min_island_area=value.min_island_area,
+            forbids=value.forbids,
+        ).as_dict()
+
+    return _atomic_items(board, zones, "zones", each)
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -1188,36 +1252,62 @@ def add_board_texts(path: str,
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, note in enumerate(texts):
-        try:
-            at = board.text(
-                note.x, note.y, note.text, layer=note.layer, size=note.size,
-                rotation=note.rotation, mirror=note.mirror)
-        except _ERRORS as exc:
-            return _partial(exc, i, "texts", out)
-        out.append({"text": note.text, "layer": note.layer, **at.as_dict()})
-    return {"ok": True, "count": len(out), "texts": out}
+    def each(target: Board, note: NewBoardText) -> dict[str, Any]:
+        at = target.text(
+            note.x, note.y, note.text, layer=note.layer, size=note.size,
+            rotation=note.rotation, mirror=note.mirror,
+        )
+        return {"text": note.text, "layer": note.layer, **at.as_dict()}
+
+    return _atomic_items(board, texts, "texts", each)
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
 def remove_copper(path: str, net: str = "", layer: str = "",
                   tracks: bool = True, vias: bool = True,
-                  uuid: str = "") -> dict[str, Any]:
+                  zones: bool = False, uuid: str = "",
+                  all: bool = False, dry_run: bool = False) -> dict[str, Any]:
     """Delete one copper UUID, or copper filtered by net and layer.
 
-    Use a UUID returned by `add_tracks`, `add_vias` or `list_copper` to repair
-    one item without rebuilding its net. UUID cannot be combined with net or
-    layer. Without UUID, filters are AND-ed and an empty one matches everything,
-    so calling this with no arguments strips the board.
+    Use a UUID returned by `add_tracks`, `add_vias`, `add_zones` or
+    `list_copper` to repair one item. UUID cannot be combined with net/layer.
+    Empty selectors are rejected unless `all=true`; `dry_run=true` reports the
+    count and identities without changing the board.
     """
+    if not uuid and not net and not layer and not all:
+        return _fail(ValueError(
+            "select uuid, net or layer; use all=true to remove all selected kinds"
+        ))
+    if all and (uuid or net or layer):
+        return _fail(ValueError("all=true cannot be combined with selectors"))
     try:
-        gone = _board(path).remove_copper(
-            uuid=uuid, net=net, layer=layer, tracks=tracks, vias=vias
+        board = _board(path)
+        selected = (
+            ((True, board.tracks()), (True, board.vias()), (True, board.zones()))
+            if uuid else
+            ((tracks, board.tracks()), (vias, board.vias()),
+             (zones, board.zones()))
+        )
+        before = [
+            item.as_dict()
+            for enabled, items in selected
+            if enabled
+            for item in items
+            if (not uuid or item.uuid == uuid)
+            and (not net or item.net == net)
+            and (not layer or (
+                getattr(item, "layer", "") == layer
+                or layer in getattr(item, "layers", ())
+            ))
+        ]
+        gone = len(before) if dry_run else board.remove_copper(
+            uuid=uuid, net=net, layer=layer,
+            tracks=tracks, vias=vias, zones=zones, all=all,
         )
     except _ERRORS as exc:
         return _fail(exc)
-    return {"ok": True, "removed": gone}
+    return {"ok": True, "dry_run": dry_run, "removed": gone,
+            "items": before}
 
 
 # -- reading back ---------------------------------------------------------
@@ -1254,23 +1344,77 @@ def list_board_nets(path: str) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
 def unrouted_connections(path: str, limit: int = 40) -> dict[str, Any]:
-    """Every pair of pads on a net with no copper between them.
+    """Disconnected pad-bearing copper groups, without choosing routes.
 
-    The work remaining, NAMED rather than counted, nearest first -- so you can
-    route one. A filled plane counts as copper, so pads on a poured net are
-    not reported. ``ok`` means the inspection ran; ``complete`` is true only
-    when the total count is zero.
+    `nets` is the complete factual group membership. `connections` contains a
+    minimum number of nearest-pad measurements spanning those groups, useful
+    as a compact progress count but not as proposed tracks. `pair_count`
+    preserves the old all-pairs magnitude without returning quadratic output.
     """
     try:
-        found = sorted(_board(path).unrouted(), key=lambda c: c.distance)
+        board = _board(path)
+        found = sorted(board.unrouted(), key=lambda c: c.distance)
+        connectivity = [item for item in board.connectivity()
+                        if len(item.groups) > 1]
     except _ERRORS as exc:
         return _fail(exc)
+    pair_count = 0
+    for item in connectivity:
+        sizes = [len(group.pads) for group in item.groups]
+        pair_count += sum(
+            left * right
+            for index, left in enumerate(sizes)
+            for right in sizes[index + 1:]
+        )
     return {"ok": True, "complete": not found, "count": len(found),
-            "connections": [c.as_dict() for c in found[:limit]]}
+            "pair_count": pair_count,
+            "connections": [c.as_dict() for c in found[:limit]],
+            "nets": [item.as_dict() for item in connectivity]}
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
-def check_board(path: str) -> dict[str, Any]:
+def measure_routes(path: str, nets: list[str] | None = None,
+                   pairs: list[NetPairSpec] | None = None) -> dict[str, Any]:
+    """Measure authored copper by explicitly named net.
+
+    Length, layer use, widths, via counts and connected-group counts are raw
+    facts. Optional pairs only compare the two supplied total lengths; no net
+    naming convention or differential-pair membership is inferred.
+    """
+    requested = list(nets or [])
+    for pair in pairs or []:
+        requested.extend((pair.first, pair.second))
+    requested = list(dict.fromkeys(requested))
+    try:
+        board = _board(path)
+        available = {net.name for net in board.nets()}
+        missing = [name for name in requested if name not in available]
+        if missing:
+            raise LookupError(f"board has no nets {missing}")
+        measured = board.route_metrics(tuple(requested))
+    except _ERRORS as exc:
+        return _fail(exc)
+    by_name = {item.net: item for item in measured}
+    comparisons = []
+    for pair in pairs or []:
+        first = by_name[pair.first].track_length
+        second = by_name[pair.second].track_length
+        comparisons.append({
+            "first": pair.first,
+            "second": pair.second,
+            "first_length": round(first, 3),
+            "second_length": round(second, 3),
+            "skew": round(abs(first - second), 3),
+        })
+    return {"ok": True, "count": len(measured),
+            "nets": [item.as_dict() for item in measured],
+            "pairs": comparisons}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def check_board(path: str, tracks: list[NewTrack] | None = None,
+                vias: list[NewVia] | None = None,
+                zones: list[NewZone] | None = None) -> dict[str, Any]:
     """Every design-rule violation, named by part and pad.
 
     Runs DRC and maps each violation from a position back to the pad that
@@ -1278,41 +1422,130 @@ def check_board(path: str) -> dict[str, Any]:
     ``something at (25.46, 10.45)``. It also reports factual routing defects
     KiCad DRC misses: dangling endpoints, zero-length and duplicate tracks.
     Copper findings carry UUIDs for exact repair. Corner angle remains caller
-    policy and is not treated as an electrical violation. ``ok`` means DRC
-    ran; ``clean`` is true only when it returned no findings, and
-    ``kind_counts`` summarizes them without deciding what should change.
+    policy and is not treated as an electrical violation.
+
+    Optional tracks, vias and zones are checked on an isolated copy and never
+    applied. Candidate findings identify the exact input list and index when
+    KiCad names either candidate object in the violation.
+
+    ``ok`` means DRC ran; ``clean`` is true only when the checked state returned
+    no findings, and ``kind_counts`` summarizes them without deciding what
+    should change.
     """
     try:
         board = _board(path)
-        found = board.check()
+        proposed = tracks is not None or vias is not None or zones is not None
+        if proposed:
+            refusal = _provider_via_refusal(path, vias or [])
+            if refusal is not None:
+                return {**refusal, "proposed": True}
+        current = board.check()
+        if proposed:
+            track_items = tuple(
+                Track(
+                    Point(item.x1, item.y1), Point(item.x2, item.y2),
+                    item.layer, item.width, item.net,
+                )
+                for item in tracks or []
+            )
+            via_items = tuple(
+                Via(
+                    at=Point(item.x, item.y),
+                    diameter=item.diameter,
+                    drill=item.drill,
+                    net=item.net,
+                    layers=item.layers,
+                    kind=item.kind,
+                )
+                for item in vias or []
+            )
+            zone_items = tuple(_zone_value(board, item) for item in zones or [])
+            for index, track_item in enumerate(track_items):
+                if track_item.layer not in board.layers:
+                    raise ValueError(
+                        f"tracks[{index}].layer {track_item.layer!r} is not one of "
+                        f"{list(board.layers)}"
+                    )
+            found = board.check_proposed(track_items, via_items, zone_items)
+        else:
+            found = current
         from ._fabrication import profile_findings, read_profile
 
         profile = read_profile(path)
         if profile is not None:
             found.extend(profile_findings(board, profile))
+            if proposed:
+                current.extend(profile_findings(board, profile))
     except _ERRORS as exc:
         return _fail(exc)
-    errors = sum(1 for item in found if item.severity == "error")
-    warnings = sum(1 for item in found if item.severity == "warning")
+    errors = sum(1 for finding in found if finding.severity == "error")
+    warnings = sum(1 for finding in found if finding.severity == "warning")
     kind_counts: dict[str, int] = {}
-    for item in found:
-        kind_counts[item.kind] = kind_counts.get(item.kind, 0) + 1
-    return {
+    for finding in found:
+        kind_counts[finding.kind] = kind_counts.get(finding.kind, 0) + 1
+    reply: dict[str, Any] = {
         "ok": True,
         "clean": not found,
         "errors": errors,
         "warnings": warnings,
         "kind_counts": dict(sorted(kind_counts.items())),
-        "findings": [item.as_dict() for item in found],
+        "findings": [finding.as_dict() for finding in found],
     }
+    if proposed:
+        def fingerprint(item: Any) -> tuple[tuple[str, str], ...]:
+            return tuple(sorted(
+                (name, str(value)) for name, value in item.as_dict().items()
+            ))
+
+        remaining: dict[tuple[tuple[str, str], ...], int] = {}
+        for finding in current:
+            key = fingerprint(finding)
+            remaining[key] = remaining.get(key, 0) + 1
+        new_findings = []
+        for finding in found:
+            key = fingerprint(finding)
+            if remaining.get(key, 0):
+                remaining[key] -= 1
+            else:
+                new_findings.append(finding)
+
+        candidate_remaining: dict[tuple[tuple[str, str], ...], int] = {}
+        for finding in found:
+            key = fingerprint(finding)
+            candidate_remaining[key] = candidate_remaining.get(key, 0) + 1
+        resolved_findings = []
+        for finding in current:
+            key = fingerprint(finding)
+            if candidate_remaining.get(key, 0):
+                candidate_remaining[key] -= 1
+            else:
+                resolved_findings.append(finding)
+        reply.update({
+            "proposed": True,
+            "current_error_count": sum(
+                finding.severity == "error" for finding in current
+            ),
+            "current_finding_count": len(current),
+            "candidate_error_count": errors,
+            "candidate_finding_count": len(found),
+            "new_error_count": sum(
+                finding.severity == "error" for finding in new_findings
+            ),
+            "new_findings": [finding.as_dict() for finding in new_findings],
+            "resolved_findings": [
+                finding.as_dict() for finding in resolved_findings
+            ],
+        })
+    return reply
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
 def what_is_on_board(path: str, x: float, y: float,
                      radius: float = 0.01) -> dict[str, Any]:
-    """What is at a point: pads, track ends and vias.
+    """What touches a point: pads, track interiors, vias and zones.
 
-    The one query worth having while routing -- *is this actually connected?*
+    This is a geometric observation. It does not infer which object the caller
+    intended to touch.
     """
     try:
         return {"ok": True, **_board(path).at(x, y, radius)}
@@ -1342,6 +1575,24 @@ def render_board_layout(path: str, output_file: str, side: str = "top",
         return _fail(exc)
     return {"ok": True, "board": str(board.path), "image": str(image),
             "side": side, "courtyard": courtyard}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def query_board_region(path: str, x1: float, y1: float,
+                       x2: float, y2: float,
+                       layers: list[str] | None = None) -> dict[str, Any]:
+    """Objects whose conservative bounds intersect one explicit rectangle.
+
+    Returns footprints, pads, tracks, vias, zones and graphics. `layers` is an
+    exact filter; omission inspects every layer. The result reports geometry
+    only and does not select a corridor or propose a route.
+    """
+    try:
+        return {"ok": True, **_board(path).region(
+            x1, y1, x2, y2, layers=tuple(layers or [])
+        )}
+    except _ERRORS as exc:
+        return _fail(exc)
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.WRITE)
@@ -1413,11 +1664,13 @@ __all__ = [
     "list_net_class_assignments",
     "list_net_classes",
     "measure_placement",
+    "measure_routes",
     "move_footprint_fields",
     "move_footprints",
     "move_graphics",
     "new_board",
     "place_footprints",
+    "query_board_region",
     "refill_zones",
     "remove_copper",
     "remove_footprints",

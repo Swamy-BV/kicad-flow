@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, urlparse
 
 from kicad_flow.backend.kicad import render
 from kicad_flow.server.activity import activity_log_path
+from kicad_flow.server.scene import SceneHistory
 
 DEFAULT_PORT = 8472
 _RENDER_DIR = Path(tempfile.gettempdir()) / "kicad-flow-monitor"
@@ -168,6 +169,8 @@ class _State:
         self.events: list[dict[str, object]] = []  # recent tool calls
         self.seq = 0  # total events ever seen (a stable cursor for SSE readers)
         self.lock = threading.Lock()
+        self.scene_lock = threading.Lock()
+        self.scene_history = SceneHistory()
 
     def poll(self) -> None:
         """Ingest new activity lines and re-render if the active design changed.
@@ -262,10 +265,12 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             self._serve_static("index.html")
-        elif path in ("/style.css", "/app.js"):
+        elif path in ("/style.css", "/app.js", "/scene.js"):
             self._serve_static(path.lstrip("/"))
         elif path == "/render.png":
             self._send_png()
+        elif path == "/scene.json":
+            self._send_scene()
         elif path == "/events":
             self._stream()
         else:
@@ -322,6 +327,27 @@ class _Handler(BaseHTTPRequestHandler):
             png = self.state.png
         data = png.read_bytes() if png and png.is_file() else _placeholder_png()
         self._send(200, "image/png", data)
+
+    def _send_scene(self) -> None:
+        """Serve the same geometry contract used by MCP, from the saved file."""
+        from kicad_flow.backend import load
+
+        qs = parse_qs(urlparse(self.path).query)
+        with self.state.lock:
+            active = self.state.active
+        if active is None or active.suffix != ".kicad_sch":
+            self._send(200, "application/json", json.dumps({
+                "ok": False, "error": "Geometry view needs an active schematic."
+            }).encode())
+            return
+        try:
+            with self.state.scene_lock:
+                scene = load(active).scene(max_objects=10000)
+                result = self.state.scene_history.observe(
+                    str(active.resolve()), scene, qs.get("since", [""])[0])
+        except (OSError, ValueError, LookupError) as exc:
+            result = {"ok": False, "error": str(exc)}
+        self._send(200, "application/json", json.dumps(result).encode())
 
     def _stream(self) -> None:
         self.send_response(200)

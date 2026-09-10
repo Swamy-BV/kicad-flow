@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import sys
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +182,14 @@ async def build(client: Any) -> int:
         pend("add_wire", path=sheet, x1=pa["x"], y1=pa["y"],
                    x2=pb["x"], y2=pb["y"])
 
+    async def fields(sheet: str, ref: str, dx: float, dy: float,
+                     rotation: float = 0) -> None:
+        """Place readable horizontal identification in explicitly chosen space."""
+        await call("move_fields", path=sheet, moves=[
+            {"ref": ref, "name": name, "dx": dx, "dy": dy + offset,
+             "rotation": rotation, "justify": "left"}
+            for name, offset in (("Reference", 0), ("Value", 2 * G))])
+
     if OUT.exists():
         shutil.rmtree(OUT)
     root = str(OUT / "fc.kicad_sch")
@@ -256,7 +265,7 @@ async def build(client: Any) -> int:
     rail(power, buck, "GND", "GND")
 
     out5 = pin(ind, "2")
-    cout = await put(power, "Device:C", "C3", out5["x"] + 6 * G,
+    cout = await put(power, "Device:C", "C3", out5["x"] + 14 * G,
                      out5["y"] + 6 * G, "22u")
     pend("add_wire", path=power, x1=out5["x"], y1=out5["y"],
                x2=pin(cout, "1")["x"], y2=out5["y"])
@@ -331,7 +340,7 @@ async def build(client: Any) -> int:
     _f5 = await call("add_power_flags", path=power, flags=[{"x": 127.0, "y": 165.1}])
     f5 = _f5["flags"][0] if _f5 else {}
     _s5 = await call("add_power", path=power,
-                     symbols=[{"x": 127.0 + 8 * G, "y": 165.1, "net": "+5V"}])
+                     symbols=[{"x": 127.0 + 16 * G, "y": 165.1, "net": "+5V"}])
     s5 = _s5["symbols"][0] if _s5 else {}
     if f5 and s5:
         # The 5 V rail comes out of an inductor. ERC sees a passive, not a
@@ -342,13 +351,15 @@ async def build(client: Any) -> int:
     _gflg = await call("add_power_flags", path=power, flags=[{"x": 88.9, "y": 165.1}])
     gflg = _gflg["flags"][0] if _gflg else {}
     _gsym = await call("add_power", path=power,
-                       symbols=[{"x": 88.9 + 8 * G, "y": 165.1, "net": "GND"}])
+                       symbols=[{"x": 88.9 + 16 * G, "y": 165.1, "net": "GND"}])
     gsym = _gsym["symbols"][0] if _gsym else {}
     if gflg and gsym:
         pend("add_wire", path=power, x1=gflg["pins"][0]["x"],
                    y1=gflg["pins"][0]["y"], x2=gsym["pins"][0]["x"],
                    y2=gsym["pins"][0]["y"])
     await flush()
+    await fields(power, "U1", -12 * G, 8 * G)
+    await fields(power, "U2", 5 * G, -12 * G)
     await call("save_sheet", path=power)
 
     # -- mcu ---------------------------------------------------------------
@@ -366,10 +377,26 @@ async def build(client: Any) -> int:
     for index, (number, name) in enumerate(PINMAP):
         await net(mcu, u3, number, name, length=(8 + (index % 3) * 6) * G)
     # Supply pins: four VDD plus VBAT and VDDA, all on the top edge.
-    for number in ("1", "19", "32", "48", "64", "13"):
-        rail(mcu, u3, number, "+3V3", length=6 * G)
-    for number in ("12", "18", "63"):
-        rail(mcu, u3, number, "GND", length=6 * G)
+    # Shared horizontal rails leave one readable power label per bank.
+    for numbers, name, direction in (
+            (("1", "19", "32", "48", "64", "13"), "+3V3", -1),
+            (("12", "18", "63"), "GND", 1)):
+        pins = [pin(u3, number) for number in numbers]
+        rail_y = pins[0]["y"] + direction * 10 * G
+        for p in pins:
+            pend("add_wire", path=mcu, x1=p["x"], y1=p["y"],
+                 x2=p["x"], y2=rail_y)
+        xs = sorted({p["x"] for p in pins})
+        for a, b in pairwise(xs):
+            pend("add_wire", path=mcu, x1=a, y1=rail_y, x2=b, y2=rail_y)
+        for x in xs[1:-1]:
+            pend("add_junction", path=mcu, x=x, y=rail_y)
+        supply = await call("add_power", path=mcu, symbols=[{
+            "x": xs[-1] + 10 * G, "y": rail_y, "net": name}])
+        anchor = supply["symbols"][0]["pins"][0]
+        pend("add_wire", path=mcu, x1=xs[-1], y1=rail_y,
+             x2=anchor["x"], y2=anchor["y"])
+        pend("add_junction", path=mcu, x=xs[-1], y=rail_y)
 
     # Crystal on PH0/PH1.
     #
@@ -377,7 +404,7 @@ async def build(client: Any) -> int:
     # them sent two wires down the same column, which shorted PH0 to PH1 --
     # a short that draws perfectly neatly. These are local labels: the crystal
     # is on this page, so the net does not leave it.
-    y1 = await put(mcu, "Device:Crystal_GND24", "Y1", 101.6, 114.3, "8MHz",
+    y1 = await put(mcu, "Device:Crystal_GND24", "Y1", 50.8, 55.88, "8MHz",
                    rotation=90, mirror="y")
     await net(mcu, u3, "PH0", "OSC_IN", kind="local")
     await net(mcu, u3, "PH1", "OSC_OUT", kind="local")
@@ -390,36 +417,26 @@ async def build(client: Any) -> int:
         # capacitor is 7.62 mm tall, so one column put C6's lower pin exactly
         # on C7's upper one -- OSC_OUT shorted to ground, drawn neatly.
         cap = await put(mcu, "Device:C", ref,
-                        pin(y1, number)["x"] + (14 + index * 8) * G,
+                        pin(y1, number)["x"] + (20 + index * 20) * G,
                         pin(y1, number)["y"] + 4 * G, "20p")
         await net(mcu, cap, "1", name, length=4 * G, kind="local")
         rail(mcu, cap, "2", "GND")
 
     # Reset and boot.
-    rst = pin(u3, "NRST")
-    rr = await put(mcu, "Device:R", "R6", rst["x"] - 10 * G, rst["y"] - 8 * G,
+    rr = await put(mcu, "Device:R", "R6", 60.96, 100.33,
                    "10k")
-    pend("add_wire", path=mcu, x1=rst["x"], y1=rst["y"],
-               x2=pin(rr, "2")["x"], y2=rst["y"])
-    pend("add_wire", path=mcu, x1=pin(rr, "2")["x"], y1=rst["y"],
-               x2=pin(rr, "2")["x"], y2=pin(rr, "2")["y"])
+    await net(mcu, u3, "NRST", "RESET", kind="local")
+    await net(mcu, rr, "2", "RESET", kind="local")
     rail(mcu, rr, "1", "+3V3")
-    crst = await put(mcu, "Device:C", "C8", rst["x"] - 18 * G, rst["y"] + 6 * G,
+    crst = await put(mcu, "Device:C", "C8", 86.36, 100.33,
                      "100n")
-    pend("add_wire", path=mcu, x1=pin(crst, "1")["x"],
-               y1=pin(crst, "1")["y"], x2=pin(crst, "1")["x"], y2=rst["y"])
-    pend("add_wire", path=mcu, x1=pin(crst, "1")["x"], y1=rst["y"],
-               x2=pin(rr, "2")["x"], y2=rst["y"])
-    pend("add_junction", path=mcu, x=pin(rr, "2")["x"], y=rst["y"])
+    await net(mcu, crst, "1", "RESET", kind="local")
     rail(mcu, crst, "2", "GND")
 
-    boot = pin(u3, "BOOT0")
-    rb = await put(mcu, "Device:R", "R7", boot["x"] - 10 * G, boot["y"] + 8 * G,
+    rb = await put(mcu, "Device:R", "R7", 60.96, 139.7,
                    "10k")
-    pend("add_wire", path=mcu, x1=boot["x"], y1=boot["y"],
-               x2=pin(rb, "1")["x"], y2=boot["y"])
-    pend("add_wire", path=mcu, x1=pin(rb, "1")["x"], y1=boot["y"],
-               x2=pin(rb, "1")["x"], y2=pin(rb, "1")["y"])
+    await net(mcu, u3, "BOOT0", "BOOT0", kind="local")
+    await net(mcu, rb, "1", "BOOT0", kind="local")
     rail(mcu, rb, "2", "GND")
 
     # VCAP: the core regulator's own capacitors.
@@ -428,7 +445,7 @@ async def build(client: Any) -> int:
         p = pin(u3, number)
         # Each on its own column. Sharing one shorted the two together, and
         # the drawing looked fine.
-        cap = await put(mcu, "Device:C", ref, p["x"] - (8 + index * 6) * G,
+        cap = await put(mcu, "Device:C", ref, p["x"] - (8 + index * 20) * G,
                         p["y"] + 5 * G, "2u2")
         pend("add_wire", path=mcu, x1=p["x"], y1=p["y"],
                    x2=pin(cap, "1")["x"], y2=p["y"])
@@ -445,7 +462,7 @@ async def build(client: Any) -> int:
 
     # USB, and the SWD header.
     usb = await put(mcu, "Connector:USB_C_Receptacle_USB2.0_16P", "J2",
-                    63.5, 190.5, "USB-C")
+                    50.8, 220.98, "USB-C")
     await net(mcu, usb, "A6", "USB_DP", length=8 * G)
     await net(mcu, usb, "A7", "USB_DM", length=8 * G)
     await net(mcu, u3, "PA12", "USB_DP")
@@ -456,19 +473,13 @@ async def build(client: Any) -> int:
     for number in ("B6", "B7", "A8", "B8"):
         p = pin(usb, number)
         pend("add_no_connect", path=mcu, x=p["x"], y=p["y"])
-    # CC1 and CC2 leave the USB-C symbol on the SAME x, 2.54 mm apart. Both
-    # pulldowns used to be placed at that x + 12G, so they landed in one
-    # column 2.54 apart -- and a `Device:R` body is 7.62 mm tall, so they were
-    # drawn through each other. ERC reported 0/0 on it; only the render showed
-    # it. Give each its own column.
+    # Keep the CC pulldowns together in clear space, connected by local labels.
+    # This avoids running their drops through the USB data labels or VCAP bank.
     for column, (ref, number) in enumerate((("R8", "CC1"), ("R9", "CC2"))):
-        p = pin(usb, number)
         res = await put(mcu, "Device:R", ref,
-                        p["x"] + (12 + column * 8) * G, p["y"] + 8 * G, "5k1")
-        pend("add_wire", path=mcu, x1=p["x"], y1=p["y"],
-                   x2=pin(res, "1")["x"], y2=p["y"])
-        pend("add_wire", path=mcu, x1=pin(res, "1")["x"], y1=p["y"],
-                   x2=pin(res, "1")["x"], y2=pin(res, "1")["y"])
+                        254 + column * 20 * G, 210.82, "5k1")
+        await net(mcu, usb, number, number, kind="local")
+        await net(mcu, res, "1", number, kind="local")
         rail(mcu, res, "2", "GND")
 
     swd = await put(mcu, "Connector:Conn_01x04_Pin", "J3", 254.0, 149.86,
@@ -494,6 +505,9 @@ async def build(client: Any) -> int:
         pend("add_no_connect", path=mcu, x=p["x"], y=p["y"])
     print(f"  MCU: {len(PINMAP)} signals, {len(spare)} pins marked no-connect")
     await flush()
+    await fields(mcu, "U3", 20 * G, -44 * G)
+    await fields(mcu, "J2", -15 * G, 22 * G)
+    await fields(mcu, "Y1", 10 * G, -2 * G, rotation=270)
     await call("save_sheet", path=mcu)
 
     # -- sensors -----------------------------------------------------------
@@ -519,23 +533,21 @@ async def build(client: Any) -> int:
     for number in ("6", "7"):                 # the auxiliary I2C is unused
         p = pin(imu, number)
         pend("add_no_connect", path=sen, x=p["x"], y=p["y"])
-    # REGOUT and CPOUT hang below the part rather than out to its right,
-    # which is where IMU_INT's label now reaches.
+    # REGOUT and CPOUT use local labels to reach a separate capacitor bank.
+    # Vertical drops here would cross the flash signal labels.
     for index, (ref, number, value) in enumerate((("C16", "10", "100n"),
                                                   ("C17", "20", "2n2"))):
-        p = pin(imu, number)
-        cap = await put(sen, "Device:C", ref, p["x"] + (4 + index * 6) * G,
-                        p["y"] + 14 * G, value)
-        pend("add_wire", path=sen, x1=p["x"], y1=p["y"],
-                   x2=pin(cap, "1")["x"], y2=p["y"])
-        pend("add_wire", path=sen, x1=pin(cap, "1")["x"], y1=p["y"],
-                   x2=pin(cap, "1")["x"], y2=pin(cap, "1")["y"])
+        cap = await put(sen, "Device:C", ref, 76.2 + index * 25.4,
+                        165.1, value)
+        name = "IMU_REGOUT" if number == "10" else "IMU_CPOUT"
+        await net(sen, imu, number, name, length=8 * G, kind="local")
+        await net(sen, cap, "1", name, kind="local")
         rail(sen, cap, "2", "GND")
     cimu = await put(sen, "Device:C", "C18", 63.5, 139.7, "100n")
     rail(sen, cimu, "1", "+3V3")
     rail(sen, cimu, "2", "GND")
 
-    flash = await put(sen, "Memory_Flash:W25Q128JVS", "U5", 190.5, 96.52,
+    flash = await put(sen, "Memory_Flash:W25Q128JVS", "U5", 215.9, 96.52,
                       "W25Q128JVS")
     for index, (number, name) in enumerate((("6", "SPI3_SCK"),
                                             ("5", "SPI3_MOSI"),
@@ -563,6 +575,8 @@ async def build(client: Any) -> int:
     rail(sen, cfl, "1", "+3V3")
     rail(sen, cfl, "2", "GND")
     await flush()
+    await fields(sen, "U4", -10 * G, -20 * G)
+    await fields(sen, "U5", 8 * G, -16 * G)
     await call("save_sheet", path=sen)
 
     # -- io ----------------------------------------------------------------
@@ -575,21 +589,21 @@ async def build(client: Any) -> int:
         return failures
     for index, name in enumerate(("M1", "M2", "M3", "M4")):
         await net(io, motors, str(index * 2 + 1), name, length=8 * G)
-        rail(io, motors, str(index * 2 + 2), "GND", length=8 * G)
+        rail(io, motors, str(index * 2 + 2), "GND", length=18 * G)
 
     for ref, x, value, nets in (
             ("J5", 127.0, "RX", ("RX_TX", "RX_RX")),
             ("J6", 165.1, "VTX", ("VTX_TX", "VTX_RX")),
             ("J7", 203.2, "GPS", ("GPS_TX", "GPS_RX"))):
         conn = await put(io, "Connector:Conn_01x04_Pin", ref, x, 88.9, value)
-        rail(io, conn, "1", "+5V", length=8 * G)
+        rail(io, conn, "1", "+5V", length=18 * G)
         await net(io, conn, "2", nets[0], length=8 * G)
         await net(io, conn, "3", nets[1], length=8 * G)
         rail(io, conn, "4", "GND", length=8 * G)
 
     strip = await put(io, "Connector:Conn_01x03_Pin", "J8", 63.5, 139.7,
                       "LED STRIP")
-    rail(io, strip, "1", "+5V", length=8 * G)
+    rail(io, strip, "1", "+5V", length=18 * G)
     await net(io, strip, "2", "LED_DATA", length=8 * G)
     rail(io, strip, "3", "GND", length=8 * G)
 
@@ -623,15 +637,35 @@ async def build(client: Any) -> int:
         print(f"   {f.get('severity')} {f.get('kind')} on "
               f"{f.get('sheet')} at ({f.get('x')}, {f.get('y')})")
     nets = await call("list_nets", path=root)
+    # ERC does not reject passive accidental joins. Check the separate local
+    # circuits explicitly so layout changes cannot silently short them again.
+    expected_groups = (
+        {"C6.1", "U3.5", "Y1.3"},
+        {"C7.1", "U3.6", "Y1.1"},
+        {"C8.1", "R6.2", "U3.7"},
+        {"R7.1", "U3.60"},
+        {"C16.1", "U4.10"}, {"C17.1", "U4.20"},
+        {"J2.A5", "R8.1"}, {"J2.B5", "R9.1"},
+    )
+    actual_groups = [{f"{p['ref']}.{p['pin']}" for p in n["pins"]}
+                     for n in nets.get("nets", [])]
+    for expected in expected_groups:
+        if expected not in actual_groups:
+            print(f"  FAILED isolated net: {sorted(expected)}")
+            failures += 1
+    for sheet in (root, power, mcu, sen, io):
+        scene = await call("inspect_schematic_scene", path=sheet)
+        count = scene.get("finding_count", 0)
+        print(f"scene({Path(sheet).stem}): {count} potential overlaps")
+        failures += int(count > 0)
     named = [n for n in nets.get("nets", [])
              if not n["name"].startswith("unconnected")]
     print(f"\nlist_nets(root): {nets.get('count')} nets, {len(named)} named")
     for n in named:
         pins = ", ".join(f"{p['ref']}.{p['pin']}" for p in n["pins"])
         print(f"   {n['name']:14s} {pins[:82]}")
-    # Keep the README thumbnail reproducible. The output directory is removed
-    # at the start of every build, so the example must redraw what it deletes.
-    await call("render_schematic", path=root, output_dir=str(OUT), pages="3")
+    # Keep every page reviewable beside its source, including the README image.
+    await call("render_schematic", path=root, output_dir=str(OUT))
     return failures + int(report.get("errors") or 0)
 
 

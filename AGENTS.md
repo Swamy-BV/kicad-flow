@@ -65,8 +65,11 @@ expressible as N calls. Nothing is decided.
 `add_components` REPORTS, so the parts have to land and answer first. Two
 calls, always: place, read the pins out of the reply, then wire.
 
-The board side has not been through this yet and still takes scalars; `batch`
-runs its primitives N at a time until it has.
+Repeatable board writes follow the same plural rule. A candidate routing stage
+can be passed to `check_board` before `add_tracks`/`add_vias`/`add_zones`; the
+check runs on an isolated copy, while every routing decision remains
+caller-supplied. Board list writes are atomic for the same reason as schematic
+ones: a failed item reports its index and rolls back the whole list.
 
 ## Hard rules
 
@@ -115,17 +118,17 @@ reasoned about.
 ```
 src/kicad_flow/
   schematic/            the sheet contract, and nothing else
-    api.py              the ABC: 31 members, no tool named
+    api.py              the ABC, no tool or file format named
     types.py            Point, Pin, Part, SymbolDef, Net, Finding, SheetRef
   pcb/                  the board contract, and nothing else
-    api.py              the ABC: 34 members, no tool named
+    api.py              the ABC, no tool or file format named
     types.py            Point, Pad, Footprint, Track, Via, Zone, Net, Finding
   backend/              the only code that knows a KiCad file from any other
     __init__.py         create/load -- the one place a concrete class is named
     kicad/              _sexpr, cli, _library, _fileio, render
     kicad/schematic/    KiCadSheet(Sheet), netlist
     kicad/pcb/          KiCadBoard(Board), library, _runner
-  server/               FastMCP tools: 28 schematic + 30 board = 58
+  server/               FastMCP tools and compact caller instructions
   monitor/              the live view and the tool-call log; its own process
 examples/scripts/       fc and led_digits, both through MCP calls alone
 ```

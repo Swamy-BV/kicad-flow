@@ -1,9 +1,8 @@
 """MCP tools: the schematic primitives, one tool per primitive.
 
-There is no design document and no batch format. A tool takes a few scalars
-and returns what it made -- notably, every call that places something returns
-the **pin positions**, so the next call can wire to them without a lookup and
-without repeating the rotation arithmetic.
+There is no design document. Every schematic write takes one typed list and
+returns what it made -- notably, every placed part includes its transformed
+**pin positions**, so the next call can wire without repeating that arithmetic.
 
 The tools hold open sheets in memory, keyed by path, so a session is a
 sequence of small calls rather than a re-parse each time. `save_sheet` writes.
@@ -12,12 +11,12 @@ sequence of small calls rather than a re-parse each time. `save_sheet` writes.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..backend import create, load
-from ..schematic import Sheet
+from ..schematic import PartPlacement, Point, SceneBounds, Sheet
 from . import _meta
 from ._app import mcp
 
@@ -252,6 +251,59 @@ def get_fields(path: str, ref: str) -> dict[str, Any]:
 # -- reading back ---------------------------------------------------------
 
 
+@mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
+def inspect_schematic_scene(
+    path: str, x1: float | None = None, y1: float | None = None,
+    x2: float | None = None, y2: float | None = None,
+    since: str = "", max_objects: int = 2000,
+) -> dict[str, Any]:
+    """Inspect schematic geometry without images, saving or electrical inference.
+
+    Omit all rectangle coordinates for the sheet, or supply all four in mm.
+    Coordinates snap to the schematic grid. Select by bounds intersection;
+    return whole objects, not clipped fragments. A parent_id may be outside
+    the region. Child-sheet boxes name their files; inspect each child path
+    explicitly rather than loading the entire project into the model context.
+
+    Objects have stable IDs, bounds, exact connection anchors and properties.
+    Text bounds and spatial conflicts are conservative estimates. This is a
+    geometry view, not a replacement for list_nets or check_sheet; no electrical
+    connectivity is inferred from overlapping bounds or matching coordinates.
+
+    Pass the returned revision as since with the SAME path and rectangle to
+    receive only added/changed objects and findings, plus removed ID lists.
+    Apply deltas by ID; replace the local view on mode=full. An expired, unknown
+    or different-scope cursor returns a full reset, never a partial snapshot.
+    Each client keeps its own cursor. A region delta can remove an object that
+    moved outside the region without deleting it from the design.
+
+    max_objects limits the selected observation; exceeding it is an explicit
+    refusal, not silent truncation. Existing editing tools still take references
+    and coordinates as documented; scene IDs do not add another write API.
+    """
+    from ..schematic import snap
+    from .scene import history
+
+    try:
+        values = (x1, y1, x2, y2)
+        region = None
+        if any(value is not None for value in values):
+            if x1 is None or y1 is None or x2 is None or y2 is None:
+                raise ValueError("supply all of x1, y1, x2, y2 or omit all four")
+            import math
+
+            if not all(math.isfinite(v) for v in (x1, y1, x2, y2)):
+                raise ValueError("region coordinates must be finite")
+            if x1 > x2 or y1 > y2:
+                raise ValueError("rectangle requires x1 <= x2 and y1 <= y2")
+            region = SceneBounds(snap(x1), snap(y1), snap(x2), snap(y2))
+        sheet = _sheet(path)
+        scene = sheet.scene(region, max_objects=max_objects)
+        return history.observe(_key(path), scene, since)
+    except (LookupError, ValueError, OSError) as exc:
+        return _fail(exc)
+
+
 @mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.WRITE)
 def render_schematic(path: str, output_dir: str = "", dpi: int = 150,
                      black_and_white: bool = False, pages: str = "",
@@ -473,11 +525,21 @@ def list_labels(path: str) -> dict[str, Any]:
 # anything runs. That is the trade -- a single call nests one level deeper,
 # and 482 wires cost one round trip instead of 482.
 #
-# On a refusal they stop, say which INDEX failed, and hand back what already
-# landed. A half-finished batch is recoverable; a silent one is not.
+# Pydantic validates the complete list before the function runs. Backend
+# writes then use a transaction: a refusal names the failing INDEX and rolls
+# the whole list back, so autosave can never persist half of one call.
 
 
-class NewPart(BaseModel):
+class _StrictModel(BaseModel):
+    """One fully checked list element; unknown keys are never ignored."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+QuarterTurn = Literal[0, 90, 180, 270]
+
+
+class NewPart(_StrictModel):
     """One part for `add_components`."""
 
     lib_id: str = Field(description="Library symbol, e.g. 'Device:R'.")
@@ -485,12 +547,41 @@ class NewPart(BaseModel):
     x: float = Field(description="Position in mm; snapped to the 1.27 grid.")
     y: float = Field(description="Position in mm.")
     value: str = Field(default="", description="Shown value, e.g. '10k'.")
-    rotation: float = Field(default=0.0, description="0, 90, 180 or 270.")
-    mirror: str = Field(default="", description="'x', 'y', or empty.")
-    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+    rotation: QuarterTurn = Field(default=0, description="0, 90, 180 or 270.")
+    mirror: Literal["", "x", "y"] = Field(
+        default="", description="'x', 'y', or empty.")
+    unit: int = Field(default=1, ge=1,
+                      description="Unit of a multi-unit symbol.")
 
 
-class Segment(BaseModel):
+@mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
+def measure_schematic_placement(path: str,
+                                parts: list[NewPart]) -> dict[str, Any]:
+    """Measure a complete caller-decided placement without changing the sheet.
+
+    Supply the same list intended for `add_components`. The backend resolves
+    exact symbol geometry, rotations, mirrors, fields and pin positions on an
+    in-memory clone, then reports overlaps and drawable-page violations. It
+    never chooses, spreads, moves or repairs a component.
+
+    Use this before placing a functional block. If `clean` is false, revise the
+    complete coordinate list and measure again; when it is true, pass the same
+    list to `add_components`, then wire only to the pins that call returns.
+    """
+    try:
+        sheet = _sheet(path)
+        measured = sheet.measure_placement(tuple(
+            PartPlacement(lib_id=item.lib_id, ref=item.ref,
+                          at=Point(item.x, item.y), value=item.value,
+                          rotation=item.rotation, mirror=item.mirror,
+                          unit=item.unit)
+            for item in parts))
+    except (LookupError, ValueError) as exc:
+        return _fail(exc)
+    return {"ok": True, **measured.as_dict()}
+
+
+class Segment(_StrictModel):
     """One wire for `add_wires`, from one point to another."""
 
     x1: float = Field(description="Start, in mm; snapped to the grid.")
@@ -498,15 +589,22 @@ class Segment(BaseModel):
     x2: float = Field(description="End, in mm.")
     y2: float = Field(description="End, in mm.")
 
+    @model_validator(mode="after")
+    def has_length(self) -> Segment:
+        """Reject a segment that cannot connect two different points."""
+        if self.x1 == self.x2 and self.y1 == self.y2:
+            raise ValueError("a wire must have two different endpoints")
+        return self
 
-class Spot(BaseModel):
+
+class Spot(_StrictModel):
     """One point, for `add_junctions` and `add_no_connects`."""
 
     x: float = Field(description="Position in mm; snapped to the grid.")
     y: float = Field(description="Position in mm.")
 
 
-class LabelTarget(BaseModel):
+class LabelTarget(_StrictModel):
     """One label selected by stable UUID, or legacy snapped position."""
 
     uuid: str = Field(
@@ -527,83 +625,95 @@ class LabelTarget(BaseModel):
         return self
 
 
-class NewLabel(BaseModel):
+class NewLabel(_StrictModel):
     """One label for `add_labels`."""
 
     x: float = Field(description="Position in mm; snapped to the grid.")
     y: float = Field(description="Position in mm.")
     text: str = Field(description="The net name. Do not use labels for GND or "
                       "+3V3; place those rails with add_power.")
-    kind: str = Field(default="local",
+    kind: Literal["local", "global", "hierarchical"] = Field(default="local",
                       description="'local', 'global' or 'hierarchical'. Use "
                       "global only for an intentionally design-wide signal.")
     rotation: float = Field(default=0.0, description="Local, global and "
                             "hierarchical labels can be vertical at 90 or 270; "
                             "horizontal reads the same at 0 and 180.")
-    justify: str = Field(default="left", description="Text growth direction: "
+    justify: Literal["left", "right", "bottom"] = Field(
+                         default="left", description="Text growth direction: "
                          "'left' grows rightward and 'right' grows leftward. "
                          "Set this explicitly for local labels: use 'right' "
                          "on left-side pins and 'left' on right-side pins.")
 
 
-class NewPower(BaseModel):
+class NewPower(_StrictModel):
     """One power symbol for `add_power`."""
 
     x: float = Field(description="Position in mm; snapped to the grid.")
     y: float = Field(description="Position in mm.")
     net: str = Field(description="Rail name, especially 'GND' or '+3V3'. Use "
                      "this power symbol instead of a label with that name.")
-    rotation: float = Field(default=0.0, description="0, 90, 180 or 270.")
+    rotation: QuarterTurn = Field(default=0, description="0, 90, 180 or 270.")
 
 
-class NewFlag(BaseModel):
+class NewFlag(_StrictModel):
     """One PWR_FLAG for `add_power_flags`."""
 
     x: float = Field(description="Position in mm; snapped to the grid.")
     y: float = Field(description="Position in mm.")
-    rotation: float = Field(default=0.0, description="0, 90, 180 or 270.")
+    rotation: QuarterTurn = Field(default=0, description="0, 90, 180 or 270.")
 
 
-class NewSheetBox(BaseModel):
+class NewSheetPort(_StrictModel):
+    """One explicitly directed hierarchical-sheet port."""
+
+    name: str
+    kind: Literal["input", "output", "bidirectional", "tri_state", "passive"]
+
+
+class NewSheetBox(_StrictModel):
     """One child-sheet box for `add_sheets`."""
 
     name: str = Field(description="Sheet name, shown above the box.")
     filename: str = Field(description="Child file, e.g. 'power.kicad_sch'.")
     x: float = Field(description="Top-left corner, in mm.")
     y: float = Field(description="Top-left corner, in mm.")
-    width: float = Field(default=38.1, description="Box width in mm.")
-    height: float = Field(default=25.4, description="Box height in mm.")
-    ports: list[dict[str, str]] = Field(
+    width: float = Field(default=38.1, gt=0, description="Box width in mm.")
+    height: float = Field(default=25.4, gt=0, description="Box height in mm.")
+    ports: list[NewSheetPort] = Field(
         default_factory=list,
         description='[{"name": "SENSE", "kind": "input"}, ...].')
 
 
-class PartMove(BaseModel):
+class PartMove(_StrictModel):
     """One absolute move for `move_components`."""
 
     ref: str = Field(description="Reference to move.")
     x: float = Field(description="New position in mm; snapped to the grid.")
     y: float = Field(description="New position in mm.")
-    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+    unit: int = Field(default=1, ge=1,
+                      description="Unit of a multi-unit symbol.")
 
 
-class PartTurn(BaseModel):
+class PartTurn(_StrictModel):
     """One rotation for `rotate_components`."""
 
     ref: str = Field(description="Reference to turn.")
-    rotation: float = Field(description="0, 90, 180 or 270.")
-    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+    rotation: QuarterTurn = Field(description="0, 90, 180 or 270.")
+    unit: int = Field(default=1, ge=1,
+                      description="Unit of a multi-unit symbol.")
 
 
-class PartFlip(BaseModel):
+class PartFlip(_StrictModel):
     """One mirroring for `mirror_components`."""
 
     ref: str = Field(description="Reference to mirror.")
-    axis: str = Field(description="'x', 'y', or empty to clear it.")
-    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+    axis: Literal["", "x", "y"] = Field(
+        description="'x', 'y', or empty to clear it.")
+    unit: int = Field(default=1, ge=1,
+                      description="Unit of a multi-unit symbol.")
 
 
-class FieldValue(BaseModel):
+class FieldValue(_StrictModel):
     """One field to set, for `set_fields`."""
 
     ref: str = Field(description="The part.")
@@ -611,7 +721,7 @@ class FieldValue(BaseModel):
     value: str = Field(description="The value to write.")
 
 
-class FieldShift(BaseModel):
+class FieldShift(_StrictModel):
     """One field to move, for `move_fields`."""
 
     ref: str = Field(description="The part.")
@@ -620,14 +730,23 @@ class FieldShift(BaseModel):
     dy: float = Field(description="Offset from the part's position, in mm.")
     rotation: float | None = Field(default=None,
                                    description="Absolute text angle, or null.")
-    justify: str = Field(default="", description="'left', 'right' or empty.")
+    justify: Literal["", "left", "right"] = Field(
+        default="", description="'left', 'right' or empty.")
 
 
-def _partial(exc: Exception, index: int, key: str,
-             done: list[Any]) -> dict[str, Any]:
-    """A refusal that says which element failed and what already landed."""
-    return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
-            "index": index, key: done}
+def _atomic_items(sheet: Sheet, items: list[Any], key: str,
+                  each: Any) -> dict[str, Any]:
+    """Apply a typed list all-or-nothing and identify a refused element."""
+    out: list[Any] = []
+    _failed_index = 0
+    try:
+        with sheet.transaction():
+            for _failed_index, item in enumerate(items):
+                out.append(each(sheet, item))
+    except (LookupError, OSError, ValueError) as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}",
+                "index": _failed_index, "applied_count": 0, key: []}
+    return {"ok": True, "count": len(out), key: out}
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -656,16 +775,12 @@ def add_components(path: str, parts: list[NewPart]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, p in enumerate(parts):
-        try:
-            made = sheet.place(p.lib_id, p.ref, p.x, p.y, value=p.value,
-                               rotation=p.rotation, mirror=p.mirror,
-                               unit=p.unit)
-        except (LookupError, ValueError) as exc:
-            return _partial(exc, i, "parts", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "parts": out}
+    return _atomic_items(
+        sheet, list(parts), "parts",
+        lambda target, part: target.place(
+            part.lib_id, part.ref, part.x, part.y, value=part.value,
+            rotation=part.rotation, mirror=part.mirror,
+            unit=part.unit).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -689,14 +804,12 @@ def add_wires(path: str, wires: list[Segment]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, w in enumerate(wires):
-        try:
-            a, b = sheet.wire(w.x1, w.y1, w.x2, w.y2)
-        except LookupError as exc:
-            return _partial(exc, i, "wires", out)
-        out.append({"start": a.as_dict(), "end": b.as_dict()})
-    return {"ok": True, "count": len(out), "wires": out}
+    def wire(target: Sheet, segment: Segment) -> dict[str, Any]:
+        a, b = target.wire(segment.x1, segment.y1,
+                           segment.x2, segment.y2)
+        return {"start": a.as_dict(), "end": b.as_dict()}
+
+    return _atomic_items(sheet, list(wires), "wires", wire)
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -724,15 +837,11 @@ def add_labels(path: str, labels: list[NewLabel]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, lb in enumerate(labels):
-        try:
-            made = sheet.label(lb.x, lb.y, lb.text, kind=lb.kind,
-                               rotation=lb.rotation, justify=lb.justify)
-        except (LookupError, ValueError) as exc:
-            return _partial(exc, i, "labels", out)
-        out.append(made.as_dict())
-    return {"ok": True, "count": len(out), "labels": out}
+    return _atomic_items(
+        sheet, list(labels), "labels",
+        lambda target, label: target.label(
+            label.x, label.y, label.text, kind=label.kind,
+            rotation=label.rotation, justify=label.justify).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -750,13 +859,9 @@ def add_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, p in enumerate(points):
-        try:
-            out.append(sheet.junction(p.x, p.y).as_dict())
-        except LookupError as exc:
-            return _partial(exc, i, "points", out)
-    return {"ok": True, "count": len(out), "points": out}
+    return _atomic_items(
+        sheet, list(points), "points",
+        lambda target, point: target.junction(point.x, point.y).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -774,13 +879,9 @@ def add_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, p in enumerate(points):
-        try:
-            out.append(sheet.no_connect(p.x, p.y).as_dict())
-        except LookupError as exc:
-            return _partial(exc, i, "points", out)
-    return {"ok": True, "count": len(out), "points": out}
+    return _atomic_items(
+        sheet, list(points), "points",
+        lambda target, point: target.no_connect(point.x, point.y).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -806,14 +907,11 @@ def add_power(path: str, symbols: list[NewPower]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, s in enumerate(symbols):
-        try:
-            out.append(sheet.power(s.x, s.y, s.net,
-                                   rotation=s.rotation).as_dict())
-        except (LookupError, ValueError) as exc:
-            return _partial(exc, i, "symbols", out)
-    return {"ok": True, "count": len(out), "symbols": out}
+    return _atomic_items(
+        sheet, list(symbols), "symbols",
+        lambda target, symbol: target.power(
+            symbol.x, symbol.y, symbol.net,
+            rotation=symbol.rotation).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -834,14 +932,10 @@ def add_power_flags(path: str, flags: list[NewFlag]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, f in enumerate(flags):
-        try:
-            out.append(sheet.power_flag(f.x, f.y,
-                                        rotation=f.rotation).as_dict())
-        except (LookupError, ValueError) as exc:
-            return _partial(exc, i, "flags", out)
-    return {"ok": True, "count": len(out), "flags": out}
+    return _atomic_items(
+        sheet, list(flags), "flags",
+        lambda target, flag: target.power_flag(
+            flag.x, flag.y, rotation=flag.rotation).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -867,18 +961,13 @@ def add_sheets(path: str, sheets: list[NewSheetBox]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, s in enumerate(sheets):
-        try:
-            ref = sheet.add_sheet(
-                s.name, s.filename, s.x, s.y, width=s.width, height=s.height,
-                ports=tuple((p["name"], p.get("kind", "passive"))
-                            for p in s.ports),
-            )
-        except (LookupError, KeyError, ValueError) as exc:
-            return _partial(exc, i, "sheets", out)
-        out.append(ref.as_dict())
-    return {"ok": True, "count": len(out), "sheets": out}
+    return _atomic_items(
+        sheet, list(sheets), "sheets",
+        lambda target, child: target.add_sheet(
+            child.name, child.filename, child.x, child.y,
+            width=child.width, height=child.height,
+            ports=tuple((port.name, port.kind)
+                        for port in child.ports)).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -918,22 +1007,18 @@ def move_components(path: str, moves: list[PartMove] | None = None,
     if moves is None and refs is None:
         return {"ok": False,
                 "error": "give either moves=[...] or refs=[...] with dx/dy"}
-    out: list[dict[str, Any]] = []
     if moves is not None:
-        for i, m in enumerate(moves):
-            try:
-                out.append(sheet.move(m.ref, m.x, m.y, unit=m.unit).as_dict())
-            except (LookupError, ValueError) as exc:
-                return _partial(exc, i, "moved", out)
-    else:
-        for i, ref in enumerate(refs or []):
-            try:
-                was = sheet.part(ref, unit=unit).at
-                out.append(sheet.move(ref, was.x + dx, was.y + dy,
-                                      unit=unit).as_dict())
-            except (LookupError, ValueError) as exc:
-                return _partial(exc, i, "moved", out)
-    return {"ok": True, "count": len(out), "moved": out}
+        return _atomic_items(
+            sheet, list(moves), "moved",
+            lambda target, move: target.move(
+                move.ref, move.x, move.y, unit=move.unit).as_dict())
+
+    def shift(target: Sheet, ref: str) -> dict[str, Any]:
+        was = target.part(ref, unit=unit).at
+        return target.move(ref, was.x + dx, was.y + dy,
+                           unit=unit).as_dict()
+
+    return _atomic_items(sheet, list(refs or []), "moved", shift)
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -951,13 +1036,10 @@ def rotate_components(path: str, turns: list[PartTurn]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, t in enumerate(turns):
-        try:
-            out.append(sheet.rotate(t.ref, t.rotation, unit=t.unit).as_dict())
-        except (LookupError, ValueError) as exc:
-            return _partial(exc, i, "turned", out)
-    return {"ok": True, "count": len(out), "turned": out}
+    return _atomic_items(
+        sheet, list(turns), "turned",
+        lambda target, turn: target.rotate(
+            turn.ref, turn.rotation, unit=turn.unit).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -975,13 +1057,10 @@ def mirror_components(path: str, mirrors: list[PartFlip]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, m in enumerate(mirrors):
-        try:
-            out.append(sheet.mirror(m.ref, m.axis, unit=m.unit).as_dict())
-        except (LookupError, ValueError) as exc:
-            return _partial(exc, i, "mirrored", out)
-    return {"ok": True, "count": len(out), "mirrored": out}
+    return _atomic_items(
+        sheet, list(mirrors), "mirrored",
+        lambda target, mirror: target.mirror(
+            mirror.ref, mirror.axis, unit=mirror.unit).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -1001,14 +1080,11 @@ def remove_components(path: str, refs: list[str],
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    gone: list[Any] = []
-    for i, ref in enumerate(refs):
-        try:
-            sheet.remove(ref, unit=unit)
-        except LookupError as exc:
-            return _partial(exc, i, "removed", gone)
-        gone.append(ref)
-    return {"ok": True, "count": len(gone), "removed": gone}
+    def remove(target: Sheet, ref: str) -> str:
+        target.remove(ref, unit=unit)
+        return ref
+
+    return _atomic_items(sheet, list(refs), "removed", remove)
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -1026,14 +1102,11 @@ def set_fields(path: str, fields: list[FieldValue]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, f in enumerate(fields):
-        try:
-            got = sheet.set_field(f.ref, f.name, f.value)
-        except LookupError as exc:
-            return _partial(exc, i, "fields", out)
-        out.append({"ref": f.ref, "fields": got})
-    return {"ok": True, "count": len(out), "fields": out}
+    return _atomic_items(
+        sheet, list(fields), "fields",
+        lambda target, field: {
+            "ref": field.ref,
+            "fields": target.set_field(field.ref, field.name, field.value)})
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -1053,31 +1126,30 @@ def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, m in enumerate(moves):
-        try:
-            at = sheet.move_field(m.ref, m.name, m.dx, m.dy,
-                                  rotation=m.rotation, justify=m.justify)
-        except LookupError as exc:
-            return _partial(exc, i, "moved", out)
-        out.append({"ref": m.ref, "field": m.name, **at.as_dict()})
-    return {"ok": True, "count": len(out), "moved": out}
+    def move(target: Sheet, item: FieldShift) -> dict[str, Any]:
+        at = target.move_field(item.ref, item.name, item.dx, item.dy,
+                               rotation=item.rotation,
+                               justify=item.justify)
+        return {"ref": item.ref, "field": item.name, **at.as_dict()}
+
+    return _atomic_items(sheet, list(moves), "moved", move)
 
 
 
-class SheetNote(BaseModel):
+class SheetNote(_StrictModel):
     """One note for `add_texts`."""
 
     x: float = Field(description="Position in mm; snapped to the grid.")
     y: float = Field(description="Position in mm. This is the text's BASELINE,"
                      " so a note grows downward from here.")
     text: str = Field(description="The note. Newlines are kept.")
-    size: float = Field(default=1.27, description="Text height in mm. 1.27 "
+    size: float = Field(default=1.27, gt=0,
+                        description="Text height in mm. 1.27 "
                         "matches a label; 2.54 reads as a heading.")
     rotation: float = Field(default=0.0, description="Degrees. Any angle.")
     bold: bool = Field(default=False, description="Bold, for a heading.")
-    justify: str = Field(default="left",
-                         description="'left', 'right' or 'center'.")
+    justify: Literal["left", "right", "center"] = Field(
+        default="left", description="'left', 'right' or 'center'.")
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
@@ -1102,16 +1174,13 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, n in enumerate(notes):
-        try:
-            at = sheet.text(n.x, n.y, n.text, size=n.size,
-                            rotation=n.rotation, bold=n.bold,
-                            justify=n.justify)
-        except (LookupError, ValueError) as exc:
-            return {**_fail(exc), "index": i, "notes": out}
-        out.append({"text": n.text, "size": n.size, **at.as_dict()})
-    return {"ok": True, "count": len(out), "notes": out}
+    def add(target: Sheet, note: SheetNote) -> dict[str, Any]:
+        at = target.text(note.x, note.y, note.text, size=note.size,
+                         rotation=note.rotation, bold=note.bold,
+                         justify=note.justify)
+        return {"text": note.text, "size": note.size, **at.as_dict()}
+
+    return _atomic_items(sheet, list(notes), "notes", add)
 
 
 # -- editing what is already drawn ----------------------------------------
@@ -1122,7 +1191,7 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
 # for success.
 
 
-class WireEnds(BaseModel):
+class WireEnds(_StrictModel):
     """One wire, named by the two points it runs between."""
 
     x1: float = Field(description="One end, in mm; snapped to the grid.")
@@ -1152,7 +1221,7 @@ class LabelTurn(LabelTarget):
                             "label; horizontal reads the same at 0 and 180.")
 
 
-class SheetMove(BaseModel):
+class SheetMove(_StrictModel):
     """One child-sheet box to move."""
 
     name: str = Field(description="The sheet name shown above the box.")
@@ -1160,24 +1229,26 @@ class SheetMove(BaseModel):
     y: float = Field(description="New top-left corner, in mm.")
 
 
-class FieldRef(BaseModel):
+class FieldRef(_StrictModel):
     """One field to delete."""
 
     ref: str = Field(description="The part.")
     name: str = Field(description="Field name, for example MPN.")
-    unit: int = Field(default=1, description="Unit of a multi-unit symbol.")
+    unit: int = Field(default=1, ge=1,
+                      description="Unit of a multi-unit symbol.")
 
 
 def _counted(sheet: Sheet, items: list[Any], each: Any,
              key: str) -> dict[str, Any]:
-    """Run *each* over *items*, totalling how many it found."""
-    found = 0
-    for i, item in enumerate(items):
-        try:
-            found += each(sheet, item)
-        except (LookupError, ValueError) as exc:
-            return {**_fail(exc), "index": i, key: found}
-    return {"ok": True, "count": len(items), key: found}
+    """Run counted edits atomically, totalling how many objects they found."""
+    result = _atomic_items(sheet, items, "results", each)
+    if not result.get("ok"):
+        result.pop("results", None)
+        result[key] = 0
+        return result
+    values = result.pop("results")
+    result[key] = sum(values)
+    return result
 
 
 def _remove_label(sheet: Sheet, target: LabelTarget) -> int:
@@ -1378,13 +1449,10 @@ def move_sheets(path: str, moves: list[SheetMove]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, m in enumerate(moves):
-        try:
-            out.append(sheet.move_sheet(m.name, m.x, m.y).as_dict())
-        except LookupError as exc:
-            return {**_fail(exc), "index": i, "sheets": out}
-    return {"ok": True, "count": len(out), "sheets": out}
+    return _atomic_items(
+        sheet, list(moves), "sheets",
+        lambda target, move: target.move_sheet(
+            move.name, move.x, move.y).as_dict())
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -1405,14 +1473,11 @@ def remove_sheets(path: str, names: list[str]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    gone: list[str] = []
-    for i, name in enumerate(names):
-        try:
-            sheet.remove_sheet(name)
-        except LookupError as exc:
-            return {**_fail(exc), "index": i, "removed": gone}
-        gone.append(name)
-    return {"ok": True, "count": len(gone), "removed": gone}
+    def remove(target: Sheet, name: str) -> str:
+        target.remove_sheet(name)
+        return name
+
+    return _atomic_items(sheet, list(names), "removed", remove)
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
@@ -1433,22 +1498,21 @@ def remove_fields(path: str, fields: list[FieldRef]) -> dict[str, Any]:
         sheet = _sheet(path)
     except LookupError as exc:
         return _fail(exc)
-    out: list[dict[str, Any]] = []
-    for i, f in enumerate(fields):
-        try:
-            left = sheet.remove_field(f.ref, f.name, unit=f.unit)
-        except LookupError as exc:
-            return {**_fail(exc), "index": i, "fields": out}
-        out.append({"ref": f.ref, "fields": left})
-    return {"ok": True, "count": len(out), "fields": out}
+    return _atomic_items(
+        sheet, list(fields), "fields",
+        lambda target, field: {
+            "ref": field.ref,
+            "fields": target.remove_field(
+                field.ref, field.name, unit=field.unit)})
 
 __all__ = [
     "add_components", "add_junctions", "add_labels",
     "add_no_connects", "add_power", "add_power_flags",
     "add_sheets", "add_texts", "add_wires",
     "check_sheet", "check_sheet_layout", "find_symbol", "get_component",
-    "get_fields", "get_pin", "list_components",
-    "list_labels", "list_nets", "list_wires", "mirror_components",
+    "get_fields", "get_pin", "inspect_schematic_scene", "list_components",
+    "list_labels", "list_nets", "list_wires",
+    "measure_schematic_placement", "mirror_components",
     "move_components", "move_fields", "move_labels",
     "move_sheets", "move_wires", "new_sheet",
     "next_ref", "remove_components", "remove_fields",

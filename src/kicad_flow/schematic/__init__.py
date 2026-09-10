@@ -22,11 +22,21 @@ from .types import (
     Net,
     NetPin,
     Part,
+    PartPlacement,
     Pin,
+    PlacementBounds,
+    PlacementMeasurement,
     Point,
+    SceneBounds,
+    SceneFinding,
+    SceneObject,
+    SceneSnapshot,
     SheetRef,
     SymbolDef,
 )
 
 __all__ = ["GRID", "Finding", "Label", "LayoutFinding", "Net", "NetPin",
-           "Part", "Pin", "Point", "Sheet", "SheetRef", "SymbolDef", "snap"]
+           "Part", "PartPlacement", "Pin", "PlacementBounds",
+           "PlacementMeasurement", "Point", "SceneBounds", "SceneFinding",
+           "SceneObject", "SceneSnapshot", "Sheet", "SheetRef", "SymbolDef",
+           "snap"]

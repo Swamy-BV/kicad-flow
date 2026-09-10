@@ -103,6 +103,64 @@ class Part:
 
 
 @dataclass(frozen=True)
+class PartPlacement:
+    """One caller-decided symbol pose to inspect without placing it."""
+
+    lib_id: str
+    ref: str
+    at: Point
+    value: str = ""
+    rotation: float = 0.0
+    mirror: str = ""
+    unit: int = 1
+
+
+@dataclass(frozen=True)
+class PlacementBounds:
+    """Axis-aligned sheet bounds for one predicted visible object."""
+
+    name: str
+    kind: str
+    ref: str
+    unit: int
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    def as_dict(self) -> dict[str, Any]:
+        """The visible extent as JSON."""
+        return {"name": self.name, "kind": self.kind, "ref": self.ref,
+                "unit": self.unit, "left": round(self.left, 3),
+                "top": round(self.top, 3), "right": round(self.right, 3),
+                "bottom": round(self.bottom, 3)}
+
+
+@dataclass(frozen=True)
+class PlacementMeasurement:
+    """Facts about a proposed placement, computed without changing the sheet."""
+
+    parts: tuple[Part, ...]
+    bounds: tuple[PlacementBounds, ...]
+    findings: tuple[LayoutFinding, ...]
+    page_size: tuple[float, float]
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete non-mutating measurement as JSON."""
+        overlap_count = sum(1 for item in self.findings
+                            if item.kind.endswith("_overlap"))
+        page_violation_count = sum(1 for item in self.findings
+                                   if item.kind == "page_bounds")
+        return {"clean": not self.findings, "part_count": len(self.parts),
+                "parts": [part.as_dict() for part in self.parts],
+                "bounds": [item.as_dict() for item in self.bounds],
+                "overlap_count": overlap_count,
+                "page_violation_count": page_violation_count,
+                "page_size": [self.page_size[0], self.page_size[1]],
+                "findings": [item.as_dict() for item in self.findings]}
+
+
+@dataclass(frozen=True)
 class SymbolDef:
     """What a library symbol offers, before it is placed anywhere.
 
@@ -265,5 +323,82 @@ class SheetRef:
                 "pins": [p.as_dict() for p in self.pins]}
 
 
+@dataclass(frozen=True)
+class SceneBounds:
+    """An axis-aligned rectangle in sheet coordinates, including its edges."""
+
+    left: float
+    top: float
+    right: float
+    bottom: float
+
+    def intersects(self, other: SceneBounds) -> bool:
+        """Whether the rectangles share any point."""
+        return (self.left <= other.right and other.left <= self.right
+                and self.top <= other.bottom and other.top <= self.bottom)
+
+    def as_list(self) -> list[float]:
+        """Return left, top, right and bottom in millimetres."""
+        return [round(v, 3) for v in (
+            self.left, self.top, self.right, self.bottom)]
+
+
+@dataclass(frozen=True)
+class SceneObject:
+    """One addressable geometric object; bounds are not electrical evidence."""
+
+    id: str
+    kind: str
+    bounds: SceneBounds
+    at: Point
+    parent_id: str = ""
+    properties: tuple[tuple[str, str | float | int | bool], ...] = ()
+    points: tuple[Point, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return geometry and scalar properties without image data."""
+        out: dict[str, Any] = {
+            "id": self.id, "kind": self.kind,
+            "bounds": self.bounds.as_list(), **self.at.as_dict(),
+            "properties": dict(self.properties),
+        }
+        if self.parent_id:
+            out["parent_id"] = self.parent_id
+        if self.points:
+            out["points"] = [p.as_dict() for p in self.points]
+        return out
+
+
+@dataclass(frozen=True)
+class SceneFinding:
+    """A conservative spatial conflict naming stable scene object IDs."""
+
+    id: str
+    kind: str
+    objects: tuple[str, ...]
+    at: Point
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return an actionable geometric finding, not an ERC result."""
+        return {"id": self.id, "kind": self.kind,
+                "objects": list(self.objects), **self.at.as_dict(),
+                "severity": "warning"}
+
+
+@dataclass(frozen=True)
+class SceneSnapshot:
+    """A complete observation of one sheet or explicitly selected region."""
+
+    sheet_id: str
+    revision: str
+    page: SceneBounds
+    region: SceneBounds | None
+    objects: tuple[SceneObject, ...]
+    findings: tuple[SceneFinding, ...]
+    unsupported: tuple[str, ...] = ()
+
+
 __all__ = ["Finding", "Label", "LayoutFinding", "Net", "NetPin", "Part",
-           "Pin", "Point", "SheetRef", "SymbolDef"]
+           "PartPlacement", "Pin", "PlacementBounds", "PlacementMeasurement",
+           "Point", "SceneBounds", "SceneFinding", "SceneObject", "SceneSnapshot",
+           "SheetRef", "SymbolDef"]

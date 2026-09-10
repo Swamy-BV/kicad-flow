@@ -108,6 +108,7 @@ RES_FP = "Resistor_SMD:R_0402_1005Metric"
 ASYMMETRIC_FP = (
     "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
 )
+LAYER_TEST_FP = "Connector_Wire:SolderWirePad_1x01_SMD_2x4mm"
 
 
 def channels() -> list[tuple[int, str, int, int]]:
@@ -152,6 +153,7 @@ async def build(client: Client) -> int:
     failures = 0
     calls = 0
     used_tools: set[str] = set()
+    wrong: list[str] = []
 
     async def call(tool: str, **kw: Any) -> dict[str, Any]:
         """One MCP call, failing loudly rather than continuing on sand."""
@@ -167,6 +169,18 @@ async def build(client: Client) -> int:
             why = (data or {}).get("error") if isinstance(data, dict) else data
             print(f"  FAILED {tool} {kw.get('ref', kw.get('net', ''))}: {why}")
             failures += 1
+            return {}
+        return data
+
+    async def refusal(tool: str, **kw: Any) -> dict[str, Any]:
+        """One deliberately refused MCP call, counted as coverage not failure."""
+        nonlocal calls
+        calls += 1
+        used_tools.add(tool)
+        res = await client.call_tool(tool, kw)
+        data = res.data if hasattr(res, "data") else res
+        if not isinstance(data, dict) or data.get("ok") is not False:
+            wrong.append(f"{tool} accepted an operation expected to be refused")
             return {}
         return data
 
@@ -482,7 +496,6 @@ async def build(client: Client) -> int:
     # project has: it is silent, and every decision the caller makes downstream
     # rests on it. `check_board` cannot see it -- the file is self-consistent
     # whether the answer is right or not.
-    wrong: list[str] = []
     if layout.get("errors") or layout.get("warnings"):
         wrong.append(
             "schematic layout has "
@@ -519,6 +532,13 @@ async def build(client: Client) -> int:
 
     # (a) the board's own inventory
     fps = await call("list_footprints", path=board)
+    # Inspect the existing hierarchy without changing the fixture's drawing.
+    scene = await call("inspect_schematic_scene", path=root)
+    same("scene child boxes", sum(obj["kind"] == "sheet"
+                                  for obj in scene.get("objects", [])), len(DIGITS))
+    scene_delta = await call("inspect_schematic_scene", path=root,
+                             since=scene["revision"])
+    same("unchanged scene delta", scene_delta.get("objects"), [])
     cop = await call("list_copper", path=board)
     bnets = await call("list_board_nets", path=board)
     same("list_footprints count", len(fps.get("footprints", [])), 2 * len(placed))
@@ -625,8 +645,38 @@ async def build(client: Client) -> int:
     # only way back was to rebuild the page.
     scratch_sch = str(OUT / "_edit.kicad_sch")
     await call("new_sheet", path=scratch_sch, title="edit round trip")
-    made = await call("add_components", path=scratch_sch, parts=[
-        {"lib_id": "Device:R", "ref": "R1", "x": 50, "y": 50}])
+    # A plural write is one transaction. The valid first element must not
+    # survive when a later element fails.
+    calls += 1
+    used_tools.add("add_components")
+    rejected_result = await client.call_tool("add_components", {
+        "path": scratch_sch,
+        "parts": [
+            {"lib_id": "Device:R", "ref": "RROLL", "x": 30, "y": 30},
+            {"lib_id": "Missing:Symbol", "ref": "XBROKEN", "x": 40, "y": 30},
+        ],
+    })
+    rejected = (rejected_result.data if hasattr(rejected_result, "data")
+                else rejected_result)
+    same("failed list write is rejected", rejected.get("ok"), False)
+    same("failed list write reports no applied items",
+         rejected.get("applied_count"), 0)
+    same("failed list write rolls back its first item", (await call(
+        "list_components", path=scratch_sch)).get("count"), 0)
+
+    r1_request = {"lib_id": "Device:R", "ref": "R1", "x": 50, "y": 50}
+    crowded = await call("measure_schematic_placement", path=scratch_sch,
+                         parts=[r1_request, {
+                             "lib_id": "Device:R", "ref": "R2",
+                             "x": 50, "y": 50}])
+    same("placement preflight detects a collision",
+         crowded.get("overlap_count", 0) > 0, True)
+    placement = await call(
+        "measure_schematic_placement", path=scratch_sch, parts=[r1_request])
+    same("placement preflight sees one part", placement.get("part_count"), 1)
+    same("placement preflight does not mutate", (await call(
+        "list_components", path=scratch_sch)).get("count"), 0)
+    made = await call("add_components", path=scratch_sch, parts=[r1_request])
     rp = {q["number"]: q for q in made["parts"][0]["pins"]}
     top, bot = rp["1"], rp["2"]
     await call("add_wires", path=scratch_sch, wires=[
@@ -809,6 +859,57 @@ async def build(client: Client) -> int:
     # the design above, so it gets a scratch board that is deleted after.
     scratch = str(OUT / "_scratch.kicad_pcb")
     await call("new_board", path=scratch, layers=2)
+    unsafe_remove = await refusal("remove_copper", path=scratch)
+    same("remove_copper requires explicit scope",
+         "all=true" in unsafe_remove.get("error", ""), True)
+    before_atomic = await call("list_copper", path=scratch)
+    rolled_back = await refusal("add_tracks", path=scratch, tracks=[
+        {"x1": 1, "y1": 1, "x2": 2, "y2": 1,
+         "layer": "F.Cu", "width": 0.25, "net": "ATOMIC"},
+        {"x1": 2, "y1": 1, "x2": 3, "y2": 1,
+         "layer": "In9.Cu", "width": 0.25, "net": "ATOMIC"},
+    ])
+    after_atomic = await call("list_copper", path=scratch)
+    same("failed PCB list reports zero applied",
+         rolled_back.get("applied_count"), 0)
+    same("failed PCB list rolls back earlier primitives",
+         after_atomic.get("tracks"), before_atomic.get("tracks"))
+
+    via_scratch = str(OUT / "_scratch-vias.kicad_pcb")
+    await call("new_board", path=via_scratch, layers=4)
+    typed_vias = await call("add_vias", path=via_scratch, vias=[
+        {"x": 5, "y": 5, "net": "BLIND", "diameter": 0.45,
+         "drill": 0.2, "layers": ["F.Cu", "In1.Cu"],
+         "kind": "blind_buried"},
+        {"x": 7, "y": 5, "net": "MICRO", "diameter": 0.3,
+         "drill": 0.1, "layers": ["In1.Cu", "In2.Cu"],
+         "kind": "microvia"},
+    ])
+    same("typed via spans round trip", [
+        (item.get("kind"), item.get("layers"))
+        for item in typed_vias.get("vias", [])
+    ], [
+        ("blind_buried", ["F.Cu", "In1.Cu"]),
+        ("microvia", ["In1.Cu", "In2.Cu"]),
+    ])
+    await call("save_board", path=via_scratch)
+    via_region = await call(
+        "query_board_region", path=via_scratch,
+        x1=4, y1=4, x2=8, y2=6, layers=["In1.Cu"],
+    )
+    same("region query reports bounded vias",
+         len(via_region.get("vias", [])), 2)
+    incompatible_profile = await refusal(
+        "set_fabrication_profile", path=via_scratch, provider="jlcpcb",
+        outer_copper_oz=1.0, inner_copper_oz=0.5, finish="ENIG",
+        soldermask_color="green", tier="recommended",
+    )
+    same("provider profile inspects existing via kinds",
+         "provider profile permits via kinds" in incompatible_profile.get(
+             "error", ""
+         ), True)
+    await call("remove_copper", path=via_scratch, all=True,
+               tracks=True, vias=True, zones=True)
     await call("set_board_limits", path=scratch, min_track_width=0.12,
                min_via_drill=0.18, min_solder_mask_bridge=0.10)
     initial_limits = await call("get_board_limits", path=scratch)
@@ -859,9 +960,86 @@ async def build(client: Client) -> int:
     await call("remove_graphics", path=scratch, uuids=[graphic_uuid])
     outline_zone = await call("add_zones", path=scratch, zones=[{
         "boundary": "board_outline", "inset": 0.2, "max_error": 0.02,
-        "layer": "B.Cu"}])
+        "layer": "B.Cu", "clearance": 0.3,
+        "pad_connection": "thermal", "min_thickness": 0.2,
+        "thermal_gap": 0.4, "thermal_spoke_width": 0.35,
+        "priority": 2, "island_removal": "area",
+        "min_island_area": 1.0}])
     same("rounded outline zone has bounded curve sampling",
          len(outline_zone.get("zones", [{}])[0].get("points", [])) > 20, True)
+    zone_made = outline_zone.get("zones", [{}])[0]
+    same("zone settings and uuid are returned", {
+        key: zone_made.get(key) for key in (
+            "clearance", "min_thickness", "thermal_gap",
+            "thermal_spoke_width", "priority", "island_removal",
+            "min_island_area")
+    }, {
+        "clearance": 0.3, "min_thickness": 0.2, "thermal_gap": 0.4,
+        "thermal_spoke_width": 0.35, "priority": 2,
+        "island_removal": "area", "min_island_area": 1.0,
+    })
+    same("add_zones returns stable uuid", bool(zone_made.get("uuid")), True)
+    zone_preview = await call(
+        "remove_copper", path=scratch, uuid=zone_made.get("uuid", ""),
+        dry_run=True,
+    )
+    same("zone uuid is an exact removable identity",
+         zone_preview.get("removed"), 1)
+    await call("place_footprints", path=scratch, footprints=[
+        {"fp_id": LAYER_TEST_FP, "ref": "LF", "x": 10, "y": 10,
+         "anchor": "courtyard_center", "side": "F"},
+        {"fp_id": LAYER_TEST_FP, "ref": "LB", "x": 10, "y": 10,
+         "anchor": "courtyard_center", "side": "B"},
+    ])
+    await call("set_pad_nets", path=scratch, pads=[
+        {"ref": "LF", "pad": "1", "net": "LAYER_TEST"},
+        {"ref": "LB", "pad": "1", "net": "LAYER_TEST"},
+    ])
+    layer_open = await call("unrouted_connections", path=scratch)
+    same("coincident pads on opposite copper layers stay disconnected",
+         sum(c.get("net") == "LAYER_TEST"
+             for c in layer_open.get("connections", [])), 1)
+    layer_via = await call("add_vias", path=scratch, vias=[{
+        "x": 10, "y": 10, "net": "LAYER_TEST",
+        "diameter": 0.60, "drill": 0.30}])
+    layer_closed = await call("unrouted_connections", path=scratch)
+    same("a through-via joins coincident opposite-layer pads",
+         sum(c.get("net") == "LAYER_TEST"
+             for c in layer_closed.get("connections", [])), 0)
+    grouped = [item for item in layer_open.get("nets", [])
+               if item.get("net") == "LAYER_TEST"]
+    same("unrouted inspection returns raw connected groups",
+         grouped[0].get("group_count") if grouped else None, 2)
+    route_measurement = await call(
+        "measure_routes", path=scratch, nets=["LAYER_TEST"]
+    )
+    same("route measurement reports connected group count",
+         route_measurement.get("nets", [{}])[0].get("connected_groups"), 1)
+    await call("remove_copper", path=scratch,
+               uuid=layer_via.get("vias", [{}])[0].get("uuid", ""))
+    await call("remove_footprints", path=scratch, refs=["LF", "LB"])
+    proposed_copper = await call("check_board", path=scratch, tracks=[{
+        "x1": 2, "y1": 2, "x2": 18, "y2": 2,
+        "layer": "F.Cu", "width": 0.25, "net": "N1"}], vias=[{
+            "x": 10, "y": 2, "net": "N1",
+            "diameter": 0.60, "drill": 0.30}], zones=[{
+                "points": [[3, 3], [4, 3], [4, 4], [3, 4]],
+                "layer": "F.Cu", "forbids": ["tracks"],
+            }])
+    same("candidate copper is marked as a dry-run",
+         proposed_copper.get("proposed"), True)
+    same("candidate copper reports only its new findings",
+         bool(proposed_copper.get("new_findings")), True)
+    same("candidate finding identifies submitted primitive",
+         any(item.get("input_kind") in {"tracks", "vias"}
+             for item in proposed_copper.get("new_findings", [])), True)
+    untouched_copper = await call("list_copper", path=scratch)
+    same("candidate copper leaves tracks unchanged",
+         len(untouched_copper.get("tracks", [])), 0)
+    same("candidate copper leaves vias unchanged",
+         len(untouched_copper.get("vias", [])), 0)
+    same("candidate copper leaves zones unchanged",
+         len(untouched_copper.get("zones", [])), 1)
     scratch_track = await call("add_tracks", path=scratch, tracks=[{
         "x1": 2, "y1": 2, "x2": 18, "y2": 2,
         "layer": "F.Cu", "width": 0.25, "net": "N1"}])
@@ -969,6 +1147,21 @@ async def build(client: Client) -> int:
     await call("set_fabrication_profile", path=scratch, provider="jlcpcb",
                outer_copper_oz=1.0, inner_copper_oz=0.5, finish="ENIG",
                soldermask_color="green", tier="recommended")
+    refused_blind = await refusal("add_vias", path=scratch, vias=[{
+        "x": 4, "y": 4, "net": "N1", "diameter": 0.45, "drill": 0.2,
+        "layers": ["F.Cu", "In1.Cu"], "kind": "blind_buried",
+    }])
+    same("active provider rejects unsupported via kind",
+         refused_blind.get("index"), 0)
+    refused_candidate_blind = await refusal(
+        "check_board", path=scratch, vias=[{
+            "x": 4, "y": 4, "net": "N1", "diameter": 0.45,
+            "drill": 0.2, "layers": ["F.Cu", "In1.Cu"],
+            "kind": "blind_buried",
+        }]
+    )
+    same("candidate check applies active provider via kinds",
+         refused_candidate_blind.get("proposed"), True)
     gone = await call("remove_copper", path=scratch, net="N1", layer="F.Cu")
     left = await call("list_copper", path=scratch)
     stackup_layers = [
@@ -1024,6 +1217,9 @@ async def build(client: Client) -> int:
     Path(scratch).with_suffix(".kicad_pro").unlink(missing_ok=True)
     Path(scratch).with_suffix(".kicad_dru").unlink(missing_ok=True)
     Path(scratch).with_suffix(".kicad-flow.json").unlink(missing_ok=True)
+    Path(via_scratch).unlink(missing_ok=True)
+    Path(via_scratch).with_suffix(".kicad_pro").unlink(missing_ok=True)
+    Path(via_scratch).with_suffix(".kicad_dru").unlink(missing_ok=True)
     Path(spare).unlink(missing_ok=True)
     await call("render_board", path=board,
                output_file=str(OUT / "led_digits-top.png"), side="top")

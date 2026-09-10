@@ -17,6 +17,16 @@
   --critical: #d03b3b;
   --radius: 6px;
 }
+
+#scene[hidden], #img[hidden], #scene-info[hidden] { display: none; }
+#scene { background: var(--plane); display: block; }
+#scene-info { padding: 8px 12px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.scene-object { stroke: var(--ink-2); stroke-width: 0.2; fill: none; cursor: pointer; }
+.scene-object text { fill: var(--ink); stroke: none; font-family: sans-serif; }
+.scene-field rect, .scene-label rect, .scene-text rect { stroke-dasharray: 0.7 0.7; }
+.scene-pin, .scene-sheet_pin { stroke: var(--accent); }
+.scene-junction circle { fill: var(--ink-2); }
+.scene-conflict { stroke: var(--warning); stroke-width: 0.35; }
 :root[data-theme="light"] {
   color-scheme: light;
   --plane: #f9f9f7;

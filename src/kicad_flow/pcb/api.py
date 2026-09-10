@@ -30,6 +30,7 @@ its silkscreen reads reversed. Both are in every signature that needs them.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager
 from pathlib import Path
 
 from .types import (
@@ -43,9 +44,11 @@ from .types import (
     Net,
     NetClass,
     NetClassAssignment,
+    NetConnectivity,
     PlacementMeasurement,
     PlacementProposal,
     Point,
+    RouteMetric,
     Stackup,
     Track,
     Via,
@@ -100,6 +103,14 @@ class Board(ABC):
         application can load the serialized result before replacing the
         destination. Rule violations do not make a structurally valid design
         unsavable.
+        """
+
+    @abstractmethod
+    def transaction(self) -> AbstractContextManager[None]:
+        """Rollback in-memory mutations if one plural MCP write fails.
+
+        This is format-neutral state bookkeeping, not a user-visible undo
+        stack and not a design decision.
         """
 
     @abstractmethod
@@ -369,15 +380,21 @@ class Board(ABC):
     @abstractmethod
     def via(self, x: float, y: float, *, net: str = "",
             diameter: float = 0.6, drill: float = 0.3,
-            layers: tuple[str, str] = ("F.Cu", "B.Cu")) -> Via:
-        """Drill a plated via joining *layers* and return it."""
+            layers: tuple[str, str] = ("F.Cu", "B.Cu"),
+            kind: str = "through") -> Via:
+        """Drill an explicitly typed plated via joining *layers*."""
 
     @abstractmethod
     def zone(self, points: list[tuple[float, float]], *, layer: str,
-             net: str = "", clearance: float = 0.0,
+             net: str = "", clearance: float = 0.5,
+             pad_connection: str = "thermal",
+             min_thickness: float = 0.25, thermal_gap: float = 0.5,
+             thermal_spoke_width: float = 0.5, priority: int = 0,
+             island_removal: str = "always", min_island_area: float = 0.0,
              forbids: tuple[str, ...] = ()) -> Zone:
         """Pour copper inside *points* on *layer*, tied to *net*.
 
+        *pad_connection* is ``"thermal"``, ``"solid"`` or ``"none"``.
         With *forbids* it is a keep-out instead: a region that refuses
         ``tracks``, ``vias``, ``pads``, ``pours`` or ``footprints``.
 
@@ -401,12 +418,12 @@ class Board(ABC):
 
     @abstractmethod
     def remove_copper(self, *, uuid: str = "", net: str = "", layer: str = "",
-                      tracks: bool = True, vias: bool = True) -> int:
+                      tracks: bool = True, vias: bool = True,
+                      zones: bool = False, all: bool = False) -> int:
         """Delete one UUID, or copper filtered by net and layer.
 
         UUID selection is exact and cannot be combined with net/layer filters.
-        Without a UUID, filters are AND-ed and an empty one matches everything,
-        so calling this with no arguments strips the board.
+        An empty selector is refused unless *all* is explicitly true.
         """
 
     # -- reading back -----------------------------------------------------
@@ -424,6 +441,14 @@ class Board(ABC):
         """Every pour and keep-out."""
 
     @abstractmethod
+    def connectivity(self, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
+        """Pad-bearing connected copper groups for the requested nets."""
+
+    @abstractmethod
+    def route_metrics(self, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
+        """Raw authored-copper lengths, widths, vias and group counts."""
+
+    @abstractmethod
     def nets(self) -> list[Net]:
         """What the board is MEANT to connect, from its netlist.
 
@@ -434,10 +459,11 @@ class Board(ABC):
 
     @abstractmethod
     def unrouted(self) -> list[Connection]:
-        """Every pair of pads on a net with no copper between them.
+        """A minimum number of measured separations between copper groups.
 
-        The work remaining, named rather than counted. A count says how much
-        is left; this says which, so a caller can route one.
+        The connected groups themselves come from :meth:`connectivity`. Each
+        separation names the nearest pads on two groups, but does not propose
+        a track or choose a route.
         """
 
     @abstractmethod
@@ -453,12 +479,27 @@ class Board(ABC):
         """
 
     @abstractmethod
+    def check_proposed(self, tracks: tuple[Track, ...] = (),
+                       vias: tuple[Via, ...] = (),
+                       zones: tuple[Zone, ...] = ()) -> list[Finding]:
+        """Check candidate copper on an isolated copy of the board.
+
+        The caller still chooses every segment and via. This reports the
+        factual DRC result without changing the open board or its file.
+        """
+
+    @abstractmethod
     def at(self, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
-        """What is at a point: which pads, track ends, vias and zones meet.
+        """What touches a point: pads, track interiors, vias and zones.
 
         The one query worth having while routing, because it answers the only
         question that matters -- *is this actually connected?*
         """
+
+    @abstractmethod
+    def region(self, x1: float, y1: float, x2: float, y2: float, *,
+               layers: tuple[str, ...] = ()) -> dict[str, object]:
+        """Objects whose geometric bounds intersect an explicit rectangle."""
 
     @abstractmethod
     def render(self, output_file: str | Path, *, side: str = "top",
