@@ -119,6 +119,7 @@ python -m ruff check .
 python -m mypy
 python examples\scripts\fc.py
 python examples\scripts\led_digits.py
+python examples\scripts\symbol_search.py
 ```
 
 Examples are the integration checks; there is no separate unit suite.

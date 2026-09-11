@@ -592,8 +592,14 @@ class KiCadSheet(Sheet):
         ``"AP2112"`` -- and read the description off the result.
         """
         found: list[SymbolDef] = []
+        if limit <= 0:
+            return found
         needle = query.lower()
         for nickname, file in library.symbol_libraries(self._path.parent).items():
+            # A qualified substring can only match this library's suffix.
+            # Preserve substring semantics ("vice:R" still matches Device:R).
+            if ":" in needle and not nickname.lower().endswith(needle.split(":", 1)[0]):
+                continue
             for name in library._library_symbol_names(str(file)):
                 lib_id = f"{nickname}:{name}"
                 if needle not in lib_id.lower():

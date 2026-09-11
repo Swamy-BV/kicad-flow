@@ -20,8 +20,8 @@ operations remain applied. Individual typed list writes retain their rollback
 behavior.
 
 Clients requesting progress receive operation counts for batches and start/end
-notifications for checks and renders. Completion means execution finished;
-inspect the returned findings to determine whether the design passed.
+notifications for symbol searches, checks and renders. Completion means execution
+finished; inspect the returned findings to determine whether the design passed.
 
 ## Optional discovery
 

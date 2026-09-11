@@ -12,6 +12,7 @@ import copy
 import os
 import re
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -22,6 +23,7 @@ from kicad_flow.backend.kicad.cli import cli
 
 # Matches a top-level (one-tab-indented) symbol name in a .kicad_sym file.
 _TOP_SYMBOL_RE = re.compile(r'^\t\(symbol "([^"]+)"', re.MULTILINE)
+_NAME_READERS = ThreadPoolExecutor(max_workers=8, thread_name_prefix="symbol-names")
 
 
 def symbol_dirs() -> list[Path]:
@@ -141,19 +143,23 @@ def _flatten(source: Path, target: Path) -> Path:
         if not (isinstance(node, Node) and node.name == "symbol")
     ]
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(sexpr.dumps(Node([*keep, *symbols])), encoding="utf-8")
+    # Other MCP processes may populate the same cache concurrently. Publish
+    # complete files only, so a reader cannot observe a half-written library.
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         dir=target.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(sexpr.dumps(Node([*keep, *symbols])))
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return target
 
 
 def _libraries_in(directory: Path) -> list[Path]:
-    """Every symbol library in *directory*, whichever format it is in.
-
-    A single `<nickname>.kicad_sym` where there is one, and a flattened
-    `<nickname>.kicad_symdir` where KiCad 10 has one instead. Searching for the
-    single-file form alone found nothing at all on a KiCad 10 install: the
-    symbol search returned zero results for `STM32F405` on a machine with 222
-    libraries on it.
-    """
+    """List library sources without flattening or parsing their definitions."""
     found: list[Path] = []
     seen: set[str] = set()
     for one in sorted(directory.glob("*.kicad_sym")):
@@ -162,10 +168,7 @@ def _libraries_in(directory: Path) -> list[Path]:
     for folder in sorted(directory.glob("*.kicad_symdir")):
         if folder.stem in seen or not folder.is_dir():
             continue
-        try:
-            found.append(_flatten(folder, _FLAT / f"{folder.stem}.kicad_sym"))
-        except (OSError, FileNotFoundError):
-            continue
+        found.append(folder)
     return found
 
 
@@ -388,11 +391,32 @@ def _load_symbol_cached(lib_id: str, library_path: str) -> LibrarySymbol:
 
 @cache
 def _library_symbol_names(path_str: str) -> tuple[str, ...]:
-    """Return top-level symbol names in a ``.kicad_sym`` file (cached).
+    """Return top-level symbol names in either library format (cached).
 
     Uses a fast text scan rather than a full parse -- only names are needed.
     """
-    text = Path(path_str).read_text(encoding="utf-8")
+    path = Path(path_str)
+    if path.is_dir():
+        files = (str(file) for file in sorted(path.glob("*.kicad_sym")))
+        return tuple(name for names in _NAME_READERS.map(_split_symbol_name, files)
+                     for name in names)
+    text = path.read_text(encoding="utf-8")
     return tuple(_TOP_SYMBOL_RE.findall(text))
+
+
+@cache
+def _split_symbol_name(path_str: str) -> tuple[str, ...]:
+    """Read the name header of KiCad 10's one-symbol-per-file format.
+
+    Do not read the graphical definition; large pin arrays are irrelevant to
+    name search. The internal name, rather than the sanitized filename, is
+    authoritative.
+    """
+    with Path(path_str).open(encoding="utf-8") as stream:
+        for line in stream:
+            match = _TOP_SYMBOL_RE.search(line)
+            if match:
+                return (match.group(1),)
+    return ()
 
 
