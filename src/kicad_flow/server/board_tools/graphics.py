@@ -118,6 +118,12 @@ def add_board_texts(path: str, texts: list[NewBoardText]) -> dict[str, Any]:
     """Put texts on board layers -- legends, fab notes, part markings.
 
     Back-side silkscreen wants ``mirror=true`` or it reads reversed.
+    Use one text item containing actual newlines for an aligned multiline block.
+    justify aligns each line left/center/right; vertical_justify anchors the
+    whole block top/center/bottom. Both default to center. Alignment follows
+    the text's rotation/mirroring, not the screen axes. Use separate items at
+    explicit coordinates for columns or custom line spacing; padding with
+    spaces is not a reliable column layout. Literal backslash-n is not a newline.
     """
     try:
         board = _board(path)
@@ -133,7 +139,14 @@ def add_board_texts(path: str, texts: list[NewBoardText]) -> dict[str, Any]:
             size=note.size,
             rotation=note.rotation,
             mirror=note.mirror,
+            justify=note.justify,
+            vertical_justify=note.vertical_justify,
         )
-        return {"text": note.text, "layer": note.layer, **at.as_dict()}
+        return {
+            "text": note.text, "layer": note.layer, **at.as_dict(),
+            "size": note.size, "rotation": note.rotation % 360.0,
+            "mirror": note.mirror, "justify": note.justify,
+            "vertical_justify": note.vertical_justify,
+        }
 
     return _atomic_items(board, texts, "texts", each)

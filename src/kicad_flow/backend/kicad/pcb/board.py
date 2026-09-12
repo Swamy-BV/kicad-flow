@@ -502,10 +502,13 @@ class KiCadBoard(Board):
         size: float = 1.0,
         rotation: float = 0.0,
         mirror: bool = False,
+        justify: str = "center",
+        vertical_justify: str = "center",
     ) -> Point:
         """Put text on a layer -- a legend, a fab note, a designator."""
         return _graphics.text(
-            self, x, y, text, layer=layer, size=size, rotation=rotation, mirror=mirror
+            self, x, y, text, layer=layer, size=size, rotation=rotation, mirror=mirror,
+            justify=justify, vertical_justify=vertical_justify,
         )
 
     def remove_copper(

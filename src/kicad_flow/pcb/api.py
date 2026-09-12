@@ -416,8 +416,13 @@ class Board(ABC):
     @abstractmethod
     def text(self, x: float, y: float, text: str, *, layer: str,
              size: float = 1.0, rotation: float = 0.0,
-             mirror: bool = False) -> Point:
-        """Put text on a layer -- a legend, a fab note, a designator."""
+             mirror: bool = False, justify: str = "center",
+             vertical_justify: str = "center") -> Point:
+        """Place literal text, aligning its lines and block at the anchor.
+
+        Horizontal alignment is left/center/right; vertical is top/center/bottom.
+        Alignment is in the text's local frame, before rotation and mirroring.
+        """
 
     @abstractmethod
     def remove_copper(self, *, uuid: str = "", net: str = "", layer: str = "",

@@ -339,9 +339,15 @@ class NewBoardText(_StrictModel):
     y: float = Field(description="Anchor Y in mm.")
     text: str = Field(description="Literal text; newlines are preserved.")
     layer: str = Field(description="Board layer name, e.g. F.SilkS.")
-    size: float = Field(default=1.0, description="Text height and width in mm.")
+    size: float = Field(default=1.0, gt=0, description="Text height and width in mm.")
     rotation: float = Field(default=0.0, description="Angle in degrees.")
     mirror: bool = Field(default=False, description="Mirror the text.")
+    justify: Literal["left", "center", "right"] = Field(
+        default="center", description="Horizontal alignment of each line at the anchor."
+    )
+    vertical_justify: Literal["top", "center", "bottom"] = Field(
+        default="center", description="Vertical alignment of the whole text block."
+    )
 
 
 class StackupLayerSpec(_StrictModel):

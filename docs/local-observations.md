@@ -92,3 +92,6 @@ This checks tool behavior; it does not measure an AI's routing success rate.
 
 For endpoint path lengths and located differential-pair spacing faults, see
 [Differential pairs](differential-pairs.md).
+
+For aligned multiline legends and explicit column placement, see
+[PCB text](pcb-text.md).

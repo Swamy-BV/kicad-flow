@@ -235,14 +235,27 @@ def text(
     size: float = 1.0,
     rotation: float = 0.0,
     mirror: bool = False,
+    justify: str = "center",
+    vertical_justify: str = "center",
 ) -> Point:
     """Put text on a layer -- a legend, a fab note, a designator."""
+    if justify not in ("left", "center", "right"):
+        raise ValueError("justify must be left, center or right")
+    if vertical_justify not in ("top", "center", "bottom"):
+        raise ValueError("vertical_justify must be top, center or bottom")
+    if size <= 0:
+        raise ValueError("text size must be positive")
     at = Point(float(x), float(y))
     effects: list[Any] = [
         _node("font", [_node("size", [size, size]), _node("thickness", [size * 0.15])])
     ]
+    alignment = [
+        Sym(value) for value in (justify, vertical_justify) if value != "center"
+    ]
     if mirror:
-        effects.append(_node("justify", [Sym("mirror")]))
+        alignment.append(Sym("mirror"))
+    if alignment:
+        effects.append(_node("justify", alignment))
     self._tree.items.append(
         _node(
             "gr_text",
