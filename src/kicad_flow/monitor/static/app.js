@@ -8,6 +8,7 @@ const view = $("view"), stage = $("stage"), img = $("img"), spin = $("spin"),
   feed = $("feed"), active = $("active"), b2d = $("b2d"), b3d = $("b3d"),
   zlab = $("zoom"), q = $("q"), onlyBad = $("only-bad"), count = $("count");
 const bscene = $("bscene"), scene = $("scene"), sceneInfo = $("scene-info");
+const view3d = $("view3d"), view3dCtl = $("view3d-ctl");
 const geometry = sceneView(scene, sceneInfo);
 let requestVersion = 0;
 
@@ -73,7 +74,8 @@ function reload(refit) {
     hideSpin();
   };
   next.onerror = hideSpin;
-  next.src = `/render.png?mode=${mode}&v=` + Date.now();
+  const camera = mode === "3d" ? `&view=${encodeURIComponent(view3d.value)}` : "";
+  next.src = `/render.png?mode=${mode}${camera}&v=` + Date.now();
 }
 
 // --- interaction ---------------------------------------------------------
@@ -121,10 +123,20 @@ function setMode(m) {
   for (const [btn, name] of [[b2d, "2d"], [b3d, "3d"], [bscene, "scene"]]) {
     btn.classList.toggle("active", m === name);
   }
+  view3dCtl.hidden = m !== "3d";
   reload(true);
 }
 b2d.onclick = () => setMode("2d");
 b3d.onclick = () => { if (!b3d.disabled) setMode("3d"); };
+view3d.onchange = () => {
+  try { localStorage.setItem("kf-3d-view", view3d.value); } catch { /* private mode */ }
+  reload(true);
+};
+try {
+  const savedView = localStorage.getItem("kf-3d-view");
+  view3d.value = [...view3d.options].some((option) => option.value === savedView)
+    ? savedView : "top-angle";
+} catch { view3d.value = "top-angle"; }
 bscene.onclick = () => {
   if (bscene.disabled) return;
   geometry.clear();

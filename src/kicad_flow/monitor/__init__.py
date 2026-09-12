@@ -10,8 +10,8 @@ no build step, no extra web dependency (stdlib ``http.server``).
     python -m kicad_flow.monitor            # http://localhost:8472
     python -m kicad_flow.monitor --port 9000 --open
 
-Two things only: the VIEW and the LOG. Pan/zoom with auto-fit, a 2D/3D toggle
-(a board renders in 3D via ``kicad-cli pcb render``), the activity feed beside
+Two things only: the VIEW and the LOG. Pan/zoom with auto-fit, 2D and selectable
+board cameras (rendered by ``kicad-cli pcb render``), the activity feed beside
 it with a filter and a Clear button, and a placeholder image when there is
 nothing to show yet (never a broken image). KiCad's own editor cannot show our
 writes live; this is the live view instead.
@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import hashlib
 import json
 import socket
 import tempfile
@@ -108,37 +109,68 @@ def _render(src: Path, dpi: int = 150) -> Path | None:
     return None
 
 
-_3d_cache: dict[str, tuple[float, Path]] = {}
+_3D_VIEWS: dict[str, dict[str, object]] = {
+    "top-angle": {"side": "top", "rotate": "-30,0,25", "perspective": True},
+    "bottom-angle": {"side": "top", "rotate": "150,0,205", "perspective": True},
+    "top": {"side": "top"},
+    "bottom": {"side": "bottom"},
+    "front": {"side": "front"},
+    "right": {"side": "right"},
+}
+_3d_cache: dict[str, tuple[int, bytes]] = {}
+_3d_render_locks: dict[str, threading.Lock] = {}
 _3d_lock = threading.Lock()
 
 
-def _render_3d(board: Path) -> Path | None:
-    """Render a board in 3D to a PNG via ``kicad-cli pcb render``; None on fail."""
+def _render_3d(board: Path, view: str) -> bytes | None:
+    """Render one named 3D camera to an isolated file; return complete PNG bytes."""
     _RENDER_DIR.mkdir(parents=True, exist_ok=True)
-    out = _RENDER_DIR / (board.stem + "-3d.png")
-    with contextlib.suppress(Exception):
-        render.render_board(
-            board, out, width=1400, height=1000, rotate="-30,0,25",
-            perspective=True, quality="basic", background="opaque", zoom=0.85)
-    return out if out.is_file() and out.stat().st_size > 0 else None
-
-
-def _cached_3d(board: Path) -> Path | None:
-    """Return a cached 3D render, re-rendering only when the board changes."""
-    key = str(board)
+    profile = _3D_VIEWS[view]
+    identity = hashlib.sha256(str(board.resolve()).encode()).hexdigest()[:10]
+    out = _RENDER_DIR / (
+        f".{board.stem}-{identity}-{view}-{threading.get_ident()}-{time.time_ns()}.png"
+    )
     try:
-        mtime = board.stat().st_mtime
+        render.render_board(
+            board, out, width=1600, height=1100,
+            side=str(profile["side"]), rotate=str(profile.get("rotate", "")),
+            perspective=bool(profile.get("perspective", False)),
+            quality="basic", background="opaque", zoom=0.88,
+        )
+        return out.read_bytes() if out.stat().st_size > 0 else None
+    except Exception:
+        return None
+    finally:
+        with contextlib.suppress(OSError):
+            out.unlink()
+
+
+def _cached_3d(board: Path, view: str) -> bytes | None:
+    """Return one complete frame, rendering each board/view revision once."""
+    if view not in _3D_VIEWS:
+        return None
+    key = f"{board.resolve()}\0{view}"
+    try:
+        revision = board.stat().st_mtime_ns
     except OSError:
         return None
     with _3d_lock:
         hit = _3d_cache.get(key)
-        if hit and hit[0] == mtime and hit[1].is_file():
+        if hit and hit[0] == revision:
             return hit[1]
-    png = _render_3d(board)  # slow (raytrace); keep outside the lock
-    if png is not None:
+        render_lock = _3d_render_locks.setdefault(key, threading.Lock())
+    # Browsers can request the same refresh twice (render + active SSE events).
+    # Only one KiCad process draws it; followers reuse that complete frame.
+    with render_lock:
         with _3d_lock:
-            _3d_cache[key] = (mtime, png)
-    return png
+            hit = _3d_cache.get(key)
+            if hit and hit[0] == revision:
+                return hit[1]
+        png = _render_3d(board, view)
+        if png is not None:
+            with _3d_lock:
+                _3d_cache[key] = (revision, png)
+        return png
 
 
 
@@ -306,6 +338,7 @@ class _Handler(BaseHTTPRequestHandler):
         qs = parse_qs(urlparse(self.path).query)
         mode = qs.get("mode", ["2d"])[0].lower()
         if mode == "3d":
+            view = qs.get("view", ["top-angle"])[0].lower()
             with self.state.lock:
                 active = self.state.active
             if (
@@ -313,11 +346,11 @@ class _Handler(BaseHTTPRequestHandler):
                 and active.suffix == ".kicad_pcb"
                 and active.is_file()
             ):
-                png = _cached_3d(active)
+                frame = _cached_3d(active, view)
                 data = (
-                    png.read_bytes()
-                    if png
-                    else _placeholder_png("3D render failed -- is KiCad 10 installed?")
+                    frame if frame else _placeholder_png(
+                        "Unknown 3D view or render failed -- is KiCad 10 installed?"
+                    )
                 )
             else:
                 data = _placeholder_png("3D view needs a board (.kicad_pcb)")
@@ -481,4 +514,3 @@ def main() -> None:
     ap.add_argument("--open", action="store_true", help="open a browser")
     args = ap.parse_args()
     serve(port=args.port, log_path=args.activity, open_browser=args.open)
-

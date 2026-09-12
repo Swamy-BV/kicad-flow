@@ -61,7 +61,8 @@ button:hover { border-color: var(--muted); color: var(--ink); }
 button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
 button:focus-visible,
-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:focus-visible,
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* ---- preview ----------------------------------------------------------- */
 
 #main { flex: 2; display: flex; flex-direction: column; min-width: 0; }
@@ -76,6 +77,16 @@ input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 #bar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
 #bar .grow { flex: 1; }
+#view3d-ctl { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+#view3d-ctl[hidden] { display: none; }
+#view3d {
+  background: var(--plane);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 3px 7px;
+  font: inherit;
+}
 #zoom {
   color: var(--muted);
   min-width: 46px;
@@ -104,15 +115,18 @@ input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 #spin {
   position: absolute;
-  inset: 0;
+  right: 14px;
+  bottom: 14px;
   display: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-  background: rgb(0 0 0 / 35%);
+  color: #fff;
+  background: rgb(20 20 19 / 88%);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 6px 11px;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 35%);
   pointer-events: none;
 }
-#spin.on { display: flex; }
+#spin.on { display: block; }
 /* ---- feed -------------------------------------------------------------- */
 
 #side {

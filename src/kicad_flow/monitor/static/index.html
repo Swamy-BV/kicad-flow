@@ -12,6 +12,16 @@
     <button id="b2d" class="active">2D</button>
     <button id="b3d" disabled title="3D view (boards only)">3D</button>
     <button id="bscene" disabled title="Structured schematic geometry; no raster images">Geometry</button>
+    <label id="view3d-ctl" hidden>Camera
+      <select id="view3d" aria-label="3D camera">
+        <option value="top-angle">Top angle</option>
+        <option value="bottom-angle">Bottom angle</option>
+        <option value="top">Top</option>
+        <option value="bottom">Bottom</option>
+        <option value="front">Front edge</option>
+        <option value="right">Right edge</option>
+      </select>
+    </label>
     <span class="sep"></span>
     <span id="zoomctl">
       <button id="fit" title="Fit to view (double-click)">Fit</button>
@@ -26,7 +36,7 @@
 
   <div id="view">
     <div id="stage"><img id="img" alt="Preview of the active design" draggable="false"><svg id="scene" hidden role="img" aria-label="Schematic objects and conservative occupied bounds"></svg></div>
-    <div id="spin">rendering&hellip;</div>
+    <div id="spin" role="status">Updating preview&hellip;</div>
   </div>
   <div id="scene-info" hidden aria-live="polite"></div>
 </div>
