@@ -8,6 +8,7 @@ interface rather than to this backend.
 
 from __future__ import annotations
 
-from .sheet import PAPER, KiCadSheet, create, load
+from ._nodes import PAPER
+from .sheet import KiCadSheet, create, load
 
 __all__ = ["PAPER", "KiCadSheet", "create", "load"]

@@ -126,12 +126,21 @@ src/kicad_flow/
   backend/              the only code that knows a KiCad file from any other
     __init__.py         create/load -- the one place a concrete class is named
     kicad/              _sexpr, cli, _library, _fileio, render
-    kicad/schematic/    KiCadSheet(Sheet), netlist
-    kicad/pcb/          KiCadBoard(Board), library, _runner
+    kicad/schematic/    sheet facade; symbols, components, fields, connections,
+                       hierarchy, placement, scene and validation
+    kicad/pcb/          board facade; footprints, copper, connectivity,
+                       graphics, placement, inspection, settings and validation
   server/               FastMCP tools and compact caller instructions
+    board_tools/        PCB tools by category, request models and session state
+    schematic_tools/    schematic tools by category, models and session state
+    tools_board.py     registration and compatibility exports
+    tools_schematic.py registration and compatibility exports
   monitor/              the live view and the tool-call log; its own process
 examples/scripts/       fc and led_digits, both through MCP calls alone
 ```
 
 Neither contract package imports a backend -- measured: `import
 kicad_flow.schematic` and `import kicad_flow.pcb` each load none.
+
+See `docs/code-organization.md` for module ownership. Keep new implementations
+in the appropriate category; the facades and registration modules delegate.

@@ -80,13 +80,14 @@ def _paths_in(arguments: Any) -> list[str]:
 
 def _save(path: str) -> None:
     """Write one open design, if it is one this server has."""
-    from . import tools_board, tools_schematic
+    from .board_tools import session as boards
+    from .schematic_tools import session as sheets
 
     registry: dict[str, Any]
     if path.endswith(".kicad_sch"):
-        registry, key = tools_schematic._OPEN, tools_schematic._key(path)
+        registry, key = sheets._OPEN, sheets._key(path)
     elif path.endswith(".kicad_pcb"):
-        registry, key = tools_board._OPEN, tools_board._key(path)
+        registry, key = boards._OPEN, boards._key(path)
     else:
         return
     design = registry.get(key)

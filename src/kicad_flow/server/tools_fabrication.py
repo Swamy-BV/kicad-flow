@@ -9,7 +9,7 @@ from ..providers import FabricationSelection, fabrication_provider
 from . import _meta
 from ._app import mcp
 from ._fabrication import profile_findings, read_profile, write_profile
-from .tools_board import _board
+from .board_tools.session import _board
 
 _ERRORS = (LookupError, ValueError, OSError, RuntimeError)
 

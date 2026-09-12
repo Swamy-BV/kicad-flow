@@ -19,18 +19,15 @@ from kicad_flow.schematic.types import (
 )
 
 from .._sexpr import Node
-from .sheet import (
-    _LABEL_NODE,
-    PAPER,
+from ._geometry import (
     _Box,
-    _f,
     _hidden,
     _on_segment,
     _pin_on_sheet,
     _segment_crosses_box,
-    _text,
     _text_box,
 )
+from ._nodes import _LABEL_NODE, PAPER, _f, _text
 
 if TYPE_CHECKING:
     from .sheet import KiCadSheet

@@ -129,3 +129,4 @@ python examples\scripts\symbol_search.py
 ```
 
 Examples are the integration checks; there is no separate unit suite.
+See [code organization](docs/code-organization.md) for module responsibilities.
