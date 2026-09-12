@@ -213,6 +213,8 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .row:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .row.bad { box-shadow: inset 2px 0 0 var(--critical); }
+.row.attention { box-shadow: inset 2px 0 0 var(--warning); }
+.row.running { box-shadow: inset 2px 0 0 var(--accent); }
 .at {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -222,6 +224,8 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mark { font-weight: 700; }
 .mark.ok { color: var(--good); }
 .mark.bad { color: var(--critical); }
+.mark.attention { color: var(--warning); }
+.mark.running { color: var(--accent); }
 .tool { color: var(--ink); }
 .sum {
   min-width: 0;
@@ -233,6 +237,7 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   font-size: 11.5px;
 }
 .sum .k { color: var(--muted); }
+.sum .signal { color: var(--ink); font-weight: 600; }
 .ms {
   color: var(--muted);
   font-variant-numeric: tabular-nums;

@@ -185,7 +185,8 @@ const digestPairs = (r) => pairsOf(r.result);
 
 function haystack(r) {
   return [r.tool, r.error, r.project, JSON.stringify(r.args || {}),
-    JSON.stringify(r.result || {}), JSON.stringify(r.argv || {})]
+    JSON.stringify(r.result || {}), JSON.stringify(r.argv || {}),
+    JSON.stringify(r.quality || {}), JSON.stringify(r.retry || {})]
     .join(" ").toLowerCase();
 }
 
@@ -197,17 +198,28 @@ function matches(r) {
 
 function summaryCell(r) {
   const cell = el("span", "sum");
+  const notices = [];
+  if (r.quality?.summary) notices.push(r.quality.summary);
+  if (r.retry?.attempt > 1) {
+    notices.push(r.retry.recovered ? `recovered on attempt ${r.retry.attempt}`
+      : `retry ${r.retry.attempt}`);
+  }
+  if (r.phase === "running") notices.push("still running");
+  if (notices.length) {
+    cell.append(el("span", "signal", notices.join(" · ")));
+  }
   // What the call RETURNED if it returned anything scalar; otherwise what it
   // was called WITH, which is all a failed call has to show.
   const pairs = digestPairs(r);
   const shown = pairs.length ? pairs : pairsOf(r.args);
   if (shown.length) {
     shown.forEach(([k, v], i) => {
-      if (i) cell.append(el("span", "k", " · "));
+      if (i || notices.length) cell.append(el("span", "k", " · "));
       cell.append(el("span", "k", k + " "), document.createTextNode(String(v)));
     });
   } else {
-    cell.textContent = typeof r.args === "string" ? r.args : "";
+    if (notices.length && r.args) cell.append(el("span", "k", " · "));
+    if (typeof r.args === "string") cell.append(document.createTextNode(r.args));
   }
   return cell;
 }
@@ -226,6 +238,8 @@ function detailFor(r) {
   };
   dl("arguments", r.argv);
   dl("result", r.result);
+  dl("quality", r.quality);
+  dl("retry", r.retry);
   if (r.path || r.project) {
     dl("where", { ...(r.path && { path: r.path }), ...(r.project && { project: r.project }) });
   }
@@ -234,16 +248,22 @@ function detailFor(r) {
 }
 
 function rowFor(r) {
-  const row = el("div", "row" + (r.ok ? "" : " bad"));
+  const running = r.phase === "running";
+  const attention = ["attention", "degraded"].includes(r.quality?.state)
+    || (r.retry?.attempt > 1 && !r.retry.recovered);
+  const status = running ? "running" : (!r.ok ? "bad" : (attention ? "attention" : "ok"));
+  const row = el("div", `row ${status}`);
   row.append(
     el("span", "at", clock(r.t)),
     // Glyph AND colour AND the error text below: status never rides on hue
     // alone, which is what makes red/green safe for colour-blind readers.
-    el("span", "mark " + (r.ok ? "ok" : "bad"), r.ok ? "✓" : "✗"),
+    el("span", "mark " + status,
+      running ? "●" : (!r.ok ? "✗" : (attention ? "⚠" : "✓"))),
     el("span", "tool", r.tool),
   );
   row.append(summaryCell(r));
-  row.append(el("span", "ms" + (r.ms > 1000 ? " slow" : ""), Math.round(r.ms) + "ms"));
+  row.append(el("span", "ms" + (r.ms > 1000 ? " slow" : ""),
+    running ? "running" : Math.round(r.ms) + "ms"));
   if (!r.ok && r.error) row.append(el("span", "err", r.error));
   row.tabIndex = 0;
   row.onclick = () => { expanded = expanded === r ? null : r; render(); };
@@ -332,7 +352,14 @@ es.addEventListener("active", (e) => {
 });
 es.addEventListener("activity", (e) => {
   const rec = JSON.parse(e.data);
-  records.push(rec);
+  const pending = rec.call_id && records.findIndex(
+    (old) => old.call_id === rec.call_id && old.phase === "running");
+  if (rec.phase === "complete" && pending >= 0) {
+    if (expanded === records[pending]) expanded = rec;
+    records[pending] = rec;
+  } else {
+    records.push(rec);
+  }
   if (records.length > CAP) records = records.slice(-CAP);
   scheduleRender();
 });

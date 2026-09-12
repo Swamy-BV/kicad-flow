@@ -60,6 +60,9 @@ Add `--tool-search` to discover tool schemas on demand. See
 The live monitor at `http://127.0.0.1:8472` shows the active design and tool calls.
 Board 3D view includes top, bottom and edge cameras; the bottom views expose
 back-side placement and routing during a build.
+The feed stays compact. Complete local replay records go to `replay.jsonl`
+beside the activity log and, once a project is known, its `logs/replay.jsonl`;
+neither file is served to the browser.
 Set `KICAD_FLOW_MONITOR=0` to disable it, or use another port number.
 
 ## What the server covers
