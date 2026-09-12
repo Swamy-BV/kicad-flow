@@ -257,6 +257,7 @@ def inspect_schematic_scene(
     path: str, x1: float | None = None, y1: float | None = None,
     x2: float | None = None, y2: float | None = None,
     since: str = "", max_objects: int = 2000,
+    detail: str = "full", max_bytes: int = 2000000,
 ) -> dict[str, Any]:
     """Inspect schematic geometry without images, saving or electrical inference.
 
@@ -281,11 +282,19 @@ def inspect_schematic_scene(
     max_objects limits the selected observation; exceeding it is an explicit
     refusal, not silent truncation. Existing editing tools still take references
     and coordinates as documented; scene IDs do not add another write API.
+
+    detail=compact flattens properties and uses [x,y] coordinate pairs while
+    retaining every object. detail=conflicts returns only objects implicated
+    in findings for focused repair; it is NOT an obstacle map for new wiring.
+    Object/finding kind counts describe the whole selected region in each mode.
+    max_bytes bounds the JSON reply; changing detail resets the delta scope.
     """
     from ..schematic import snap
     from .scene import history
 
     try:
+        if not 1000 <= max_bytes <= 2000000:
+            raise ValueError("max_bytes must be 1000..2000000")
         values = (x1, y1, x2, y2)
         region = None
         if any(value is not None for value in values):
@@ -300,7 +309,8 @@ def inspect_schematic_scene(
             region = SceneBounds(snap(x1), snap(y1), snap(x2), snap(y2))
         sheet = _sheet(path)
         scene = sheet.scene(region, max_objects=max_objects)
-        return history.observe(_key(path), scene, since)
+        return history.observe(_key(path), scene, since,
+                               detail=detail, max_bytes=max_bytes)
     except (LookupError, ValueError, OSError) as exc:
         return _fail(exc)
 

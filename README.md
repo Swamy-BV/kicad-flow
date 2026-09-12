@@ -73,8 +73,9 @@ Set `KICAD_FLOW_MONITOR=0` to disable it, or use another port number.
   DRC and 2D/3D renders.
 - **Preflight:** check proposed component placement or board routing before
   applying it. List writes are atomic.
-- **Spatial inspection:** query schematic geometry and changes without images.
-  See the [scene API guide](docs/schematic-scenes.md).
+- **Spatial inspection:** local schematic/PCB geometry, revision updates,
+  focused overlap repair and net-class readback without repeated images.
+  See [local observations](docs/local-observations.md).
 
 The caller supplies placement and routing decisions. A successful tool call
 does not mean the design passes ERC or DRC.

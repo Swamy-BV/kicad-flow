@@ -73,6 +73,11 @@ class Pad:
     net: str = ""
     drill: float = 0.0
     kind: str = "smd"  # smd, pth, npth
+    shape: str = "unknown"
+    rotation: float = 0.0
+    corner_ratio: float = 0.0
+    uuid: str = ""
+    geometry_supported: bool = False
 
     @property
     def through_hole(self) -> bool:
@@ -84,7 +89,10 @@ class Pad:
         return {"number": self.number, "x": round(self.at.x, 3),
                 "y": round(self.at.y, 3), "width": self.size[0],
                 "height": self.size[1], "layers": list(self.layers),
-                "net": self.net, "drill": self.drill, "kind": self.kind}
+                "net": self.net, "drill": self.drill, "kind": self.kind,
+                "shape": self.shape, "rotation": self.rotation,
+                "corner_ratio": self.corner_ratio, "uuid": self.uuid,
+                "geometry_supported": self.geometry_supported}
 
 
 @dataclass(frozen=True)

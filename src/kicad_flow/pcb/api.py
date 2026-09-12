@@ -449,6 +449,14 @@ class Board(ABC):
         """Raw authored-copper lengths, widths, vias and group counts."""
 
     @abstractmethod
+    def net_policy(self, nets: tuple[str, ...]) -> dict[str, object]:
+        """Effective routing-class dimensions and their source for named nets.
+
+        Class dimensions are preferences; conditional DRC limits may override
+        them for particular objects. This observation does not change policy.
+        """
+
+    @abstractmethod
     def nets(self) -> list[Net]:
         """What the board is MEANT to connect, from its netlist.
 
@@ -498,7 +506,8 @@ class Board(ABC):
 
     @abstractmethod
     def region(self, x1: float, y1: float, x2: float, y2: float, *,
-               layers: tuple[str, ...] = ()) -> dict[str, object]:
+               layers: tuple[str, ...] = (),
+               include_fills: bool = False) -> dict[str, object]:
         """Objects whose geometric bounds intersect an explicit rectangle."""
 
     @abstractmethod

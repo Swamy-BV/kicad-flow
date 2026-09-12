@@ -69,6 +69,7 @@ _NUMERIC_CONSTRAINTS = {
 }
 _DEFAULT_CLASS: dict[str, Any] = {
     "name": "Default",
+    "tuning_profile": "",
     "clearance": 0.2,
     "track_width": 0.2,
     "via_diameter": 0.6,
@@ -86,6 +87,7 @@ _DEFAULT_CLASS: dict[str, Any] = {
     "wire_width": 6,
 }
 _CLASS_DISPLAY: dict[str, Any] = {
+    "tuning_profile": "",
     "bus_width": 12,
     "line_style": 0,
     "pcb_color": "rgba(0, 0, 0, 0.000)",
@@ -129,6 +131,11 @@ def _net_settings(project: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("meta", {"version": 5})
     settings.setdefault("net_colors", None)
     settings.setdefault("netclass_patterns", [])
+    # KiCad 10.0.0 reads this unconditionally for schema version 5. Without
+    # it the entire classes array is ignored, even though DRC still runs.
+    for entry in settings.get("classes") or []:
+        if isinstance(entry, dict):
+            entry.setdefault("tuning_profile", "")
     return settings
 
 
@@ -262,6 +269,47 @@ def set_net_classes(board: Path,
     _validate_sidecars(board, project=text)
     _atomic_text(_project_path(board), text)
     return [_class_from(by_name[name]) for name in names]
+
+
+def net_policy(board: Path, nets: tuple[str, ...]) -> dict[str, object]:
+    """Let KiCad resolve class membership, inheritance and pattern priorities."""
+    from ._runner import run_pcbnew
+
+    result = run_pcbnew('''
+import json, sys, pcbnew
+job = json.load(open(sys.argv[1], encoding="utf-8"))
+board = pcbnew.LoadBoard(job["board"])
+settings = board.GetDesignSettings().m_NetSettings
+fields = {
+    "clearance": "Clearance", "track_width": "TrackWidth",
+    "via_diameter": "ViaDiameter", "via_drill": "ViaDrill",
+    "diff_pair_width": "DiffPairWidth", "diff_pair_gap": "DiffPairGap",
+    "diff_pair_via_gap": "DiffPairViaGap",
+}
+rows = []
+for net in job["nets"]:
+    effective = settings.GetEffectiveNetClass(net)
+    values, sources = {}, {}
+    for name, method in fields.items():
+        raw = getattr(effective, "Get" + method)()
+        values[name] = mm(raw) if raw >= 0 else None
+        parent = getattr(effective, "Get" + method + "Parent")()
+        sources[name] = parent.GetName() if parent else effective.GetName()
+    rows.append({"net": net, "effective_class": effective.GetName(),
+                 "dimensions": values, "sources": sources})
+print(json.dumps({"nets": rows}))
+''', {"board": str(board), "nets": list(nets)}, timeout=30.0)
+    raw_classes = _read_project(board).get("net_settings", {}).get("classes") or []
+    missing = [str(entry.get("name", "")) for entry in raw_classes
+               if isinstance(entry, dict) and "tuning_profile" not in entry]
+    return {**result, "units": "mm",
+            "scope": ("netclass preferences; custom and per-object DRC rules "
+                      "may override"),
+            "custom_rule_count": len(rules(board)),
+            "readback_warnings": (["stored classes lack tuning_profile: "
+                                   + ", ".join(missing)
+                                   + "; reapply set_net_classes for KiCad 10.0.0"]
+                                  if missing else [])}
 
 
 def assignments(board: Path) -> list[NetClassAssignment]:

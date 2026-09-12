@@ -776,6 +776,10 @@ class KiCadBoard(Board):
         """Replace memberships for the nets mentioned by the caller."""
         return _project.assign(self._path, assignments)
 
+    def net_policy(self, nets: tuple[str, ...]) -> dict[str, object]:
+        """Read effective classes with KiCad's own inheritance resolver."""
+        return _project.net_policy(self._path, nets)
+
     def net_class_assignments(self) -> list[NetClassAssignment]:
         """Read explicit net-to-netclass memberships."""
         return _project.assignments(self._path)
@@ -1324,6 +1328,17 @@ class KiCadBoard(Board):
             drill=_f(drill, 0) if drill is not None else 0.0,
             kind="pth" if kind == "thru_hole" else (
                 "npth" if kind == "np_thru_hole" else "smd"),
+            shape=_text(node, 2, "unknown"),
+            rotation=_f(pat, 2) % 360.0,
+            corner_ratio=_f(node.get("roundrect_rratio"), 0),
+            uuid=_text(node.get("uuid")),
+            geometry_supported=(
+                _text(node, 2) in {"rect", "circle", "oval", "roundrect"}
+                and not any(node.get(key) is not None for key in
+                            ("offset", "chamfer", "chamfer_ratio", "padstack"))
+                and not (drill is not None and (
+                    drill.get("offset") is not None or _text(drill, 0) == "oval"))
+            ),
         )
 
     def fields(self, ref: str) -> dict[str, str]:
@@ -2235,7 +2250,8 @@ class KiCadBoard(Board):
                 "connected": count > 1}
 
     def region(self, x1: float, y1: float, x2: float, y2: float, *,
-               layers: tuple[str, ...] = ()) -> dict[str, object]:
+               layers: tuple[str, ...] = (),
+               include_fills: bool = False) -> dict[str, object]:
         """Return objects whose conservative bounds intersect a rectangle."""
         if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
             raise ValueError("region coordinates must be finite")
@@ -2267,6 +2283,7 @@ class KiCadBoard(Board):
                 if intersects(bounds):
                     footprints.append({
                         "ref": footprint.ref,
+                        "uuid": footprint.uuid,
                         "side": footprint.side,
                         "courtyard_polygon": [
                             point.as_dict() for point in polygon
@@ -2276,10 +2293,22 @@ class KiCadBoard(Board):
                 pad_layers = set(self._pad_copper_layers(pad))
                 if wanted and not wanted.intersection(pad_layers):
                     continue
-                half = max(pad.size) / 2
-                if intersects((pad.at.x - half, pad.at.y - half,
-                               pad.at.x + half, pad.at.y + half)):
-                    pads.append({"ref": footprint.ref, **pad.as_dict()})
+                # A rotated square reaches beyond max(width, height)/2.
+                # Keep the enclosing rectangle conservative for curved pads.
+                angle = math.radians(pad.rotation)
+                c, s = abs(math.cos(angle)), abs(math.sin(angle))
+                hx = (pad.size[0] * c + pad.size[1] * s) / 2
+                hy = (pad.size[0] * s + pad.size[1] * c) / 2
+                bounds = (pad.at.x - hx, pad.at.y - hy,
+                          pad.at.x + hx, pad.at.y + hy)
+                supported = pad.geometry_supported
+                # Custom copper may extend outside its anchor rectangle. Do
+                # not silently exclude it from a local observation.
+                if not supported or intersects(bounds):
+                    pads.append({"ref": footprint.ref, **pad.as_dict(),
+                                 "copper_layers": sorted(pad_layers),
+                                 "bounds": list(bounds) if supported else None,
+                                 "geometry_supported": supported})
 
         tracks = []
         for track in self.tracks():
@@ -2308,11 +2337,22 @@ class KiCadBoard(Board):
             xs = [point.x for point in zone.points]
             ys = [point.y for point in zone.points]
             if xs and intersects((min(xs), min(ys), max(xs), max(ys))):
-                zones.append(zone.as_dict())
+                record = zone.as_dict()
+                if include_fills:
+                    node = next((n for n in self._tree.get_all("zone")
+                                 if _text(n.get("uuid")) == zone.uuid), None)
+                    record["fill_contours"] = [
+                        {"layer": _text(fill.get("layer")),
+                         "points": [[_f(p, 0), _f(p, 1)] for p in pts.get_all("xy")]}
+                        for fill in (node.get_all("filled_polygon") if node else [])
+                        if (pts := fill.get("pts")) is not None
+                        and (not wanted or _text(fill.get("layer")) in wanted)
+                    ]
+                zones.append(record)
 
         graphics = []
         for graphic in self.graphics():
-            if wanted and graphic.layer not in wanted:
+            if wanted and graphic.layer not in wanted and graphic.layer != "Edge.Cuts":
                 continue
             points = (
                 _arc_extrema(graphic.points)
@@ -2343,6 +2383,28 @@ class KiCadBoard(Board):
             "vias": vias,
             "zones": zones,
             "graphics": graphics,
+            "units": "mm", "y_direction": "down",
+            "coordinates": "board; never mirrored for back-side observations",
+            "clearance_expanded": False,
+            "unsupported_kinds": sorted(
+                {"pad_geometry" for pad in pads if not pad["geometry_supported"]}
+                | {node.name for node in self._tree.items if isinstance(node, Node)
+                   and node.name in {"arc", "gr_curve", "gr_polyline"}}
+                | {"copper_graphics" for node in self._tree.items
+                   if isinstance(node, Node) and node.name.startswith("gr_")
+                   and _text(node.get("layer")).endswith(".Cu")}
+                | {"footprint_copper_or_edges"
+                   for fp in self._tree.get_all("footprint") for node in fp.items
+                   if isinstance(node, Node) and (
+                       node.name == "zone" or (
+                           node.name.startswith("fp_") and (
+                               _text(node.get("layer")).endswith(".Cu")
+                               or _text(node.get("layer")) == "Edge.Cuts")))}
+                | {"multilayer_zone" for node in self._tree.get_all("zone")
+                   if node.get("layers") is not None}
+            ),
+            "zone_geometry": ("stored fill contours; refill after copper edits"
+                              if include_fills else "declared boundaries only"),
         }
 
     def render(self, output_file: str | Path, *, side: str = "top",
