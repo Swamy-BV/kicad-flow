@@ -116,6 +116,8 @@ class FootprintDef:
     courtyard_polygon: tuple[Point, ...]
     bbox: tuple[float, float]
     has_pth: bool
+    fabrication_polygon: tuple[Point, ...] = ()
+    fabrication_status: str = "missing"
 
     def as_dict(self) -> dict[str, Any]:
         """The footprint definition as JSON."""
@@ -125,6 +127,9 @@ class FootprintDef:
                 "courtyard_polygon": [point.as_dict()
                                         for point in self.courtyard_polygon],
                 "bbox": list(self.bbox),
+                "fabrication_polygon": [p.as_dict() for p in self.fabrication_polygon],
+                "fabrication_status": self.fabrication_status,
+                "fabrication_basis": "graphics envelope; no text; not a mating datum",
                 "has_pth": self.has_pth, "pad_count": len(self.pads),
                 "pads": [p.as_dict() for p in self.pads]}
 
@@ -154,6 +159,9 @@ class Footprint:
     #: Conservative courtyard rectangle in board coordinates, fully rotated.
     courtyard_polygon: tuple[Point, ...]
     uuid: str = ""
+    #: Envelope of fabrication graphics, excluding all text; not a mating datum.
+    fabrication_polygon: tuple[Point, ...] = ()
+    fabrication_status: str = "missing"
 
     def pad(self, number: str) -> Pad | None:
         """The pad with this number, or None."""
@@ -173,6 +181,9 @@ class Footprint:
                 "courtyard_polygon": [point.as_dict()
                                         for point in self.courtyard_polygon],
                 "uuid": self.uuid,
+                "fabrication_polygon": [p.as_dict() for p in self.fabrication_polygon],
+                "fabrication_status": self.fabrication_status,
+                "fabrication_basis": "graphics envelope; no text; not a mating datum",
                 "pads": [p.as_dict() for p in self.pads]}
 
 
@@ -250,6 +261,8 @@ class PlacementMeasurement:
     edge_violations: tuple[PlacementEdge, ...]
     connection_length: float
     net_lengths: tuple[PlacementNetLength, ...]
+    edge_exceptions: tuple[PlacementEdge, ...] = ()
+    edge_exempt_refs: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         """Return all measurements without collapsing them into one score."""
@@ -279,6 +292,9 @@ class PlacementMeasurement:
             "overlaps": [item.as_dict() for item in self.overlaps],
             "edge_violation_count": len(self.edge_violations),
             "edge_violations": [item.as_dict() for item in self.edge_violations],
+            "edge_basis": "courtyard; not fabrication graphics or text",
+            "edge_exempt_refs": list(self.edge_exempt_refs),
+            "edge_exceptions": [item.as_dict() for item in self.edge_exceptions],
             "connection_length": round(self.connection_length, 3),
             "net_lengths": [item.as_dict() for item in self.net_lengths],
         }

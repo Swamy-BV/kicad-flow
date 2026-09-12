@@ -656,6 +656,9 @@ def footprint_pads(fp_id: str, project_dir: str = "") -> dict[str, Any]:
     body. Its centre and polygon are local to the footprint origin here. For
     positions to actually ROUTE to, place it and read the board-coordinate
     pads and courtyard that `place_footprints` returns.
+    fabrication_polygon separately bounds fabrication graphics, excluding all
+    text. It is a drawn envelope, not a verified body or connector mating datum.
+    Missing/unsupported graphics return an empty polygon, never a guessed body.
     """
     try:
         found = _blank(project_dir).footprint_def(fp_id)
@@ -1014,6 +1017,7 @@ def measure_placement(
     placements: list[PlacementCandidate] | None = None,
     edge_clearance: float = 0.0,
     net_limit: int = 20,
+    edge_exempt_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Measure current or tentative placement without changing the board.
 
@@ -1027,6 +1031,13 @@ def measure_placement(
     and maximum-side ratios when judging density. `net_limit` controls how
     many of the longest per-net estimates are returned; totals always cover
     every net.
+
+    Edge checks use the courtyard, not labels or the fabrication envelope.
+    For a deliberately edge-mounted connector, edge_exempt_refs can waive
+    that named part's courtyard-to-board requirement. Its otherwise failing
+    measurements remain in edge_exceptions. Exemptions do not waive courtyard
+    overlaps, copper/board-edge DRC, or mechanical verification. They are
+    per inspection, not persisted board rules; unknown references are rejected.
     """
     if net_limit < 0:
         return _fail(ValueError("net_limit must be zero or greater"))
@@ -1036,7 +1047,8 @@ def measure_placement(
     ) for item in placements or [])
     try:
         measured = _board(path).measure_placement(
-            proposals, edge_clearance=edge_clearance
+            proposals, edge_clearance=edge_clearance,
+            edge_exempt_refs=tuple(edge_exempt_refs or []),
         )
     except _ERRORS as exc:
         return _fail(exc)

@@ -500,6 +500,42 @@ def _courtyard_geometry(node: Node, at: Point, rotation: float
     return centre, offset, polygon, size
 
 
+def _fabrication_geometry(node: Node, at: Point, rotation: float
+                          ) -> tuple[tuple[Point, ...], str]:
+    """Envelope of Fab graphics, with no text, pad or courtyard fallback.
+
+    This is the library's drawn envelope, not an inferred connector mating
+    face or a guarantee of physical dimensions. Stroke widths are excluded.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for shape in node.items:
+        if not isinstance(shape, Node) or not shape.name.startswith("fp_"):
+            continue
+        if shape.name in {"fp_text", "fp_text_box"}:
+            continue
+        if not _text(shape.get("layer")).endswith(".Fab"):
+            continue
+        if shape.name == "fp_arc":
+            corners = [shape.get(key) for key in ("start", "mid", "end")]
+            if any(corner is None for corner in corners):
+                return (), "unsupported"
+            points = _arc_extrema(tuple(Point(_f(p, 0), _f(p, 1)) for p in corners))
+            xs.extend(p.x for p in points)
+            ys.extend(p.y for p in points)
+        elif shape.name in {"fp_line", "fp_rect", "fp_poly", "fp_circle"}:
+            sx, sy = _fplib._extent(shape, shape.name)
+            xs.extend(sx)
+            ys.extend(sy)
+        else:
+            return (), "unsupported"
+    if not xs:
+        return (), "missing"
+    return tuple(_pad_on_board(x, y, at, rotation) for x, y in (
+        (min(xs), min(ys)), (max(xs), min(ys)),
+        (max(xs), max(ys)), (min(xs), max(ys)))), "available"
+
+
 def _origin_for_anchor(node: Node, x: float, y: float, rotation: float,
                        anchor: str) -> Point:
     """Convert an explicit origin/centre anchor to a footprint origin."""
@@ -973,6 +1009,8 @@ class KiCadBoard(Board):
             (cx + width / 2, cy + height / 2),
             (cx - width / 2, cy + height / 2),
         ))
+        fabrication, fabrication_status = _fabrication_geometry(
+            tree, Point(0.0, 0.0), 0.0)
         return FootprintDef(
             fp_id=fp_id,
             description=_text(tree.get("descr")),
@@ -981,6 +1019,7 @@ class KiCadBoard(Board):
             courtyard_polygon=courtyard_polygon,
             bbox=_fplib.bbox(tree),
             has_pth=any(p.through_hole for p in pads),
+            fabrication_polygon=fabrication, fabrication_status=fabrication_status,
         )
 
     def _load_def(self, fp_id: str) -> Node:
@@ -1157,10 +1196,13 @@ class KiCadBoard(Board):
         proposals: tuple[PlacementProposal, ...] = (),
         *,
         edge_clearance: float = 0.0,
+        edge_exempt_refs: tuple[str, ...] = (),
     ) -> PlacementMeasurement:
         """Measure current or proposed poses without modifying this board."""
         if edge_clearance < 0:
             raise ValueError("edge_clearance cannot be negative")
+        for ref in edge_exempt_refs:
+            self._require(ref)
         target = self
         if proposals:
             target = KiCadBoard(self._path, copy.deepcopy(self._tree))
@@ -1180,10 +1222,10 @@ class KiCadBoard(Board):
                     proposal.ref, proposal.x, proposal.y,
                     anchor=proposal.anchor,
                 )
-        return target._measure_current_placement(edge_clearance)
+        return target._measure_current_placement(edge_clearance, edge_exempt_refs)
 
     def _measure_current_placement(
-        self, edge_clearance: float
+        self, edge_clearance: float, edge_exempt_refs: tuple[str, ...]
     ) -> PlacementMeasurement:
         """Measure the current tree; caller choices have already been applied."""
         footprints = self.footprints()
@@ -1215,6 +1257,7 @@ class KiCadBoard(Board):
                     ))
 
         edge_violations: list[PlacementEdge] = []
+        edge_exceptions: list[PlacementEdge] = []
         clearances: list[float] = []
         outline_pairs = [
             (point, outline[(i + 1) % len(outline)])
@@ -1236,7 +1279,9 @@ class KiCadBoard(Board):
             )
             clearances.append(clearance)
             if outside or clearance + 1e-9 < edge_clearance:
-                edge_violations.append(PlacementEdge(
+                findings = (edge_exceptions if part.ref in edge_exempt_refs
+                            else edge_violations)
+                findings.append(PlacementEdge(
                     part.ref, clearance, outside
                 ))
 
@@ -1258,6 +1303,8 @@ class KiCadBoard(Board):
             required_edge_clearance=edge_clearance,
             overlaps=tuple(overlaps),
             edge_violations=tuple(edge_violations),
+            edge_exceptions=tuple(edge_exceptions),
+            edge_exempt_refs=tuple(sorted(set(edge_exempt_refs))),
             connection_length=sum(item.length for item in net_lengths),
             net_lengths=tuple(sorted(
                 net_lengths, key=lambda item: (-item.length, item.net)
@@ -1302,6 +1349,7 @@ class KiCadBoard(Board):
         centre, offset, polygon, courtyard = _courtyard_geometry(
             node, at, rotation
         )
+        fabrication, fabrication_status = _fabrication_geometry(node, at, rotation)
         return Footprint(
             ref=ref, fp_id=_text(node), value=_text(value, 1) if value else "",
             at=at, rotation=rotation, side=side, pads=pads,
@@ -1310,6 +1358,7 @@ class KiCadBoard(Board):
             courtyard_center=centre,
             courtyard_polygon=polygon,
             uuid=_text(node.get("uuid")),
+            fabrication_polygon=fabrication, fabrication_status=fabrication_status,
         )
 
     def _pad_of(self, node: Node, at: Point, rotation: float) -> Pad:
@@ -2288,6 +2337,9 @@ class KiCadBoard(Board):
                         "courtyard_polygon": [
                             point.as_dict() for point in polygon
                         ],
+                        "fabrication_polygon": [p.as_dict()
+                                                for p in footprint.fabrication_polygon],
+                        "fabrication_status": footprint.fabrication_status,
                     })
             for pad in footprint.pads:
                 pad_layers = set(self._pad_copper_layers(pad))

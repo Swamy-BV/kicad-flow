@@ -290,6 +290,7 @@ class Board(ABC):
         proposals: tuple[PlacementProposal, ...] = (),
         *,
         edge_clearance: float = 0.0,
+        edge_exempt_refs: tuple[str, ...] = (),
     ) -> PlacementMeasurement:
         """Measure current or caller-proposed placement without changing it.
 
@@ -297,7 +298,8 @@ class Board(ABC):
         edge distances, courtyard area for each face, and a minimum
         connection-length lower bound. Combined courtyard area is reported
         for accounting, not as a one-sided capacity limit. It deliberately
-        returns no weighted quality score.
+        returns no weighted quality score. Explicit edge exemptions only waive
+        courtyard-to-board checks for named parts; all measurements remain visible.
         """
 
     @abstractmethod

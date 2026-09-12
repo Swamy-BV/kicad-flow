@@ -45,6 +45,29 @@ and footprint copper/edges are also flagged as unsupported. These flags can
 describe features anywhere on the board, beyond the selected rectangle.
 Use candidate DRC to decide whether a proposed route is legal.
 
+## Connectors at a board edge
+
+`footprint_pads`, `get_footprint` and placement replies now distinguish
+`fabrication_polygon` from `courtyard_polygon`. The fabrication polygon is an
+enclosing rectangle of fabrication graphics, transformed with the footprint.
+It excludes text, pads and stroke thickness; it is not a verified mechanical
+body or mating datum. Missing or unsupported geometry is explicitly marked
+instead of replaced with a pad or text boundary.
+
+Use the mechanical drawing to choose the edge to align. For example, the
+installed HRO USB-C footprint's maximum-Y fabrication edge is 3.65 mm from its
+origin; its courtyard extends to 4.15 mm. Aligning the courtyard with a board
+edge therefore leaves a 0.50 mm gap to the fabrication edge.
+
+`measure_placement` checks courtyards. For a deliberately edge-mounted `J1`,
+pass `edge_exempt_refs=["J1"]` to allow its courtyard across the edge. Its
+failing edge measurements remain visible in `edge_exceptions`. Other parts,
+courtyard overlaps and copper DRC retain their checks. This exception applies
+only to that inspection; it does not save or disable any board rule.
+
+Run `python examples/scripts/connector_edges.py` for the measured example and
+regressions for label movement, rotation, back-side placement and exemptions.
+
 ## Net properties before routing
 
 1. Read the schematic's `list_nets` and apply membership with `set_pad_nets`.
