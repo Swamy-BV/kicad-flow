@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from kicad_flow.schematic.types import (
+    LayoutFinding,
     Point,
     SceneBounds,
     SceneFinding,
@@ -210,6 +211,41 @@ def _findings(objects: list[SceneObject]) -> tuple[SceneFinding, ...]:
                                           _box(obj.bounds).meeting(_box(other.bounds))))
         active.append(obj)
     return tuple(sorted(findings, key=lambda f: f.id))
+
+
+def body_findings(sheet: KiCadSheet, page: str) -> list[LayoutFinding]:
+    """Share scene body collisions with the hierarchy layout checker.
+
+    Text/text and text/wire checks remain in the layout checker. These bounds
+    include pin extents and are conservative, just like the scene observation.
+    """
+    objects = {obj.id: obj for obj in _objects(sheet)}
+
+    def name(obj: SceneObject) -> str:
+        properties = dict(obj.properties)
+        parent = objects.get(obj.parent_id or "", obj)
+        owner = dict(parent.properties)
+        ref = owner.get("ref", owner.get("name", ""))
+        field = properties.get("field", "")
+        text = properties.get("text", "")
+        unit = f"unit {owner['unit']}" if "unit" in owner else ""
+        detail = " ".join(str(value) for value in (obj.kind, ref, unit, field, text)
+                          if value != "")
+        return f"{detail} [{obj.id}]"
+
+    out: list[LayoutFinding] = []
+    for finding in _findings(list(objects.values())):
+        first, second = (objects[identity] for identity in finding.objects)
+        if not {first.kind, second.kind} & {"symbol", "sheet"}:
+            continue
+        kind = "_".join(sorted((first.kind, second.kind))) + "_overlap"
+        first_name, second_name = name(first), name(second)
+        out.append(LayoutFinding(
+            severity="warning", kind=kind,
+            message=f"{first_name} overlaps {second_name} (conservative bounds)",
+            first=first_name, second=second_name, sheet=page, at=finding.at,
+        ))
+    return out
 
 
 def snapshot(sheet: KiCadSheet, region: SceneBounds | None, *,

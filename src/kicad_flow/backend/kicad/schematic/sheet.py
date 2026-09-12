@@ -1584,7 +1584,9 @@ class KiCadSheet(Sheet):
 
     def _check_layout_page(self, page: str) -> list[LayoutFinding]:
         """Graphical findings for this page, without following child sheets."""
-        findings: list[LayoutFinding] = []
+        from .scene import body_findings
+
+        findings = body_findings(self, page)
         texts = self._visible_text()
         wires: list[tuple[Point, Point]] = []
         seen_wires: set[tuple[tuple[float, float], tuple[float, float]]] = set()

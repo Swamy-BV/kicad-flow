@@ -113,6 +113,13 @@ multi-writer ownership or external-edit conflicts; use one design writer.
 
 ## Verification
 
+`check_sheet_layout` includes the scene's symbol/body and text/body collision
+checks across the hierarchy, alongside its text/text and text/wire checks.
+These use conservative bounds, including pin extents; inspect a reported pair
+before deciding how to correct it or documenting an intentional intersection.
+Run `python examples/scripts/layout_feedback.py` to check warning readback,
+caller correction, and finding evidence in activity logs.
+
 Run `python examples/scripts/scene.py`. This example checks observations through
 `Client(mcp)`, including transformed pins, multi-unit identities, region exits,
 cursor reset, rollback, file immutability and a fresh-process reload. Its native

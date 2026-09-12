@@ -157,8 +157,8 @@ def _digest(data: Any) -> dict[str, Any]:
     """The scalar answers in a tool's result -- what made the call worth making.
 
     Numbers and short strings are kept as they are; a list or dict is kept as
-    its length under ``<key>_n``, since "conflicts: 3" is the reviewable fact
-    and the three conflicts themselves belong in the tool's own output. ``ok``
+    its length under ``<key>_n``. Finding kinds and a bounded sample are retained
+    so a review can identify what an agent was asked to correct. ``ok``
     and ``error`` are promoted to the top level of the record, so they are
     skipped here.
     """
@@ -173,6 +173,20 @@ def _digest(data: Any) -> dict[str, Any]:
         elif isinstance(v, str):
             if 0 < len(v) <= 80:
                 out[k] = v
+        elif k == "kind_counts" and isinstance(v, dict):
+            out[k] = {str(kind)[:80]: count for kind, count in list(v.items())[:16]
+                      if isinstance(count, int)}
+        elif k in ("findings", "findings_sample") and isinstance(v, list):
+            if k == "findings":
+                out["findings_n"] = len(v)
+            out["findings_sample"] = [
+                {key: value[:180] if isinstance(value, str) else value
+                 for key, value in item.items()
+                 if key in {"kind", "severity", "message", "first", "second",
+                            "sheet", "x", "y"}
+                 and isinstance(value, str | bool | int | float)}
+                for item in v[:3] if isinstance(item, dict)
+            ]
         elif isinstance(v, list | dict):
             out[f"{k}_n"] = len(v)
     return out

@@ -457,8 +457,9 @@ def check_sheet_layout(path: str) -> dict[str, Any]:
     """Find potential graphical collisions on every page of a schematic.
 
     KiCad ERC does not report a value crossed by a wire, labels printed over
-    each other, or notes colliding with component fields. This checks those
-    visible text geometry conservatively without changing it. Each finding
+    each other, or notes colliding with component fields. This checks visible
+    text, symbol and child-sheet bounds conservatively without changing them.
+    Symbol bounds include pin extents. Each finding
     names both objects and its sheet position; render to confirm it, and the
     caller still decides which object to move.
 
