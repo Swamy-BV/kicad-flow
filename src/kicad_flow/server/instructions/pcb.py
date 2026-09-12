@@ -156,6 +156,16 @@ PCB = (
     "refill after copper edits before relying on them. Inspect, propose, "
     "check_board(candidate), apply, then verify connectivity.\n\n"
 
+    "Differential pairs: choose both nets explicitly. In `measure_routes`, "
+    "supply each pair's first_start/first_end/second_start/second_end as "
+    "{ref,pad,layer}, gap_min/gap_max (edge-to-edge mm), and the design's "
+    "max_uncoupled/max_skew limits. Read inspection.path_skew, located spacing "
+    "faults and path issues; legacy skew is total authored track length. "
+    "Unknown or ambiguous results are not passes. Via travel needs a complete "
+    "saved stackup; via spacing and electrical delay are unverified. The caller "
+    "routes and repairs with tracks/vias, then repeats inspection and native "
+    "check_board. Geometry alone does not establish controlled impedance.\n\n"
+
     "Checking, and do not skip it. `ok=true` only means an inspection ran. "
     "Placement is not complete until `measure_placement.valid=true`, with no "
     "overlap or edge violations, and its raw "

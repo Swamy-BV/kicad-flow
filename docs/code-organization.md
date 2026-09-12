@@ -18,6 +18,7 @@ to modules in the same directory:
 | Placement measurements | `placement.py` | `placement.py` |
 | Electrical and layout checks | `validation.py` | `validation.py`, `connectivity.py` |
 | Spatial observations | `scene.py` | `inspection.py` |
+| Explicit route paths and pair spacing | — | `routing_path.py`, `differential.py` |
 | Outlines and drawn graphics | `connections.py` | `graphics.py` |
 | Construction and project rules | — | `settings.py`, `project.py` |
 

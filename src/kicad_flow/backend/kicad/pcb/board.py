@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from kicad_flow.pcb.api import Board
+from kicad_flow.pcb.routing import RoutePath
 from kicad_flow.pcb.types import (
     BoardLimits,
     BoardRule,
@@ -560,6 +561,16 @@ class KiCadBoard(Board):
     def route_metrics(self, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
         """Measure authored copper on each intended net."""
         return _connectivity.route_metrics(self, nets)
+
+    def inspect_pair(self, first: RoutePath, second: RoutePath, *,
+                     gap_min: float, gap_max: float,
+                     max_uncoupled: float | None = None,
+                     max_skew: float | None = None) -> dict[str, object]:
+        """Inspect caller-selected paths without inferring pair membership."""
+        from .differential import inspect_pair
+
+        return inspect_pair(self, first, second, gap_min=gap_min, gap_max=gap_max,
+                            max_uncoupled=max_uncoupled, max_skew=max_skew)
 
     def unrouted(self) -> list[Connection]:
         """A minimum set of pad-group separations, nearest endpoints first."""

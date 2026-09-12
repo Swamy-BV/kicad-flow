@@ -89,3 +89,6 @@ prove electrical connectivity from geometric overlap.
 Run `python examples/scripts/local_observations.py` to exercise focused repair,
 back-side geometry, inherited rules, reply limits and revision updates via MCP.
 This checks tool behavior; it does not measure an AI's routing success rate.
+
+For endpoint path lengths and located differential-pair spacing faults, see
+[Differential pairs](differential-pairs.md).

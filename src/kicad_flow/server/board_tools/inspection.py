@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...pcb.routing import RoutePath, RouteTerminal
 from .. import _meta
 from .._app import mcp
 from .models import (
@@ -104,14 +105,29 @@ def unrouted_connections(path: str, limit: int = 40) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
 def measure_routes(
-    path: str, nets: list[str] | None = None, pairs: list[NetPairSpec] | None = None
+    path: str,
+    nets: list[str] | None = None,
+    pairs: list[NetPairSpec] | None = None,
+    max_bytes: int = 100000,
 ) -> dict[str, Any]:
     """Measure authored copper by explicitly named net.
 
     Length, layer use, widths, via counts and connected-group counts are raw
-    facts. Optional pairs only compare the two supplied total lengths; no net
+    facts. Basic pairs compare the two supplied total lengths; no net
     naming convention or differential-pair membership is inferred.
+
+    For path inspection supply first_start/first_end/second_start/second_end
+    as {ref,pad,layer}, plus gap_min/gap_max. Optional max_uncoupled/max_skew
+    set geometric limits. inspection reports unique centerline paths, faults
+    with UUIDs/locations and traversed via length from saved stackup depths.
+    Ambiguous paths/partners and unsupported geometry are reported, not chosen.
+    Legacy skew compares total authored track length; inspection.path_skew
+    compares the selected paths. Neither is propagation delay or DRC proof.
     """
+    import json
+
+    if not 1000 <= max_bytes <= 2000000 or len(pairs or []) > 8:
+        return _fail(ValueError("max_bytes must be 1000..2000000; at most 8 pairs"))
     requested = list(nets or [])
     for pair in pairs or []:
         requested.extend((pair.first, pair.second))
@@ -139,12 +155,41 @@ def measure_routes(
                 "skew": round(abs(first - second), 3),
             }
         )
-    return {
+        if pair.first_start is not None:
+            try:
+                assert pair.first_end and pair.second_start and pair.second_end
+                assert pair.gap_min is not None and pair.gap_max is not None
+                comparisons[-1]["inspection"] = board.inspect_pair(
+                    RoutePath(
+                        pair.first,
+                        RouteTerminal(**pair.first_start.model_dump()),
+                        RouteTerminal(**pair.first_end.model_dump()),
+                    ),
+                    RoutePath(
+                        pair.second,
+                        RouteTerminal(**pair.second_start.model_dump()),
+                        RouteTerminal(**pair.second_end.model_dump()),
+                    ),
+                    gap_min=pair.gap_min,
+                    gap_max=pair.gap_max,
+                    max_uncoupled=pair.max_uncoupled,
+                    max_skew=pair.max_skew,
+                )
+            except _ERRORS as exc:
+                return _fail(ValueError(f"pairs[{len(comparisons) - 1}]: {exc}"))
+    result = {
         "ok": True,
         "count": len(measured),
         "nets": [item.as_dict() for item in measured],
         "pairs": comparisons,
     }
+    if len(json.dumps(result).encode()) > max_bytes:
+        return _fail(
+            ValueError(
+                f"route reply exceeds max_bytes={max_bytes}; inspect fewer nets/pairs"
+            )
+        )
+    return result
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)

@@ -286,13 +286,50 @@ class NewZone(_StrictModel):
         return self
 
 
-class NetPairSpec(_StrictModel):
-    """Two explicitly named nets whose authored lengths should be compared."""
+class RouteTerminalSpec(_StrictModel):
+    """An explicit route endpoint; layer selection is never inferred."""
 
-    model_config = ConfigDict(extra="forbid")
+    ref: str
+    pad: str
+    layer: str
+
+
+class NetPairSpec(_StrictModel):
+    """Explicit nets, optionally with terminals and geometric pair limits."""
 
     first: str
     second: str
+    first_start: RouteTerminalSpec | None = None
+    first_end: RouteTerminalSpec | None = None
+    second_start: RouteTerminalSpec | None = None
+    second_end: RouteTerminalSpec | None = None
+    gap_min: float | None = Field(default=None, ge=0)
+    gap_max: float | None = Field(default=None, ge=0)
+    max_uncoupled: float | None = Field(default=None, ge=0)
+    max_skew: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def inspection_arguments(self) -> NetPairSpec:
+        """Require all endpoints and gap bounds together for path inspection."""
+        endpoints = (
+            self.first_start,
+            self.first_end,
+            self.second_start,
+            self.second_end,
+        )
+        limits = (self.gap_min, self.gap_max, self.max_uncoupled, self.max_skew)
+        if any(v is not None for v in (*endpoints, *limits)):
+            if (
+                any(v is None for v in endpoints)
+                or self.gap_min is None
+                or self.gap_max is None
+            ):
+                raise ValueError(
+                    "path inspection requires all four endpoints and gap_min/gap_max"
+                )
+            if self.gap_min > self.gap_max:
+                raise ValueError("gap_min must not exceed gap_max")
+        return self
 
 
 class NewBoardText(_StrictModel):

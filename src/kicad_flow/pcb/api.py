@@ -33,6 +33,7 @@ from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from pathlib import Path
 
+from .routing import RoutePath
 from .types import (
     BoardLimits,
     BoardRule,
@@ -449,6 +450,17 @@ class Board(ABC):
     @abstractmethod
     def route_metrics(self, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
         """Raw authored-copper lengths, widths, vias and group counts."""
+
+    @abstractmethod
+    def inspect_pair(self, first: RoutePath, second: RoutePath, *,
+                     gap_min: float, gap_max: float,
+                     max_uncoupled: float | None = None,
+                     max_skew: float | None = None) -> dict[str, object]:
+        """Inspect explicit paths and parallel spacing against caller limits.
+
+        Ambiguous routes or spacing associations must be reported, never chosen.
+        Geometry cannot establish impedance, propagation delay or DRC compliance.
+        """
 
     @abstractmethod
     def net_policy(self, nets: tuple[str, ...]) -> dict[str, object]:
