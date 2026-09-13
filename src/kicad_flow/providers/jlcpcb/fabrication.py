@@ -199,6 +199,12 @@ class JlcpcbFabricationProvider(FabricationProvider):
             "stackup before claiming an impedance value.",
         )
         minimum = data["minimum_size_mm"]
+        tolerance = data["thickness_tolerance"]
+        thickness_tolerance = (
+            thickness * float(tolerance["at_or_above_threshold_fraction"])
+            if thickness >= float(tolerance["threshold_mm"])
+            else float(tolerance["below_threshold_mm"])
+        )
         return FabricationProfile(
             provider=self.name,
             selection=resolved,
@@ -208,6 +214,7 @@ class JlcpcbFabricationProvider(FabricationProvider):
             source_url=str(data["source_url"]),
             retrieved_at=str(data["retrieved_at"]),
             via_kinds=("through",),
+            thickness_tolerance_mm=thickness_tolerance,
             notes=notes,
         )
 

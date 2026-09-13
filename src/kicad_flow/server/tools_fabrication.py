@@ -46,10 +46,14 @@ def set_fabrication_profile(
     outline_process: str = "routed",
     impedance_control: bool = False,
     tier: str = "recommended",
+    nominal_thickness: float | None = None,
 ) -> dict[str, Any]:
     """Resolve and apply an explicit manufacturing profile before layout.
 
-    Layer count and thickness are facts read from the board. Every process
+    Layer count is read from the board. Specify nominal_thickness in mm when
+    the board records a physical stackup sum instead of an ordering thickness;
+    omission uses the board thickness without rounding to a provider choice.
+    The provider's thickness tolerance checks physical compatibility. Every process
     choice remains an argument; none is guessed from nearby geometry. The
     operation changes limits and project metadata, never board geometry.
     """
@@ -58,7 +62,8 @@ def set_fabrication_profile(
         profile = fabrication_provider(provider).resolve(FabricationSelection(
             board_type=board_type,
             layers=len(board.layers),
-            thickness=board.thickness,
+            thickness=(board.thickness if nominal_thickness is None
+                       else nominal_thickness),
             material=material,
             outer_copper_oz=outer_copper_oz,
             inner_copper_oz=inner_copper_oz,

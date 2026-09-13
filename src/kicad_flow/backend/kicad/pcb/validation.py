@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -202,6 +203,13 @@ def check_proposed(
     candidate = KiCadBoard(scratch, copy.deepcopy(self._tree))
     inputs: dict[str, tuple[str, int]] = {}
     try:
+        # KiCad resolves design settings and custom rules by board basename.
+        # A tree-only clone silently falls back to the default project rules.
+        # Keep the copy beside the source so project-relative paths still work.
+        for suffix in (".kicad_pro", ".kicad_dru"):
+            source = self._path.with_suffix(suffix)
+            if source.is_file():
+                shutil.copyfile(source, scratch.with_suffix(suffix))
         # A filled zone is cached copper, not merely a declaration. Loading
         # a scratch board containing that stale fill plus newly proposed
         # copper lets pcbnew build connectivity before the filler runs and

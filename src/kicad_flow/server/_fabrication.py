@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -68,11 +69,23 @@ def profile_findings(board: Board, profile: dict[str, Any]) -> list[Finding]:
             f"was resolved for {selected_layers}",
         ))
     selected_thickness = float(selection.get("thickness", 0.0))
-    if abs(board.thickness - selected_thickness) > 0.001:
+    # Selection is the nominal ordering thickness; the board can contain
+    # the physical stackup sum. Legacy profiles retain their original bound
+    # until the caller explicitly resolves a new provider profile.
+    tolerance = float(profile.get("thickness_tolerance_mm", 0.001))
+    if not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("fabrication profile has invalid thickness tolerance")
+    if not math.isfinite(selected_thickness) or selected_thickness <= 0:
+        raise ValueError("fabrication profile has invalid nominal thickness")
+    if (
+        not math.isfinite(board.thickness)
+        or abs(board.thickness - selected_thickness) > tolerance + 1e-9
+    ):
         out.append(Finding(
             "error", "provider_board_thickness",
             f"board thickness is {board.thickness:g} mm; active provider "
-            f"profile was resolved for {selected_thickness:g} mm",
+            f"profile nominal thickness is {selected_thickness:g} mm "
+            f"with +/-{tolerance:g} mm tolerance",
         ))
     allowed_vias = profile.get("via_kinds")
     if isinstance(allowed_vias, list):

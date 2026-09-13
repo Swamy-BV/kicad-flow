@@ -187,6 +187,7 @@ class FabricationProfile:
     retrieved_at: str
     via_kinds: tuple[str, ...] = ("through",)
     notes: tuple[str, ...] = ()
+    thickness_tolerance_mm: float = 0.001
 
     def as_dict(self) -> dict[str, Any]:
         """Return the complete resolved profile as JSON."""
@@ -200,6 +201,7 @@ class FabricationProfile:
             "retrieved_at": self.retrieved_at,
             "via_kinds": list(self.via_kinds),
             "notes": list(self.notes),
+            "thickness_tolerance_mm": self.thickness_tolerance_mm,
         }
 
 

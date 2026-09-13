@@ -5,6 +5,13 @@
   "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities/",
   "supported_layers": [2, 4, 6, 8],
   "thickness_mm": [0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0],
+  "thickness_tolerance": {
+    "threshold_mm": 1.0,
+    "below_threshold_mm": 0.1,
+    "at_or_above_threshold_fraction": 0.1,
+    "source_url": "https://jlcpcb.com/capabilities/Capabilities",
+    "retrieved_at": "2026-09-12"
+  },
   "outer_copper_oz": {
     "2": [1.0, 2.0, 2.5, 3.5, 4.5],
     "multilayer": [1.0, 2.0]

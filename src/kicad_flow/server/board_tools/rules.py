@@ -52,6 +52,9 @@ def set_stackup(
     Copper entries must exactly match the layers reported by `new_board` or
     `set_board_layers`. Include every layer the manufacturer specifies:
     copper, dielectric core/prepreg and optional mask/silkscreen/paste layers.
+    The copper/core/prepreg sum becomes the board's physical thickness. The
+    fabrication profile keeps its nominal ordering thickness separately; use
+    set_fabrication_profile(nominal_thickness=...) when selecting it afterward.
     No impedance dimensions are inferred from materials or thicknesses.
     """
     try:
