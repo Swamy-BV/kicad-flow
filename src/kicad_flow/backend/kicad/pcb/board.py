@@ -23,6 +23,7 @@ from kicad_flow.pcb.types import (
     Net,
     NetClass,
     NetClassAssignment,
+    NetClassPattern,
     NetConnectivity,
     Pad,
     PlacementMeasurement,
@@ -187,6 +188,16 @@ class KiCadBoard(Board):
     def net_classes(self) -> list[NetClass]:
         """Read every project netclass."""
         return _settings.net_classes(self)
+
+    def set_net_class_patterns(
+        self, patterns: tuple[NetClassPattern, ...]
+    ) -> list[NetClassPattern]:
+        """Replace persistent net-class assignment patterns in the project."""
+        return _settings.set_net_class_patterns(self, patterns)
+
+    def net_class_patterns(self) -> list[NetClassPattern]:
+        """Read the project's net-class assignment patterns."""
+        return _settings.net_class_patterns(self)
 
     def assign_net_classes(
         self, assignments: tuple[NetClassAssignment, ...]

@@ -21,6 +21,7 @@ to modules in the same directory:
 | Explicit route paths and pair spacing | — | `routing_path.py`, `differential.py` |
 | Outlines and drawn graphics | `connections.py` | `graphics.py` |
 | Construction and project rules | — | `settings.py`, `project.py` |
+| Net-class colors and patterns | — | `colors.py`, `class_patterns.py` |
 
 `_geometry.py` contains coordinate and intersection calculations. `_nodes.py`
 contains format helpers. Feature modules accept the concrete document as an

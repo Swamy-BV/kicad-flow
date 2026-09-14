@@ -535,7 +535,7 @@ class BoardLimits:
 
 @dataclass(frozen=True)
 class NetClass:
-    """Routing dimensions shared by a named set of nets, in millimetres."""
+    """Routing dimensions in millimetres and optional display colors for nets."""
 
     name: str
     clearance: float | None = None
@@ -547,19 +547,33 @@ class NetClass:
     diff_pair_width: float | None = None
     diff_pair_gap: float | None = None
     diff_pair_via_gap: float | None = None
+    pcb_color: str | None = None
+    schematic_color: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        """The class name and every dimension it explicitly defines."""
+        """The class name and every property it explicitly defines."""
         out: dict[str, Any] = {"name": self.name}
         for name in (
             "clearance", "track_width", "via_diameter", "via_drill",
             "microvia_diameter", "microvia_drill", "diff_pair_width",
-            "diff_pair_gap", "diff_pair_via_gap",
+            "diff_pair_gap", "diff_pair_via_gap", "pcb_color", "schematic_color",
         ):
             value = getattr(self, name)
             if value is not None:
                 out[name] = value
         return out
+
+
+@dataclass(frozen=True)
+class NetClassPattern:
+    """A caller-supplied net-name pattern and its class membership."""
+
+    pattern: str
+    net_class: str
+
+    def as_dict(self) -> dict[str, str]:
+        """The pattern and class as JSON."""
+        return {"pattern": self.pattern, "net_class": self.net_class}
 
 
 @dataclass(frozen=True)

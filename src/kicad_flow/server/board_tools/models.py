@@ -371,7 +371,7 @@ class StackupLayerSpec(_StrictModel):
 
 
 class NetClassSpec(_StrictModel):
-    """One named collection of routing dimensions."""
+    """One named collection of routing dimensions and display colors."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -385,6 +385,14 @@ class NetClassSpec(_StrictModel):
     diff_pair_width: float | None = None
     diff_pair_gap: float | None = None
     diff_pair_via_gap: float | None = None
+    pcb_color: str | None = Field(
+        default=None, pattern=r"^(?:#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?)?$",
+        description="PCB color: #RRGGBB or #RRGGBBAA; empty clears, null preserves.",
+    )
+    schematic_color: str | None = Field(
+        default=None, pattern=r"^(?:#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?)?$",
+        description="Schematic color: hex RGB/RGBA; empty clears, null preserves.",
+    )
 
 
 class NetClassAssignmentSpec(_StrictModel):
@@ -394,6 +402,13 @@ class NetClassAssignmentSpec(_StrictModel):
 
     net: str
     net_class: str
+
+
+class NetClassPatternSpec(_StrictModel):
+    """One persistent project net-class assignment pattern."""
+
+    pattern: str = Field(min_length=1)
+    net_class: str = Field(min_length=1)
 
 
 class NumericConstraintSpec(_StrictModel):

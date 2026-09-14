@@ -45,6 +45,7 @@ from .types import (
     Net,
     NetClass,
     NetClassAssignment,
+    NetClassPattern,
     NetConnectivity,
     PlacementMeasurement,
     PlacementProposal,
@@ -142,11 +143,21 @@ class Board(ABC):
 
     @abstractmethod
     def set_net_classes(self, classes: tuple[NetClass, ...]) -> list[NetClass]:
-        """Create or replace named routing classes and return those classes."""
+        """Update supplied class dimensions/colors and return the resulting classes."""
 
     @abstractmethod
     def net_classes(self) -> list[NetClass]:
         """Every routing class stored with the board's project."""
+
+    @abstractmethod
+    def set_net_class_patterns(
+        self, patterns: tuple[NetClassPattern, ...]
+    ) -> list[NetClassPattern]:
+        """Replace all project net-class patterns; an empty list clears them."""
+
+    @abstractmethod
+    def net_class_patterns(self) -> list[NetClassPattern]:
+        """Read the project's persistent net-class assignment patterns."""
 
     @abstractmethod
     def assign_net_classes(

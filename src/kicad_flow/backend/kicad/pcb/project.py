@@ -24,6 +24,7 @@ from kicad_flow.pcb.types import (
 
 from .._sexpr import Node, Sym, dumps, loads
 from ..cli import cli
+from . import colors
 
 _LIMIT_KEYS = {
     "min_clearance": "min_clearance",
@@ -214,6 +215,8 @@ def _class_from(raw: dict[str, Any]) -> NetClass:
     for name in _DIMENSIONS:
         value = raw.get(name)
         values[name] = float(value) if isinstance(value, (int, float)) else None
+    for name in ("pcb_color", "schematic_color"):
+        values[name] = colors.from_project(raw.get(name))
     return NetClass(**values)
 
 
@@ -234,6 +237,10 @@ def set_net_classes(board: Path,
     if len(set(names)) != len(names):
         raise ValueError("netclass names must be unique within one call")
     for item in classes:
+        for name in ("pcb_color", "schematic_color"):
+            color = getattr(item, name)
+            if color is not None:
+                colors.to_project(color)
         values = [getattr(item, name) for name in _DIMENSIONS]
         if any(value is not None and value < 0 for value in values):
             raise ValueError(f"netclass {item.name!r} has a negative dimension")
@@ -265,6 +272,10 @@ def set_net_classes(board: Path,
             value = getattr(item, name)
             if value is not None:
                 current[name] = value
+        for name in ("pcb_color", "schematic_color"):
+            value = getattr(item, name)
+            if value is not None:
+                current[name] = colors.to_project(value)
     text = json.dumps(project, indent=2, ensure_ascii=False) + "\n"
     _validate_sidecars(board, project=text)
     _atomic_text(_project_path(board), text)
@@ -296,9 +307,18 @@ for net in job["nets"]:
         parent = getattr(effective, "Get" + method + "Parent")()
         sources[name] = parent.GetName() if parent else effective.GetName()
     rows.append({"net": net, "effective_class": effective.GetName(),
-                 "dimensions": values, "sources": sources})
+                 "dimensions": values, "sources": sources,
+                 "class_colors": {
+                     "pcb_color": effective.GetPcbColor().ToCSSString(),
+                     "schematic_color": effective.GetSchematicColor().ToCSSString(),
+                 }})
 print(json.dumps({"nets": rows}))
 ''', {"board": str(board), "nets": list(nets)}, timeout=30.0)
+    for row in result.get("nets", []):
+        row["class_colors"] = {
+            name: colors.from_project(value)
+            for name, value in row["class_colors"].items()
+        }
     raw_classes = _read_project(board).get("net_settings", {}).get("classes") or []
     missing = [str(entry.get("name", "")) for entry in raw_classes
                if isinstance(entry, dict) and "tuning_profile" not in entry]

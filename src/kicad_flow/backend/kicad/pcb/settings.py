@@ -10,11 +10,13 @@ from kicad_flow.pcb.types import (
     BoardRule,
     NetClass,
     NetClassAssignment,
+    NetClassPattern,
     Stackup,
     StackupLayer,
 )
 
 from .._sexpr import Node, Sym
+from . import class_patterns as _class_patterns
 from . import project as _project
 from ._constants import (
     _STACKUP_KINDS,
@@ -207,6 +209,18 @@ def set_net_classes(self: KiCadBoard, classes: tuple[NetClass, ...]) -> list[Net
 def net_classes(self: KiCadBoard) -> list[NetClass]:
     """Read every project netclass."""
     return _project.net_classes(self._path)
+
+
+def set_net_class_patterns(
+    self: KiCadBoard, patterns: tuple[NetClassPattern, ...]
+) -> list[NetClassPattern]:
+    """Replace the complete project pattern list."""
+    return _class_patterns.replace(self._path, patterns)
+
+
+def net_class_patterns(self: KiCadBoard) -> list[NetClassPattern]:
+    """Read persistent project pattern assignments."""
+    return _class_patterns.read(self._path)
 
 
 def assign_net_classes(

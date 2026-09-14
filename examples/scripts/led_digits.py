@@ -1185,6 +1185,8 @@ async def build(client: Client) -> int:
         "via_diameter": 0.45, "via_drill": 0.2,
         "diff_pair_width": 0.18, "diff_pair_gap": 0.15,
         "diff_pair_via_gap": 0.2}])
+    patterns = (await call("list_net_class_patterns", path=scratch))["patterns"]
+    await call("set_net_class_patterns", path=scratch, patterns=patterns)
     classes = await call("list_net_classes", path=scratch)
     same("USB netclass exists",
          any(item.get("name") == "USB" for item in classes.get("classes", [])),

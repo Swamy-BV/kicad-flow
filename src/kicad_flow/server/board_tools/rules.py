@@ -10,6 +10,7 @@ from ...pcb.types import (
     Constraint,
     NetClass,
     NetClassAssignment,
+    NetClassPattern,
     Stackup,
     StackupLayer,
 )
@@ -18,6 +19,7 @@ from .._app import mcp
 from .models import (
     BoardRuleSpec,
     NetClassAssignmentSpec,
+    NetClassPatternSpec,
     NetClassSpec,
     StackupLayerSpec,
 )
@@ -153,10 +155,17 @@ def get_board_limits(path: str) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def set_net_classes(path: str, classes: list[NetClassSpec]) -> dict[str, Any]:
-    """Create or update named routing classes without changing other classes.
+    """Set net-class routing rules and PCB/schematic colors in the board project.
 
     Omitted dimensions remain unchanged on an existing class. A newly created
     named class may omit dimensions and inherit the project's Default class.
+    pcb_color and schematic_color accept #RRGGBB or #RRGGBBAA. Omit or pass
+    null to preserve a color; empty clears it to KiCad's inherited/default color.
+    Use set_net_class_patterns for persistent schematic and PCB assignments.
+    assign_net_classes only sets explicit board memberships; the schematic
+    editor can rebuild that cache. No colors are chosen automatically.
+    PCB visibility also depends on the editor's net-color display mode; these
+    colors do not change physical copper or solder-mask colors in 3D renders.
     """
     try:
         made = _board(path).set_net_classes(
@@ -183,6 +192,41 @@ def list_net_classes(path: str) -> dict[str, Any]:
         "count": len(found),
         "classes": [item.as_dict() for item in found],
     }
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def set_net_class_patterns(
+    path: str, patterns: list[NetClassPatternSpec]
+) -> dict[str, Any]:
+    """Replace ALL project net-class patterns for both schematic and PCB.
+
+    Read list_net_class_patterns first to retain existing entries. Empty clears
+    all patterns. Classes must exist. KiCad accepts wildcards and regular
+    expressions: USB_* groups nets, ^VBUS$ anchors a simple exact name.
+    Use full sheet paths for local nets (e.g. ^/SCL$); escape regex characters
+    in literal names. Matching nets inherit class rules and colors. Explicit
+    and schematic directive assignments still apply independently.
+    path is the board in the same project as the root schematic.
+    """
+    try:
+        made = _board(path).set_net_class_patterns(tuple(
+            NetClassPattern(item.pattern, item.net_class) for item in patterns
+        ))
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(made),
+            "patterns": [item.as_dict() for item in made]}
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def list_net_class_patterns(path: str) -> dict[str, Any]:
+    """Read persistent project net-class patterns before editing their list."""
+    try:
+        found = _board(path).net_class_patterns()
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(found),
+            "patterns": [item.as_dict() for item in found]}
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)

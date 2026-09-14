@@ -29,7 +29,8 @@ def list_board_nets(
     board mid-layout.
 
     net selects one exact name. include_rules adds KiCad-resolved netclass
-    dimensions and the source class of each inherited value. It reports pads
+    dimensions, source classes and effective class_colors. Individual PCB net
+    color overrides and editor display modes are separate. It reports pads
     without net assignments and explicit class coverage so callers can review
     policy before routing. Default is valid; inspect it instead of guessing.
     Read custom constraints separately and check candidates with check_board:
