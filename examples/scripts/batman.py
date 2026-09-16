@@ -1,10 +1,10 @@
 """A sixteen-LED bat signal: schematic and shaped PCB, through MCP only.
 
 Sixteen identical +5V -> resistor -> LED -> GND channels form a bat emblem.
-The LEDs live on the front, their resistors directly behind them, and one via
-per channel joins the only net that must cross layers. A front GND pour and a
-back +5V pour complete the power paths. The PCB outline and all silkscreen art
-are composed from the public graphical primitives.
+A 250 mA resettable fuse and series Schottky diode protect the 5 V input, while
+10 uF bulk and 100 nF ceramic capacitors decouple the protected rail. The LEDs
+live on the front and the support circuitry lives on the back. A front GND pour
+and back +5V pour complete the power paths.
 
 Run it: ``python examples/scripts/batman.py``
 """
@@ -28,24 +28,28 @@ VCC, GND = "+5V", "GND"
 LED_FP = "LED_SMD:LED_0603_1608Metric"
 RES_FP = "Resistor_SMD:R_0402_1005Metric"
 POWER_FP = "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+FUSE_FP = "Fuse:Fuse_1206_3216Metric"
+DIODE_FP = "Diode_SMD:D_SMA"
+BULK_FP = "Capacitor_SMD:C_1206_3216Metric"
+DECOUPLING_FP = "Capacitor_SMD:C_0603_1608Metric"
 
-# The placement is the drawing: paired wing points, two eyes, a chest and the
-# lower tail. Every coordinate is chosen here, never inferred by the API.
+# The placement follows the silhouette: five lights on each wing and six across
+# the head and body. Every coordinate is chosen here, never inferred by the API.
 LED_AT = [
-    (18.0, 25.0), (26.0, 24.0), (34.0, 27.0), (22.0, 34.0), (34.0, 36.0),
-    (82.0, 25.0), (74.0, 24.0), (66.0, 27.0), (78.0, 34.0), (66.0, 36.0),
-    (45.0, 18.0), (55.0, 18.0), (46.0, 25.0), (54.0, 25.0),
-    (44.0, 42.0), (56.0, 42.0),
+    (17.0, 21.0), (27.0, 21.0), (36.0, 26.0), (29.0, 29.0), (38.0, 32.0),
+    (83.0, 21.0), (73.0, 21.0), (64.0, 26.0), (71.0, 29.0), (62.0, 32.0),
+    (46.0, 22.0), (54.0, 22.0), (43.0, 27.0), (57.0, 27.0),
+    (44.0, 35.0), (56.0, 35.0),
 ]
 
-# Clockwise bat silhouette. A polygon is one exact closed contour; the two
-# circular contours below become mounting cutouts by containment, a KiCad fact.
+# Clockwise bat silhouette. A polygon is one exact closed contour.
 BAT_OUTLINE = [
-    [50, 12], [54, 16], [61, 6], [60, 20], [82, 10], [76, 23],
-    [96, 20], [86, 30], [96, 40], [72, 35], [78, 52], [60, 41],
-    [55, 55], [50, 43], [45, 55], [40, 41], [22, 52], [28, 35],
-    [4, 40], [14, 30], [4, 20], [24, 23], [18, 10], [40, 20],
-    [39, 6], [46, 16],
+    [50, 17], [54, 11], [55, 19], [61, 22], [70, 19], [82, 14],
+    [96, 10], [91, 25], [88, 31], [84, 28], [78, 29], [72, 35],
+    [66, 32], [60, 36], [56, 44], [52, 48], [50, 54], [48, 48],
+    [44, 44], [40, 36], [34, 32], [28, 35], [22, 29], [16, 28],
+    [12, 31], [9, 25], [4, 10], [18, 14], [30, 19], [39, 22],
+    [45, 19], [46, 11],
 ]
 
 
@@ -77,54 +81,80 @@ async def build(client: Client) -> int:
 
     # -- schematic -------------------------------------------------------
     sheet = str(OUT / "batman.kicad_sch")
-    await call("new_sheet", path=sheet, paper="A3",
+    await call("new_sheet", path=sheet, paper="A4",
                title="BAT SIGNAL // 16 LED beacon")
     parts: list[dict[str, Any]] = []
     for i in range(16):
-        col, row = i % 8, i // 8
-        x, top = (28 + col * 28) * G, (24 + row * 48) * G
+        col, row = i % 4, i // 4
+        x, top = (30 + col * 42) * G, (12 + row * 30) * G
         parts += [
             {"lib_id": "Device:R", "ref": f"R{i + 1}",
-             "x": x, "y": top + 9 * G, "value": "330R"},
+             "x": x, "y": top + 7 * G, "value": "330R"},
             {"lib_id": "Device:LED", "ref": f"D{i + 1}",
-             "x": x, "y": top + 20 * G, "value": "AMBER",
+             "x": x, "y": top + 15 * G, "value": "AMBER",
              "rotation": 90},
         ]
-    parts.append({"lib_id": "Connector_Generic:Conn_01x02", "ref": "J1",
-                  "x": 270 * G, "y": 45 * G, "value": "5V IN"})
+    parts += [
+        {"lib_id": "Connector_Generic:Conn_01x02", "ref": "J1",
+         "x": 210 * G, "y": 36 * G, "value": "5V IN"},
+        {"lib_id": "Device:Fuse", "ref": "F1", "x": 190 * G,
+         "y": 36 * G, "value": "250mA PTC", "rotation": 90},
+        {"lib_id": "Device:D_Schottky", "ref": "D17", "x": 175 * G,
+         "y": 36 * G, "value": "SS14"},
+        {"lib_id": "Device:C", "ref": "C1", "x": 180 * G,
+         "y": 58 * G, "value": "10uF"},
+        {"lib_id": "Device:C", "ref": "C2", "x": 204 * G,
+         "y": 58 * G, "value": "100nF"},
+    ]
+    await call("measure_schematic_placement", path=sheet, parts=parts)
     placed = await call("add_components", path=sheet, parts=parts)
     made = placed.get("parts", [])
-    if len(made) != 33:
+    if len(made) != 37:
         print(f"WRONG schematic placements: {len(made)}")
         return failures + 1
+    by_ref = {part["ref"]: part for part in made}
 
     channel_rails: list[dict[str, Any]] = []
     for i in range(16):
-        col, row = i % 8, i // 8
-        x, top = (28 + col * 28) * G, (24 + row * 48) * G
+        col, row = i % 4, i // 4
+        x, top = (30 + col * 42) * G, (12 + row * 30) * G
         channel_rails += [
             {"x": x, "y": top, "net": VCC},
-            {"x": x, "y": top + 29 * G, "net": GND, "rotation": 180},
+            {"x": x, "y": top + 23 * G, "net": GND, "rotation": 180},
         ]
     # Two isolated rail/flag pairs establish that both global supplies are
     # driven. The connector receives its own visible power-symbol links.
     flag_rails = [
-        {"x": 250 * G, "y": 105 * G, "net": VCC},
-        {"x": 278 * G, "y": 105 * G, "net": GND},
+        {"x": 190 * G, "y": 82 * G, "net": VCC},
+        {"x": 210 * G, "y": 82 * G, "net": GND},
     ]
-    connector = made[-1]
-    j1, j2 = pin(connector, "1"), pin(connector, "2")
-    connector_rails = [
-        {"x": j1[0] + 10 * G, "y": j1[1], "net": VCC,
-         "rotation": 270},
+    connector = by_ref["J1"]
+    fuse = by_ref["F1"]
+    protector = by_ref["D17"]
+    bulk = by_ref["C1"]
+    decoupling = by_ref["C2"]
+    j2 = pin(connector, "2")
+    protected = pin(protector, "1")
+    support_rails = [
         {"x": j2[0] + 10 * G, "y": j2[1], "net": GND,
          "rotation": 270},
+        {"x": protected[0] - 10 * G, "y": protected[1], "net": VCC,
+         "rotation": 90},
+        {"x": pin(bulk, "1")[0], "y": pin(bulk, "1")[1] - 8 * G,
+         "net": VCC},
+        {"x": pin(bulk, "2")[0], "y": pin(bulk, "2")[1] + 8 * G,
+         "net": GND, "rotation": 180},
+        {"x": pin(decoupling, "1")[0],
+         "y": pin(decoupling, "1")[1] - 8 * G, "net": VCC},
+        {"x": pin(decoupling, "2")[0],
+         "y": pin(decoupling, "2")[1] + 8 * G,
+         "net": GND, "rotation": 180},
     ]
     powered = await call("add_power", path=sheet,
-                         symbols=channel_rails + flag_rails + connector_rails)
+                         symbols=channel_rails + flag_rails + support_rails)
     flags = await call("add_power_flags", path=sheet, flags=[
-        {"x": 250 * G, "y": 97 * G},
-        {"x": 278 * G, "y": 97 * G},
+        {"x": 190 * G, "y": 74 * G},
+        {"x": 210 * G, "y": 74 * G},
     ])
     rail_parts = powered.get("symbols", [])
     flag_parts = flags.get("flags", [])
@@ -137,32 +167,37 @@ async def build(client: Client) -> int:
         wires.append({"x1": pa[0], "y1": pa[1],
                       "x2": pb[0], "y2": pb[1]})
 
-    labels: list[dict[str, Any]] = []
     for i in range(16):
         resistor, led = made[i * 2:i * 2 + 2]
         supply, ground = rail_parts[i * 2:i * 2 + 2]
         link(supply, "1", resistor, "1")
         link(resistor, "2", led, "2")
         link(led, "1", ground, "1")
-        rp, dp = pin(resistor, "2"), pin(led, "2")
-        labels.append({"x": rp[0], "y": (rp[1] + dp[1]) / 2,
-                       "text": f"BAT_{i + 1:02d}", "kind": "local"})
     for i in range(2):
         link(flag_parts[i], "1", rail_parts[32 + i], "1")
-    link(connector, "1", rail_parts[34], "1")
-    link(connector, "2", rail_parts[35], "1")
+    link(connector, "1", fuse, "1")
+    link(fuse, "2", protector, "2")
+    link(protector, "1", rail_parts[35], "1")
+    link(connector, "2", rail_parts[34], "1")
+    link(bulk, "1", rail_parts[36], "1")
+    link(bulk, "2", rail_parts[37], "1")
+    link(decoupling, "1", rail_parts[38], "1")
+    link(decoupling, "2", rail_parts[39], "1")
     await call("add_wires", path=sheet, wires=wires)
-    await call("add_labels", path=sheet, labels=labels)
     await call("set_fields", path=sheet, fields=[
         *[{"ref": f"D{i}", "name": "Footprint", "value": LED_FP}
           for i in range(1, 17)],
         *[{"ref": f"R{i}", "name": "Footprint", "value": RES_FP}
           for i in range(1, 17)],
         {"ref": "J1", "name": "Footprint", "value": POWER_FP},
+        {"ref": "F1", "name": "Footprint", "value": FUSE_FP},
+        {"ref": "D17", "name": "Footprint", "value": DIODE_FP},
+        {"ref": "C1", "name": "Footprint", "value": BULK_FP},
+        {"ref": "C2", "name": "Footprint", "value": DECOUPLING_FP},
     ])
     await call("add_texts", path=sheet, notes=[{
-        "x": 247 * G, "y": 126 * G,
-        "text": "GOTHAM BEACON\n16 x AMBER LED\n5 V / 330 ohm",
+        "x": 185 * G, "y": 112 * G,
+        "text": "GOTHAM BEACON\n16 x AMBER LED\n5 V / 330 ohm / ~150 mA",
         "size": 1.5}])
     await call("save_sheet", path=sheet)
     erc = await call("check_sheet", path=sheet)
@@ -171,12 +206,22 @@ async def build(client: Client) -> int:
     # -- board -----------------------------------------------------------
     board = str(OUT / "batman.kicad_pcb")
     await call("new_board", path=board, layers=2, thickness=1.6)
+    await call("set_stackup", path=board, layers=[
+        {"name": "Top Silk Screen", "kind": "Top Silk Screen",
+         "color": "White"},
+        {"name": "Top Solder Mask", "kind": "Top Solder Mask",
+         "color": "Black"},
+        {"name": "F.Cu", "kind": "copper", "thickness": 0.035},
+        {"name": "dielectric 1", "kind": "core", "thickness": 1.53,
+         "material": "FR4", "epsilon_r": 4.2, "loss_tangent": 0.02},
+        {"name": "B.Cu", "kind": "copper", "thickness": 0.035},
+        {"name": "Bottom Solder Mask", "kind": "Bottom Solder Mask",
+         "color": "Black"},
+        {"name": "Bottom Silk Screen", "kind": "Bottom Silk Screen",
+         "color": "White"},
+    ], copper_finish="ENIG")
     outline = await call("add_graphics", path=board, graphics=[
         {"kind": "polygon", "layer": "Edge.Cuts", "points": BAT_OUTLINE},
-        {"kind": "circle", "layer": "Edge.Cuts",
-         "x": 20, "y": 30, "radius": 1.7},
-        {"kind": "circle", "layer": "Edge.Cuts",
-         "x": 80, "y": 30, "radius": 1.7},
     ])
 
     footprints: list[dict[str, Any]] = []
@@ -187,9 +232,18 @@ async def build(client: Client) -> int:
             {"fp_id": RES_FP, "ref": f"R{i}", "x": x, "y": y,
              "rotation": 90, "side": "B", "value": "330R"},
         ]
-    footprints.append({"fp_id": POWER_FP, "ref": "J1",
-                       "x": 50, "y": 33, "rotation": 90,
-                       "side": "B", "value": "5V IN"})
+    footprints += [
+        {"fp_id": POWER_FP, "ref": "J1", "x": 51.27, "y": 39,
+         "rotation": 270, "side": "B", "value": "5V IN"},
+        {"fp_id": FUSE_FP, "ref": "F1", "x": 50, "y": 34,
+         "side": "B", "value": "250mA PTC"},
+        {"fp_id": DIODE_FP, "ref": "D17", "x": 50, "y": 28,
+         "side": "B", "value": "SS14"},
+        {"fp_id": BULK_FP, "ref": "C1", "x": 43, "y": 31,
+         "rotation": 90, "side": "B", "value": "10uF"},
+        {"fp_id": DECOUPLING_FP, "ref": "C2", "x": 57, "y": 31,
+         "rotation": 90, "side": "B", "value": "100nF"},
+    ]
     board_parts = await call("place_footprints", path=board,
                              footprints=footprints)
     pads_of = {
@@ -231,46 +285,49 @@ async def build(client: Client) -> int:
              "y2": resistor["y"], "layer": "B.Cu", "width": 0.25,
              "net": net},
         ]
+    # The protected input chain stays on the back. Both capacitor ground pads
+    # reach the front ground plane through a nearby via.
+    for first_ref, first_pad, second_ref, second_pad in [
+        ("J1", "1", "F1", "1"),
+        ("F1", "2", "D17", "2"),
+    ]:
+        first = pads_of[first_ref][first_pad]
+        second = pads_of[second_ref][second_pad]
+        tracks.append({
+            "x1": first["x"], "y1": first["y"],
+            "x2": second["x"], "y2": second["y"],
+            "layer": "B.Cu", "width": 0.6,
+            "net": net_of[f"{first_ref}.{first_pad}"],
+        })
+    for ref, direction in [("C1", -1.0), ("C2", 1.0)]:
+        ground = pads_of[ref]["2"]
+        vx = round(ground["x"] + direction * 1.5, 3)
+        vias.append({"x": vx, "y": ground["y"], "net": GND,
+                     "diameter": 0.65, "drill": 0.3})
+        tracks.append({
+            "x1": ground["x"], "y1": ground["y"],
+            "x2": vx, "y2": ground["y"],
+            "layer": "B.Cu", "width": 0.4, "net": GND,
+        })
     await call("add_vias", path=board, vias=vias)
     await call("add_tracks", path=board, tracks=tracks)
 
-    # The zone polygons deliberately extend across the silhouette; KiCad's
-    # filler clips them to the exact bat edge and internal cutouts.
-    zone_box = [[2, 4], [98, 4], [98, 57], [2, 57]]
+    # Follow the silhouette with a deliberate copper-to-edge inset.
     await call("add_zones", path=board, zones=[
-        {"points": zone_box, "layer": "F.Cu", "net": GND},
-        {"points": zone_box, "layer": "B.Cu", "net": VCC},
+        {"boundary": "board_outline", "inset": 0.6,
+         "layer": "F.Cu", "net": GND, "pad_connection": "solid"},
+        {"boundary": "board_outline", "inset": 0.6,
+         "layer": "B.Cu", "net": VCC, "pad_connection": "solid"},
     ])
 
-    # Front eye halos and central bat mask; back carries the signal roundel.
-    front_art: list[dict[str, Any]] = [
-        {"kind": "arc", "layer": "F.SilkS", "width": 0.35,
-         "x1": 41, "y1": 18, "xm": 45, "ym": 14, "x2": 49, "y2": 18},
-        {"kind": "arc", "layer": "F.SilkS", "width": 0.35,
-         "x1": 51, "y1": 18, "xm": 55, "ym": 14, "x2": 59, "y2": 18},
-        {"kind": "polygon", "layer": "F.SilkS", "fill": True,
-         "points": [[43, 31], [47, 28], [50, 31], [53, 28], [57, 31],
-                    [53, 33], [55, 37], [50, 34], [45, 37], [47, 33]]},
-        {"kind": "line", "layer": "F.SilkS", "width": 0.3,
-         "x1": 31, "y1": 31, "x2": 40, "y2": 33},
-        {"kind": "line", "layer": "F.SilkS", "width": 0.3,
-         "x1": 69, "y1": 31, "x2": 60, "y2": 33},
-    ]
-    back_art: list[dict[str, Any]] = [
-        {"kind": "circle", "layer": "B.SilkS", "width": 0.45,
-         "x": 50, "y": 30, "radius": 14},
-        {"kind": "polygon", "layer": "B.SilkS", "fill": True,
-         "points": [[36, 30], [42, 26], [46, 28], [48, 24], [50, 28],
-                    [52, 24], [54, 28], [58, 26], [64, 30], [57, 31],
-                    [60, 36], [53, 33], [50, 38], [47, 33], [40, 36],
-                    [43, 31]]},
-    ]
-    await call("add_graphics", path=board, graphics=front_art + back_art)
+    # Keep the silkscreen sparse so the LEDs and silhouette stay legible.
     await call("add_board_texts", path=board, texts=[
-        {"x": 50, "y": 39, "text": "BAT SIGNAL // 16",
+        {"x": 50, "y": 31, "text": "GOTHAM // 16",
          "layer": "F.SilkS", "size": 0.9},
-        {"x": 50, "y": 41, "text": "I AM THE NIGHT",
-         "layer": "B.SilkS", "size": 1.1, "mirror": True},
+        {"x": 55, "y": 39, "text": "+5V", "layer": "B.SilkS",
+         "size": 0.8, "mirror": True},
+        {"x": 45, "y": 41.5, "text": "GND", "layer": "B.SilkS",
+         "size": 0.8, "mirror": True},
     ])
 
     await call("save_board", path=board)
@@ -300,14 +357,14 @@ async def build(client: Client) -> int:
         failures += int(unrouted["count"])
     if errors:
         failures += len(errors)
-    if outline.get("size") != [92.0, 49.0]:
+    if outline.get("size") != [92.0, 44.0]:
         failures += 1
         print(f"WRONG board size: {outline.get('size')}")
 
     took = time.time() - started
     print(f"schematic: 16 LED channels, {len(nets.get('nets', []))} nets; "
           f"ERC {erc.get('errors', '?')}/{erc.get('warnings', '?')}")
-    print(f"board: 33 footprints, {len(vias)} vias, {len(tracks)} tracks, "
+    print(f"board: 37 footprints, {len(vias)} vias, {len(tracks)} tracks, "
           f"{graphics.get('count', 0)} graphics")
     print(f"unrouted: {unrouted.get('count', '?')}; "
           f"DRC errors: {len(errors)}")

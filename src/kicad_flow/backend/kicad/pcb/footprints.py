@@ -114,10 +114,11 @@ def place(
     node.items[1] = fp_id
     if side == "B":
         self._mirror(node)
-    origin = _origin_for_anchor(node, x, y, rotation, anchor)
+    stored_rotation = (rotation + (180.0 if side == "B" else 0.0)) % 360.0
+    origin = _origin_for_anchor(node, x, y, stored_rotation, anchor)
     self._set_child(node, "layer", ["F.Cu" if side == "F" else "B.Cu"])
-    self._set_child(node, "at", [origin.x, origin.y, rotation % 360.0])
-    _turn_pads(node, rotation % 360.0)
+    self._set_child(node, "at", [origin.x, origin.y, stored_rotation])
+    _turn_pads(node, stored_rotation)
     _refresh_uuids(node)
     if node.get("uuid") is None:
         node.items.append(_node("uuid", [_uid()]))
@@ -133,12 +134,16 @@ def place(
 def _mirror(node: Node) -> None:
     """Flip a footprint's stored geometry to the other side of the board.
 
-    This is what the file records, and why :func:`_pad_on_board` applies
-    no side of its own: a back-side footprint carries coordinates that are
-    ALREADY mirrored. Negate X on everything it draws, negate the angles,
-    and move every layer to its opposite -- a pad left on ``F.Cu`` under a
-    part on the back is a pad on the wrong side, which routes cleanly and
-    connects nothing.
+    This is what KiCad records, and why :func:`_pad_on_board` applies no side
+    of its own: a back-side footprint carries coordinates that are ALREADY
+    mirrored. KiCad negates local Y, negates local angles, and stores the
+    footprint itself 180 degrees from the caller-facing rotation. Every layer
+    also moves to its opposite -- a pad left on ``F.Cu`` under a part on the
+    back is a pad on the wrong side, which routes cleanly and connects nothing.
+
+    The 3D model node is deliberately unchanged. KiCad applies the footprint's
+    side and stored rotation to it; changing the model itself produces a local
+    copy that no longer matches the library footprint.
     """
     for kind in (
         "pad",
@@ -154,12 +159,12 @@ def _mirror(node: Node) -> None:
             for corner in ("at", "start", "end", "center", "mid"):
                 point = shape.get(corner)
                 if point is not None and len(point.items) >= 2:
-                    _set(point, 0, -_f(point, 0))
+                    _set(point, 1, -_f(point, 1))
                     if len(point.items) >= 4:
                         _set(point, 2, (-_f(point, 2)) % 360.0)
             pts = shape.get("pts")
             for xy in pts.get_all("xy") if pts is not None else []:
-                _set(xy, 0, -_f(xy, 0))
+                _set(xy, 1, -_f(xy, 1))
             for holder in (shape.get("layers"), shape.get("layer")):
                 if holder is None:
                     continue
@@ -233,8 +238,10 @@ def rotate(self: KiCadBoard, ref: str, rotation: float) -> Footprint:
     if at is None:
         raise LookupError(f"{ref} has no position")
     was = _f(at, 2) if len(at.items) > 3 else 0.0
-    _set(at, 2, rotation % 360.0)
-    _turn_pads(node, (rotation - was) % 360.0)
+    side = "B" if _text(node.get("layer")).startswith("B.") else "F"
+    stored = (rotation + (180.0 if side == "B" else 0.0)) % 360.0
+    _set(at, 2, stored)
+    _turn_pads(node, (stored - was) % 360.0)
     return self.footprint(ref)
 
 
@@ -245,7 +252,16 @@ def flip(self: KiCadBoard, ref: str, side: str) -> Footprint:
     node = self._require(ref)
     now = "B" if _text(node.get("layer")).startswith("B.") else "F"
     if now != side:
+        at = node.get("at")
+        if at is None:
+            raise LookupError(f"{ref} has no position")
+        stored = _f(at, 2) if len(at.items) > 3 else 0.0
+        rotation = (stored - (180.0 if now == "B" else 0.0)) % 360.0
         self._mirror(node)
+        # _mirror negates each pad's absolute angle. Restore the same logical
+        # orientation in KiCad's representation for the destination side.
+        _turn_pads(node, (2.0 * rotation + 180.0) % 360.0)
+        _set(at, 2, (rotation + (180.0 if side == "B" else 0.0)) % 360.0)
         self._set_child(node, "layer", ["F.Cu" if side == "F" else "B.Cu"])
     return self.footprint(ref)
 
@@ -274,12 +290,21 @@ def _as_footprint(self: KiCadBoard, node: Node, ref: str) -> Footprint:
     """Build a :class:`Footprint` from a placed ``(footprint ...)``."""
     at_node = node.get("at")
     at = Point(_f(at_node, 0), _f(at_node, 1))
-    rotation = _f(at_node, 2)
+    stored_rotation = _f(at_node, 2)
     side = "B" if _text(node.get("layer")).startswith("B.") else "F"
+    rotation = (
+        stored_rotation - (180.0 if side == "B" else 0.0)
+    ) % 360.0
     value = self._prop_of(node, "Value")
-    pads = tuple(self._pad_of(p, at, rotation) for p in node.get_all("pad"))
-    centre, offset, polygon, courtyard = _courtyard_geometry(node, at, rotation)
-    fabrication, fabrication_status = _fabrication_geometry(node, at, rotation)
+    pads = tuple(
+        self._pad_of(p, at, stored_rotation) for p in node.get_all("pad")
+    )
+    centre, offset, polygon, courtyard = _courtyard_geometry(
+        node, at, stored_rotation
+    )
+    fabrication, fabrication_status = _fabrication_geometry(
+        node, at, stored_rotation
+    )
     return Footprint(
         ref=ref,
         fp_id=_text(node),
