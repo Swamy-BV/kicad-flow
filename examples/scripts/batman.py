@@ -235,9 +235,9 @@ async def build(client: Client) -> int:
     footprints += [
         {"fp_id": POWER_FP, "ref": "J1", "x": 51.27, "y": 39,
          "rotation": 270, "side": "B", "value": "5V IN"},
-        {"fp_id": FUSE_FP, "ref": "F1", "x": 50, "y": 34,
+        {"fp_id": FUSE_FP, "ref": "F1", "x": 49.87, "y": 34,
          "side": "B", "value": "250mA PTC"},
-        {"fp_id": DIODE_FP, "ref": "D17", "x": 50, "y": 28,
+        {"fp_id": DIODE_FP, "ref": "D17", "x": 50.47, "y": 28,
          "side": "B", "value": "SS14"},
         {"fp_id": BULK_FP, "ref": "C1", "x": 43, "y": 31,
          "rotation": 90, "side": "B", "value": "10uF"},
@@ -276,13 +276,20 @@ async def build(client: Client) -> int:
         # LED pad 2 is to the right at rotation zero. Keep the short front
         # segment on that side so it never crosses cathode pad 1.
         vx = round(x + 1.8, 3)
+        # One 45-degree step takes up the Y offset to the back-side resistor;
+        # finish horizontally into the pad. The front run remains straight.
+        elbow_x = round(vx - abs(resistor["y"] - y), 3)
         vias.append({"x": vx, "y": y, "net": net,
                      "diameter": 0.65, "drill": 0.3})
         tracks += [
             {"x1": led["x"], "y1": led["y"], "x2": vx, "y2": y,
              "layer": "F.Cu", "width": 0.25, "net": net},
-            {"x1": vx, "y1": y, "x2": resistor["x"],
+            {"x1": vx, "y1": y, "x2": elbow_x,
              "y2": resistor["y"], "layer": "B.Cu", "width": 0.25,
+             "net": net},
+            {"x1": elbow_x, "y1": resistor["y"],
+             "x2": resistor["x"], "y2": resistor["y"],
+             "layer": "B.Cu", "width": 0.25,
              "net": net},
         ]
     # The protected input chain stays on the back. Both capacitor ground pads
@@ -310,7 +317,8 @@ async def build(client: Client) -> int:
             "layer": "B.Cu", "width": 0.4, "net": GND,
         })
     await call("add_vias", path=board, vias=vias)
-    await call("add_tracks", path=board, tracks=tracks)
+    await call("add_tracks", path=board, tracks=tracks,
+               track_angle_step=45)
 
     # Follow the silhouette with a deliberate copper-to-edge inset.
     await call("add_zones", path=board, zones=[
@@ -334,7 +342,7 @@ async def build(client: Client) -> int:
     await call("refill_zones", path=board)
     await call("save_board", path=board)
     unrouted = await call("unrouted_connections", path=board)
-    drc = await call("check_board", path=board)
+    drc = await call("check_board", path=board, track_angle_step=45)
     graphics = await call("list_graphics", path=board)
 
     await call("render_schematic", path=sheet, output_dir=str(OUT))

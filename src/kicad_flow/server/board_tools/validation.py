@@ -11,6 +11,7 @@ from ...pcb.types import (
 )
 from .. import _meta
 from .._app import mcp
+from ._track_angles import _angle_step, angle_findings
 from .copper import (
     _provider_via_refusal,
     _zone_value,
@@ -33,6 +34,7 @@ def check_board(
     tracks: list[NewTrack] | None = None,
     vias: list[NewVia] | None = None,
     zones: list[NewZone] | None = None,
+    track_angle_step: float | None = None,
 ) -> dict[str, Any]:
     """Every design-rule violation, named by part and pad.
 
@@ -41,7 +43,9 @@ def check_board(
     ``something at (25.46, 10.45)``. It also reports factual routing defects
     KiCad DRC misses: dangling endpoints, zero-length and duplicate tracks.
     Copper findings carry UUIDs for exact repair. Corner angle remains caller
-    policy and is not treated as an electrical violation.
+    policy: set ``track_angle_step=45`` to report existing and candidate tracks
+    outside 0/45/90/135 degrees as ``track_angle`` findings. Omit it to allow
+    arbitrary angles. This is a caller-selected style rule, not native DRC.
 
     Optional tracks, vias and zones are checked on an isolated copy and never
     applied. Candidate findings identify the exact input list and index when
@@ -53,6 +57,7 @@ def check_board(
     """
     try:
         board = _board(path)
+        step = _angle_step(track_angle_step)
         proposed = tracks is not None or vias is not None or zones is not None
         if proposed:
             refusal = _provider_via_refusal(path, vias or [])
@@ -98,6 +103,12 @@ def check_board(
             found.extend(profile_findings(board, profile))
             if proposed:
                 current.extend(profile_findings(board, profile))
+        if step is not None:
+            existing_angles = angle_findings(board.tracks(), step)
+            current.extend(existing_angles)
+            if proposed:
+                found.extend(existing_angles)
+                found.extend(angle_findings(track_items, step, candidates=True))
     except _ERRORS as exc:
         return _fail(exc)
     errors = sum(1 for finding in found if finding.severity == "error")

@@ -376,6 +376,13 @@ async def build(client: Client) -> int:
     # the pads out of the reply, then route at the reported coordinates.
     board = str(OUT / "led_digits.kicad_pcb")
     await call("new_board", path=board, layers=2)
+    grid = await call("get_board_grid", path=board)
+    if grid["spacing_mm"] != 0.25:
+        wrong.append("new boards should recommend a 0.25 mm placement grid")
+    grid = await call("set_board_grid", path=board, spacing_mm=0.5)
+    if grid["spacing_mm"] != 0.5:
+        wrong.append("board placement grid should be configurable")
+    await call("set_board_grid", path=board, spacing_mm=0.25)
     await call("add_graphics", path=board, graphics=[{
         "kind": "rectangle", "layer": "Edge.Cuts",
         "x1": 0, "y1": 0, "x2": BOARD_W, "y2": BOARD_H}])

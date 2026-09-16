@@ -74,6 +74,7 @@ from .board_tools.models import _StrictModel as _StrictModel
 from .board_tools.rendering import render_board, render_board_layout
 from .board_tools.rules import (
     assign_net_classes,
+    get_board_grid,
     get_board_limits,
     get_stackup,
     list_board_constraints,
@@ -81,6 +82,7 @@ from .board_tools.rules import (
     list_net_class_patterns,
     list_net_classes,
     set_board_constraints,
+    set_board_grid,
     set_board_layers,
     set_board_limits,
     set_net_class_patterns,
@@ -108,6 +110,7 @@ __all__ = [
     "find_footprint",
     "flip_footprints",
     "footprint_pads",
+    "get_board_grid",
     "get_board_limits",
     "get_footprint",
     "get_footprint_fields",
@@ -138,6 +141,7 @@ __all__ = [
     "rotate_footprints",
     "save_board",
     "set_board_constraints",
+    "set_board_grid",
     "set_board_layers",
     "set_board_limits",
     "set_footprint_fields",

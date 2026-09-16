@@ -7,10 +7,12 @@ from typing import Any
 from ...pcb.api import Board
 from ...pcb.types import (
     Point,
+    Track,
     Zone,
 )
 from .. import _meta
 from .._app import mcp
+from ._track_angles import _angle_step, angle_findings
 from .models import (
     NewTrack,
     NewVia,
@@ -73,23 +75,51 @@ def _provider_via_refusal(path: str, vias: list[NewVia]) -> dict[str, Any] | Non
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_tracks(path: str, tracks: list[NewTrack]) -> dict[str, Any]:
+def add_tracks(
+    path: str,
+    tracks: list[NewTrack],
+    track_angle_step: float | None = None,
+) -> dict[str, Any]:
     """Lay straight copper segments in order.
 
     A corner is two list items and a layer change is a via. That is deliberate:
     where a track turns and where it changes layer are routing decisions.
 
     Prefer 45-degree PCB corners and keep every endpoint on a same-net pad,
-    via, filled zone or track. The call preflights the complete list before
-    writing and returns a stable UUID for each segment. It does not reroute.
+    via, filled zone or track. Set ``track_angle_step=45`` to reject a list
+    containing any segment outside 0/45/90/135 degrees before writing it.
+    Omit it to allow arbitrary angles. The call preflights the complete list
+    and returns a stable UUID for each segment. It does not reroute.
 
     Copper on the wrong layer connects nothing, so *layer* is required --
     `new_board` reports which exist.
     """
     try:
         board = _board(path)
+        step = _angle_step(track_angle_step)
     except _ERRORS as exc:
         return _fail(exc)
+    if step is not None:
+        proposed = [
+            Track(
+                Point(item.x1, item.y1),
+                Point(item.x2, item.y2),
+                item.layer,
+                item.width,
+                item.net,
+            )
+            for item in tracks
+        ]
+        findings = angle_findings(proposed, step, candidates=True)
+        if findings:
+            first = findings[0]
+            return {
+                "ok": False,
+                "error": f"ValueError: tracks[{first.input_index}]: {first.message}",
+                "index": first.input_index,
+                "applied_count": 0,
+                "tracks": [],
+            }
     return _atomic_items(
         board,
         tracks,

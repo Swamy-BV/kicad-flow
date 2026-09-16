@@ -43,6 +43,7 @@ from . import connectivity as _connectivity
 from . import copper as _copper
 from . import footprints as _footprints
 from . import graphics as _graphics
+from . import grid as _grid
 from . import inspection as _inspection
 from . import placement as _placement
 from . import settings as _settings
@@ -131,6 +132,14 @@ class KiCadBoard(Board):
             + keep
         )
         return names
+
+    def placement_grid(self) -> float:
+        """Read KiCadFlow's footprint-origin spacing."""
+        return _grid.spacing(self._path)
+
+    def set_placement_grid(self, spacing: float) -> float:
+        """Persist an explicit spacing without modifying copper or pads."""
+        return _grid.set_spacing(self._path, spacing)
 
     def save(self, *, validate: bool = False) -> Path:
         """Atomically write the board and optionally prove KiCad can load it."""

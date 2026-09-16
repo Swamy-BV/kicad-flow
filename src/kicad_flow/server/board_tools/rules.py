@@ -31,6 +31,52 @@ from .session import (
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def set_board_grid(path: str, spacing_mm: float) -> dict[str, Any]:
+    """Set the advisory footprint-origin grid; no geometry is moved or snapped.
+
+    This KiCadFlow preference persists beside the board. KiCad PCB Editor's
+    interactive grid remains a user preference and is not changed here.
+    """
+    try:
+        board = _board(path)
+        board.set_placement_grid(spacing_mm)
+    except _ERRORS as exc:
+        return _fail(exc)
+    return get_board_grid(path)
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def get_board_grid(path: str) -> dict[str, Any]:
+    """Read the advisory grid and footprint origins outside it.
+
+    A reported off-grid origin is a placement choice, not a DRC violation.
+    Pad centres and copper endpoints are deliberately excluded because they
+    must retain exact electrical coordinates.
+    """
+    try:
+        board = _board(path)
+        spacing = board.placement_grid()
+        off_grid = [
+            part.ref
+            for part in board.footprints()
+            if any(
+                abs(value - round(value / spacing) * spacing) > 1e-6
+                for value in (part.at.x, part.at.y)
+            )
+        ]
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {
+        "ok": True,
+        "spacing_mm": spacing,
+        "origin": {"x": 0.0, "y": 0.0},
+        "off_grid_count": len(off_grid),
+        "off_grid_refs": off_grid,
+        "scope": "footprint origins; advisory",
+    }
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def set_board_layers(path: str, count: int) -> dict[str, Any]:
     """Set the copper layer count (2, 4, 6 or 8). Do this before routing."""
     try:

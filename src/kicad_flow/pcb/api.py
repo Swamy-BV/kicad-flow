@@ -62,8 +62,9 @@ class Board(ABC):
     """One board, open for editing.
 
     Every mutator returns what it made, so a caller can chain without a
-    lookup, and every position argument is in millimetres. Nothing is written
-    to disk until :meth:`save`.
+    lookup, and every position argument is in millimetres. Board geometry is
+    written by :meth:`save`; project and authoring preferences persist when
+    explicitly changed.
     """
 
     # -- the board itself -------------------------------------------------
@@ -96,6 +97,14 @@ class Board(ABC):
         an inner-layer track on a layer that no longer exists does not move,
         it disappears.
         """
+
+    @abstractmethod
+    def placement_grid(self) -> float:
+        """Recommended footprint-origin grid spacing in millimetres."""
+
+    @abstractmethod
+    def set_placement_grid(self, spacing: float) -> float:
+        """Persist an explicit placement preference without moving geometry."""
 
     @abstractmethod
     def save(self, *, validate: bool = False) -> Path:

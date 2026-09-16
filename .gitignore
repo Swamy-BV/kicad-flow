@@ -51,6 +51,7 @@ examples/art_board/*.kicad_pcb
 examples/batman/*.kicad_pcb
 examples/batman/*.kicad_sch
 examples/batman/*.kicad_pro
+examples/*/*.kicad-flow.json
 
 # Keep the ESC root schematic preview and PCB views; child-page renders are
 # generated for inspection and do not belong in the showcase.

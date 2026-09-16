@@ -57,27 +57,41 @@ def _atomic_items(
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def new_board(path: str, layers: int = 2, thickness: float = 1.6) -> dict[str, Any]:
+def new_board(
+    path: str,
+    layers: int = 2,
+    thickness: float = 1.6,
+    placement_grid: float = 0.25,
+) -> dict[str, Any]:
     """Start a new board and open it for editing.
 
-    Nothing is written until `save_board`. Set the layer count HERE: changing
-    it after routing invalidates the route, because an inner-layer track on a
+    Board geometry is written by `save_board`; the advisory grid preference is
+    stored immediately beside the board. Set the layer count HERE: changing it
+    after routing invalidates the route, because an inner-layer track on a
     layer that no longer exists does not move, it disappears.
 
     Args:
         path: Where the board will be written.
         layers: Copper layers -- 2, 4, 6 or 8.
         thickness: Board thickness in mm.
+        placement_grid: Recommended footprint-origin spacing in mm. This is
+            advisory KiCadFlow metadata, not KiCad Editor's active snap grid.
 
     Returns:
-        ``{ok, path, layers}``.
+        ``{ok, path, layers, placement_grid_mm}``.
     """
     try:
         board = create_board(path, layers=layers, thickness=thickness)
+        spacing = board.set_placement_grid(placement_grid)
     except _ERRORS as exc:
         return _fail(exc)
     _OPEN[_key(path)] = board
-    return {"ok": True, "path": str(board.path), "layers": list(board.layers)}
+    return {
+        "ok": True,
+        "path": str(board.path),
+        "layers": list(board.layers),
+        "placement_grid_mm": spacing,
+    }
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
