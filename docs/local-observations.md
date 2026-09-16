@@ -70,7 +70,8 @@ regressions for label movement, rotation, back-side placement and exemptions.
 
 ## Net properties before routing
 
-1. Read the schematic's `list_nets` and apply membership with `set_pad_nets`.
+1. Place all schematic footprints, then call `sync_board_nets` to transfer
+   actual schematic membership. `set_pad_nets` remains for schematic-free boards.
 2. Set manufacturing limits and choose routing classes deliberately using
    `set_net_classes` and `assign_net_classes`.
 3. Read `list_board_nets(net="SIGNAL", include_rules=true)`. It reports effective

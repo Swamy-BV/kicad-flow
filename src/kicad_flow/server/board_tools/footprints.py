@@ -322,8 +322,9 @@ def set_pad_nets(path: str, pads: list[PadNet]) -> dict[str, Any]:
     nothing is connected, a plane joins nothing, and DRC calls every track a
     short.
 
-    Which pad is on which net is a fact the SCHEMATIC holds. Read it with
-    `list_nets` on the sheet and apply it here, one pad at a time.
+    Which pad is on which net is a fact the SCHEMATIC holds. Use
+    `sync_board_nets` for a placed schematic-driven board. This direct
+    primitive remains available for boards without a schematic.
     """
     try:
         board = _board(path)

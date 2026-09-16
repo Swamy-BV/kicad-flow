@@ -358,7 +358,7 @@ class Board(ABC):
 
     @abstractmethod
     def set_net(self, ref: str, pad: str, net: str) -> str:
-        """Put *ref*'s *pad* on *net*, and return the net.
+        """Put *ref*'s *pad* on *net*, or clear it with an empty net.
 
         A library footprint carries no nets -- it is a land pattern, not a
         circuit -- so a board built by placing parts has none either, and
@@ -367,10 +367,9 @@ class Board(ABC):
         every track as shorting an unnamed net to a named one.
 
         Which pad is on which net is a FACT that comes from the schematic,
-        not a board decision. The caller reads it from there -- `Sheet.nets()`
-        gives exactly ``(ref, pad, net)`` -- and applies it here. That is why
-        this takes one pad rather than a netlist file: the two contracts
-        compose, and neither has to know about the other's format.
+        not a board decision. `sync_board_nets` composes the Sheet and Board
+        contracts for a placed board. Direct pad writes remain available for
+        schematic-free boards.
 
         Raises:
             LookupError: If the footprint or the pad does not exist.

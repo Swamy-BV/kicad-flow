@@ -218,10 +218,12 @@ class Net:
 
     name: str
     pins: tuple[NetPin, ...]
+    no_connect: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         """The net as JSON."""
         return {"name": self.name, "count": len(self.pins),
+                "no_connect": self.no_connect,
                 "pins": [p.as_dict() for p in self.pins]}
 
 

@@ -424,7 +424,8 @@ def set_net(self: KiCadBoard, ref: str, pad: str, net: str) -> str:
             existing = candidate.get("net")
             if existing is not None:
                 candidate.items.remove(existing)
-            candidate.items.append(_node("net", [net]))
+            if net:
+                candidate.items.append(_node("net", [net]))
             hit += 1
     if hit:
         return net

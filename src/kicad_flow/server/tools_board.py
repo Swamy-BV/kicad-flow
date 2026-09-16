@@ -71,6 +71,7 @@ from .board_tools.models import RectangleGraphic as RectangleGraphic
 from .board_tools.models import StackupLayerSpec as StackupLayerSpec
 from .board_tools.models import _GraphicBase as _GraphicBase
 from .board_tools.models import _StrictModel as _StrictModel
+from .board_tools.netlist import sync_board_nets
 from .board_tools.rendering import render_board, render_board_layout
 from .board_tools.rules import (
     assign_net_classes,
@@ -149,6 +150,7 @@ __all__ = [
     "set_net_classes",
     "set_pad_nets",
     "set_stackup",
+    "sync_board_nets",
     "unrouted_connections",
     "what_is_on_board",
 ]

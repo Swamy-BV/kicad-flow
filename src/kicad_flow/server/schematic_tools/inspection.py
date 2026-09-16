@@ -110,7 +110,7 @@ def list_nets(path: str) -> dict[str, Any]:
     is done.
 
     Returns:
-        ``{ok, count, nets: [{name, count, pins: [{ref, pin, name}]}]}``.
+        ``{ok, count, nets: [{name, count, no_connect, pins: [...]}]}``.
     """
     try:
         nets = _sheet(path).nets()

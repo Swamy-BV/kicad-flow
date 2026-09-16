@@ -51,7 +51,10 @@ def nets(self: KiCadSheet) -> list[Net]:
             )
             for item in node.get_all("node")
         )
-        found.append(Net(name=_text(node.get("name")), pins=pins))
+        name = _text(node.get("name"))
+        found.append(
+            Net(name=name, pins=pins, no_connect=name.startswith("unconnected-("))
+        )
     return sorted(found, key=lambda n: n.name)
 
 

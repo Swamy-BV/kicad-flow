@@ -1081,79 +1081,43 @@ async def build(client: Client) -> int:
         ],
     )
 
-    # Net assignment is explicit. It mirrors the visible schematic topology.
-    pad_nets: list[dict[str, str]] = [
-        {"ref": "J1", "pad": "1", "net": "VBAT"},
-        {"ref": "J2", "pad": "1", "net": "GND"},
-    ]
-    for index in range(101, 105):
-        pad_nets += [
-            {"ref": f"C{index}", "pad": "1", "net": "VBAT"},
-            {"ref": f"C{index}", "pad": "2", "net": "GND"},
-        ]
-    for pad, net in (
-        ("1", "VBAT"), ("2", "GND"),
-        ("5", "DSHOT1"), ("6", "DSHOT2"),
-        ("7", "DSHOT3"), ("8", "DSHOT4"),
-    ):
-        pad_nets.append({"ref": "J3", "pad": pad, "net": net})
+    # The schematic owns every pad membership. These explicit aliases only
+    # preserve concise board net names used by the caller's routing plan.
+    schematic_by_pin = {
+        (pin_item["ref"], pin_item["pin"]): net_item["name"]
+        for net_item in nets["nets"]
+        for pin_item in net_item["pins"]
+    }
+    net_names: dict[str, str] = {}
+
+    def name_from(ref: str, pad: str, board_name: str) -> None:
+        source_name = schematic_by_pin[(ref, pad)]
+        previous = net_names.setdefault(source_name, board_name)
+        if previous != board_name:
+            raise RuntimeError(f"conflicting aliases for {source_name}")
+
+    name_from("J1", "1", "VBAT")
+    name_from("J2", "1", "GND")
+    name_from("U1", "10", "+3V3")
     for motor in range(1, 5):
-        pad_nets += [
-            {"ref": f"U{motor}", "pad": "8", "net": "VBAT"},
-            {"ref": f"U{motor}", "pad": "10", "net": "+3V3"},
-            {"ref": f"U{motor}", "pad": "44", "net": "GND"},
-            {"ref": f"U{motor}", "pad": "48", "net": "+3V3"},
-            {"ref": f"U{motor}", "pad": "49", "net": "GND"},
-            {"ref": f"U{motor}", "pad": "13", "net": f"DSHOT{motor}"},
-        ]
+        name_from("J3", str(motor + 4), f"DSHOT{motor}")
         for phase_index, phase in enumerate(PHASES):
             high_q = (motor - 1) * 6 + phase_index * 2 + 1
             low_q = high_q + 1
-            phase_net = f"M{motor}_{phase}"
-            high_gate = f"M{motor}_{phase}_GH"
-            low_gate = f"M{motor}_{phase}_GL"
-            high_drive = f"M{motor}_{phase}_DH"
-            low_drive = f"M{motor}_{phase}_DL"
             high_pin, low_pin = GATE_PINS[phase]
-            pad_nets += [
-                {"ref": f"U{motor}", "pad": high_pin, "net": high_drive},
-                {"ref": f"U{motor}", "pad": low_pin, "net": low_drive},
-                {"ref": f"U{motor}", "pad": OUT_PINS[phase], "net": phase_net},
-                {
-                    "ref": f"U{motor}",
-                    "pad": BOOT_PINS[phase],
-                    "net": f"M{motor}_{phase}_BOOT",
-                },
-                {"ref": f"R{high_q}", "pad": "1", "net": high_drive},
-                {"ref": f"R{high_q}", "pad": "2", "net": high_gate},
-                {"ref": f"R{low_q}", "pad": "1", "net": low_drive},
-                {"ref": f"R{low_q}", "pad": "2", "net": low_gate},
-                {"ref": f"Q{high_q}", "pad": "4", "net": high_gate},
-                {"ref": f"Q{high_q}", "pad": "5", "net": "VBAT"},
-                {"ref": f"Q{low_q}", "pad": "4", "net": low_gate},
-                {"ref": f"Q{low_q}", "pad": "5", "net": phase_net},
-                {
-                    "ref": f"C{(motor - 1) * 3 + phase_index + 1}",
-                    "pad": "1",
-                    "net": f"M{motor}_{phase}_BOOT",
-                },
-                {
-                    "ref": f"C{(motor - 1) * 3 + phase_index + 1}",
-                    "pad": "2",
-                    "net": phase_net,
-                },
-                {
-                    "ref": f"J{10 + (motor - 1) * 3 + phase_index + 1}",
-                    "pad": "1",
-                    "net": phase_net,
-                },
-            ]
-            for source_pad in ("1", "2", "3"):
-                pad_nets += [
-                    {"ref": f"Q{high_q}", "pad": source_pad, "net": phase_net},
-                    {"ref": f"Q{low_q}", "pad": source_pad, "net": "GND"},
-                ]
-    await call("set_pad_nets", path=board, pads=pad_nets)
+            stem = f"M{motor}_{phase}"
+            name_from(f"U{motor}", OUT_PINS[phase], stem)
+            name_from(f"R{high_q}", "2", f"{stem}_GH")
+            name_from(f"R{low_q}", "2", f"{stem}_GL")
+            name_from(f"U{motor}", high_pin, f"{stem}_DH")
+            name_from(f"U{motor}", low_pin, f"{stem}_DL")
+            name_from(f"U{motor}", BOOT_PINS[phase], f"{stem}_BOOT")
+    synced = await call(
+        "sync_board_nets", schematic_path=root, board_path=board,
+        net_names=net_names,
+    )
+    if synced["net_count"] != len(net_names):
+        raise RuntimeError("schematic contains connected nets without display names")
     await call(
         "set_net_classes",
         path=board,
