@@ -25,20 +25,20 @@ async def main() -> None:
             return data
 
         created = await call("new_board", path=path)
-        assert created["placement_grid_mm"] == 0.25
+        assert created["placement_grid_mm"] == 0.1
         await call("place_footprints", path=path, footprints=[
-            {"fp_id": resistor, "ref": "R1", "x": 20.25, "y": 20},
-            {"fp_id": resistor, "ref": "R2", "x": 24.3, "y": 20},
+            {"fp_id": resistor, "ref": "R1", "x": 20.2, "y": 20},
+            {"fp_id": resistor, "ref": "R2", "x": 24.35, "y": 20},
         ])
         initial = await call("get_board_grid", path=path)
-        assert initial["spacing_mm"] == 0.25
+        assert initial["spacing_mm"] == 0.1
         assert initial["off_grid_refs"] == ["R2"]
 
         changed = await call("set_board_grid", path=path, spacing_mm=0.5)
         assert changed["spacing_mm"] == 0.5
         assert changed["off_grid_refs"] == ["R1", "R2"]
-        assert (await call("get_footprint", path=path, ref="R1"))["x"] == 20.25
-        assert (await call("get_footprint", path=path, ref="R2"))["x"] == 24.3
+        assert (await call("get_footprint", path=path, ref="R1"))["x"] == 20.2
+        assert (await call("get_footprint", path=path, ref="R2"))["x"] == 24.35
         await call("move_footprints", path=path, moves=[
             {"ref": "R1", "x": 20.75, "y": 20},
         ])
@@ -50,7 +50,7 @@ async def main() -> None:
         })).data
         assert not invalid["ok"], invalid
         assert (await call("get_board_grid", path=path))["spacing_mm"] == 0.5
-        print("PASS: 0.25 mm default, configurable readback, off-grid report "
+        print("PASS: 0.1 mm default, configurable readback, off-grid report "
               "and exact placement/move coordinates after save")
 
 

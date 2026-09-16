@@ -607,10 +607,6 @@ class KiCadBoard(Board):
         """Copper layers inside a via's declared span."""
         return _connectivity._via_copper_layers(self, via)
 
-    def _groups_of(self, net: str) -> list[set[tuple[float, float, str]]]:
-        """Layer-aware copper nodes on *net*, grouped by connectivity."""
-        return _connectivity._groups_of(self, net)
-
     def _routing_findings(self) -> list[Finding]:
         """Factual copper defects KiCad's DRC does not currently report."""
         return _validation._routing_findings(self)

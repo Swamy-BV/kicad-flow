@@ -75,7 +75,8 @@ def list_board_nets(
 def unrouted_connections(path: str, limit: int = 40) -> dict[str, Any]:
     """Disconnected pad-bearing copper groups, without choosing routes.
 
-    `nets` is the complete factual group membership. `connections` contains a
+    `nets` is KiCad's native connected-pad group membership, including the
+    actual filled copper. `connections` contains a
     minimum number of nearest-pad measurements spanning those groups, useful
     as a compact progress count but not as proposed tracks. `pair_count`
     preserves the old all-pairs magnitude without returning quadratic output.
@@ -197,10 +198,13 @@ def measure_routes(
 def what_is_on_board(
     path: str, x: float, y: float, radius: float = 0.01
 ) -> dict[str, Any]:
-    """What touches a point: pads, track interiors, vias and zones.
+    """Copper at a point and KiCad's connected groups for those items.
 
-    This is a geometric observation. It does not infer which object the caller
-    intended to touch.
+    `connected_groups` names selected item UUIDs in each native component.
+    `connected` means at least one net has two selected items and each selected
+    item's net occupies just one component. Cross-layer X/Y overlap alone is
+    not electrical contact. Zones count only where stored fill reaches the
+    point; refill them after copper edits.
     """
     try:
         return {"ok": True, **_board(path).at(x, y, radius)}

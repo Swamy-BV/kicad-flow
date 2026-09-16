@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from kicad_flow.pcb.types import (
+    Pad,
     Track,
 )
 
@@ -21,9 +22,54 @@ from ._nodes import (
     _f,
     _text,
 )
+from ._runner import run_pcbnew
 
 if TYPE_CHECKING:
     from .board import KiCadBoard
+
+
+_POINT_CONNECTIVITY_SCRIPT = """
+import json
+import sys
+import pcbnew
+
+with open(sys.argv[1], encoding='utf-8') as source:
+    job = json.load(source)
+board = pcbnew.LoadBoard(job['path'])
+board.BuildConnectivity()
+items = {}
+for footprint in board.GetFootprints():
+    for pad in footprint.Pads():
+        items[pad.m_Uuid.AsString()] = pad
+for track in board.GetTracks():
+    items[track.m_Uuid.AsString()] = track
+for zone in board.Zones():
+    items[zone.m_Uuid.AsString()] = zone
+selected = set(job['uuids'])
+connectivity = board.GetConnectivity()
+groups = []
+seen = set()
+for uuid in sorted(selected):
+    if uuid in seen or uuid not in items:
+        continue
+    item = items[uuid]
+    members = {part.m_Uuid.AsString()
+               for part in connectivity.GetConnectedItems(item)} & selected
+    members.add(uuid)
+    seen.update(members)
+    groups.append({'net': item.GetNetname(), 'uuids': sorted(members)})
+print(json.dumps({'groups': groups,
+                  'missing': sorted(selected - set(items))}))
+"""
+
+
+def _pad_bounds(pad: Pad) -> tuple[float, float, float, float]:
+    """Conservative copper bounds after the placed pad's rotation."""
+    angle = math.radians(pad.rotation)
+    c, s = abs(math.cos(angle)), abs(math.sin(angle))
+    hx = (pad.size[0] * c + pad.size[1] * s) / 2
+    hy = (pad.size[0] * s + pad.size[1] * c) / 2
+    return (pad.at.x - hx, pad.at.y - hy, pad.at.x + hx, pad.at.y + hy)
 
 
 def at(self: KiCadBoard, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
@@ -53,8 +99,8 @@ def at(self: KiCadBoard, x: float, y: float, radius: float = 0.01) -> dict[str, 
         {"ref": footprint.ref, **pad.as_dict()}
         for footprint in self.footprints()
         for pad in footprint.pads
-        if abs(pad.at.x - x) <= pad.size[0] / 2 + radius
-        and abs(pad.at.y - y) <= pad.size[1] / 2 + radius
+        if (bounds := _pad_bounds(pad))[0] - radius <= x <= bounds[2] + radius
+        and bounds[1] - radius <= y <= bounds[3] + radius
     ]
     tracks = [
         track.as_dict()
@@ -72,12 +118,48 @@ def at(self: KiCadBoard, x: float, y: float, radius: float = 0.01) -> dict[str, 
         for via in self.vias()
         if math.dist((x, y), (via.at.x, via.at.y)) <= via.diameter / 2 + radius
     ]
-    zones = [
-        {"uuid": zone.uuid, "net": zone.net, "layer": zone.layer, "filled": zone.filled}
-        for zone in self.zones()
-        if _point_in_polygon((x, y), [(p.x, p.y) for p in zone.points])
+    zone_nodes = {
+        _text(node.get("uuid")): node for node in self._tree.get_all("zone")
+    }
+    zones = []
+    for zone in self.zones():
+        node = zone_nodes.get(zone.uuid)
+        if not zone.filled or node is None:
+            continue
+        if any(
+            _text(fill.get("layer")) == zone.layer
+            and (pts := fill.get("pts")) is not None
+            and _point_in_polygon(
+                (x, y), [(_f(point, 0), _f(point, 1))
+                         for point in pts.get_all("xy")]
+            )
+            for fill in node.get_all("filled_polygon")
+        ):
+            zones.append(
+                {"uuid": zone.uuid, "net": zone.net,
+                 "layer": zone.layer, "filled": True}
+            )
+    uuids = [
+        str(item["uuid"])
+        for item in [*pads, *tracks, *vias, *zones]
     ]
-    count = len(pads) + len(tracks) + len(vias) + len(zones)
+    native = (
+        run_pcbnew(_POINT_CONNECTIVITY_SCRIPT,
+                   {"path": str(self.path), "uuids": uuids})
+        if uuids else {"groups": [], "missing": []}
+    )
+    if native["missing"]:
+        raise ValueError(f"point copper missing from native board: {native['missing']}")
+    groups: list[dict[str, Any]] = native["groups"]
+    per_net: dict[str, list[dict[str, Any]]] = {}
+    for group in groups:
+        if group["net"]:
+            per_net.setdefault(str(group["net"]), []).append(group)
+    connected = (
+        any(sum(len(group["uuids"]) for group in net_groups) >= 2
+            for net_groups in per_net.values())
+        and all(len(net_groups) == 1 for net_groups in per_net.values())
+    )
     return {
         "x": round(x, 3),
         "y": round(y, 3),
@@ -87,7 +169,8 @@ def at(self: KiCadBoard, x: float, y: float, radius: float = 0.01) -> dict[str, 
         "vias": vias,
         "zones": zones,
         "track_ends": track_ends,
-        "connected": count > 1,
+        "connected_groups": groups,
+        "connected": connected,
     }
 
 
@@ -148,11 +231,7 @@ def region(
                 continue
             # A rotated square reaches beyond max(width, height)/2.
             # Keep the enclosing rectangle conservative for curved pads.
-            angle = math.radians(pad.rotation)
-            c, s = abs(math.cos(angle)), abs(math.sin(angle))
-            hx = (pad.size[0] * c + pad.size[1] * s) / 2
-            hy = (pad.size[0] * s + pad.size[1] * c) / 2
-            bounds = (pad.at.x - hx, pad.at.y - hy, pad.at.x + hx, pad.at.y + hy)
+            bounds = _pad_bounds(pad)
             supported = pad.geometry_supported
             # Custom copper may extend outside its anchor rectangle. Do
             # not silently exclude it from a local observation.

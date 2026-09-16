@@ -13,19 +13,45 @@ from kicad_flow.pcb.types import (
     NetConnectivity,
     NetPad,
     Pad,
-    Point,
     RouteMetric,
     Via,
 )
 
-from ._geometry import (
-    _find_root,
-    _point_in_polygon,
-    _segments_intersect,
-)
+from ._geometry import _find_root
+from ._runner import run_pcbnew
 
 if TYPE_CHECKING:
     from .board import KiCadBoard
+
+
+_CONNECTED_PADS_SCRIPT = """
+import json
+import sys
+import pcbnew
+
+with open(sys.argv[1], encoding='utf-8') as source:
+    job = json.load(source)
+board = pcbnew.LoadBoard(job['path'])
+board.BuildConnectivity()
+connectivity = board.GetConnectivity()
+groups = []
+group_indexes = {}
+pads = {}
+for footprint in board.GetFootprints():
+    for pad in footprint.Pads():
+        if not pad.GetNetname():
+            continue
+        members = tuple(sorted(item.m_Uuid.AsString()
+                               for item in connectivity.GetConnectedItems(pad)))
+        if not members:
+            members = (pad.m_Uuid.AsString(),)
+        key = (pad.GetNetname(), members)
+        if key not in group_indexes:
+            group_indexes[key] = len(groups)
+            groups.append({'net': pad.GetNetname(), 'uuids': members})
+        pads[pad.m_Uuid.AsString()] = group_indexes[key]
+print(json.dumps({'groups': groups, 'pads': pads}))
+"""
 
 
 def nets(self: KiCadBoard) -> list[Net]:
@@ -39,52 +65,56 @@ def nets(self: KiCadBoard) -> list[Net]:
 
 
 def connectivity(self: KiCadBoard, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
-    """Return pad-bearing connected copper groups without selecting routes."""
+    """Return KiCad's actual pad-bearing connected copper groups."""
     wanted = set(nets)
-    where = {
-        (part.ref, pad.number): pad for part in self.footprints() for pad in part.pads
+    footprints = self.footprints()
+    native = run_pcbnew(_CONNECTED_PADS_SCRIPT, {"path": str(self.path)})
+    pad_groups: dict[str, int] = native["pads"]
+    native_groups: list[dict[str, object]] = native["groups"]
+    layers_by_uuid: dict[str, tuple[str, ...]] = {
+        pad.uuid: self._pad_copper_layers(pad)
+        for part in footprints for pad in part.pads
     }
+    layers_by_uuid.update(
+        {track.uuid: (track.layer,) for track in self.tracks()}
+    )
+    layers_by_uuid.update(
+        {via.uuid: self._via_copper_layers(via) for via in self.vias()}
+    )
+    layers_by_uuid.update(
+        {zone.uuid: (zone.layer,) for zone in self.zones() if zone.filled}
+    )
+    pads_by_group: dict[int, list[ConnectedPad]] = {}
+    for part in footprints:
+        for pad in part.pads:
+            if not pad.net or (wanted and pad.net not in wanted):
+                continue
+            if pad.uuid not in pad_groups:
+                raise ValueError(f"native connectivity omitted {part.ref}.{pad.number}")
+            pads_by_group.setdefault(pad_groups[pad.uuid], []).append(
+                ConnectedPad(part.ref, pad.number, pad.at,
+                             self._pad_copper_layers(pad))
+            )
     out: list[NetConnectivity] = []
     for net in self.nets():
         if wanted and net.name not in wanted:
             continue
-        copper_groups = self._groups_of(net.name)
-        node_group = {
-            node: index for index, group in enumerate(copper_groups) for node in group
-        }
-        grouped_pads: dict[int, list[ConnectedPad]] = {}
-        for item in net.pads:
-            pad = where[(item.ref, item.pad)]
-            indexes = {
-                node_group[node]
-                for layer in self._pad_copper_layers(pad)
-                if (node := (round(pad.at.x, 3), round(pad.at.y, 3), layer))
-                in node_group
-            }
-            # _groups_of always creates nodes for net pads. Keep a guarded
-            # fallback so malformed imported boards remain inspectable.
-            index = min(indexes) if indexes else len(copper_groups)
-            grouped_pads.setdefault(index, []).append(
-                ConnectedPad(item.ref, item.pad, pad.at, self._pad_copper_layers(pad))
-            )
-
         ordered = sorted(
-            grouped_pads.items(),
+            ((index, pads) for index, pads in pads_by_group.items()
+             if native_groups[index]["net"] == net.name),
             key=lambda item: min((pad.ref, pad.pad) for pad in item[1]),
         )
         groups: list[ConnectivityGroup] = []
         for public_index, (source_index, pads) in enumerate(ordered):
-            nodes = (
-                copper_groups[source_index]
-                if source_index < len(copper_groups)
-                else set()
-            )
+            members = native_groups[source_index]["uuids"]
+            assert isinstance(members, list)
             groups.append(
                 ConnectivityGroup(
                     index=public_index,
                     pads=tuple(sorted(pads, key=lambda pad: (pad.ref, pad.pad))),
-                    layers=tuple(sorted({node[2] for node in nodes})),
-                    copper_nodes=len(nodes),
+                    layers=tuple(sorted({layer for uuid in members
+                                         for layer in layers_by_uuid.get(uuid, ())})),
+                    copper_nodes=len(members),
                 )
             )
         out.append(NetConnectivity(net.name, tuple(groups)))
@@ -197,84 +227,3 @@ def _via_copper_layers(self: KiCadBoard, via: Via) -> tuple[str, ...]:
         return ()
     low, high = sorted((first, last))
     return self.layers[low : high + 1]
-
-
-def _groups_of(self: KiCadBoard, net: str) -> list[set[tuple[float, float, str]]]:
-    """Layer-aware copper nodes on *net*, grouped by connectivity."""
-    node = tuple[float, float, str]
-    edges: list[tuple[node, node]] = []
-    nodes: set[node] = set()
-
-    def key(point: Point, layer: str) -> node:
-        return (round(point.x, 3), round(point.y, 3), layer)
-
-    # A plated pad joins its layers internally. Coincident pads join only
-    # on a copper layer both can actually reach.
-    seen_at: dict[node, node] = {}
-    for part in self.footprints():
-        for pad in part.pads:
-            if pad.net != net:
-                continue
-            pad_nodes = [key(pad.at, layer) for layer in self._pad_copper_layers(pad)]
-            nodes.update(pad_nodes)
-            for other in pad_nodes[1:]:
-                edges.append((pad_nodes[0], other))
-            for pad_node in pad_nodes:
-                if pad_node in seen_at:
-                    edges.append((seen_at[pad_node], pad_node))
-                seen_at[pad_node] = pad_node
-
-    tracks = [track for track in self.tracks() if track.net == net]
-    for track in tracks:
-        start = key(track.start, track.layer)
-        end = key(track.end, track.layer)
-        nodes.update((start, end))
-        edges.append((start, end))
-    # Same-layer copper joins at crossings and T intersections even when
-    # neither caller supplied the intersection as an endpoint.
-    for index, first in enumerate(tracks):
-        for second in tracks[index + 1 :]:
-            if first.layer == second.layer and _segments_intersect(
-                first.start, first.end, second.start, second.end
-            ):
-                edges.append(
-                    (key(first.start, first.layer), key(second.start, second.layer))
-                )
-
-    for via in self.vias():
-        if via.net != net:
-            continue
-        via_nodes = [key(via.at, layer) for layer in self._via_copper_layers(via)]
-        nodes.update(via_nodes)
-        for other in via_nodes[1:]:
-            edges.append((via_nodes[0], other))
-
-    # A filled plane joins conductive objects on ITS layer only. An SMD
-    # pad on F.Cu does not reach an In1.Cu plane without a via.
-    for zone in self.zones():
-        if zone.net != net or not zone.filled or zone.forbids:
-            continue
-        poly = [(point.x, point.y) for point in zone.points]
-        inside = [
-            item
-            for item in nodes
-            if item[2] == zone.layer and _point_in_polygon((item[0], item[1]), poly)
-        ]
-        for item in inside[1:]:
-            edges.append((inside[0], item))
-
-    parent: dict[node, node] = {item: item for item in nodes}
-
-    def find(k: node) -> node:
-        parent.setdefault(k, k)
-        while parent[k] != k:
-            parent[k] = parent[parent[k]]
-            k = parent[k]
-        return k
-
-    for a, b in edges:
-        parent[find(a)] = find(b)
-    groups: dict[node, set[node]] = {}
-    for k in list(parent):
-        groups.setdefault(find(k), set()).add(k)
-    return list(groups.values())

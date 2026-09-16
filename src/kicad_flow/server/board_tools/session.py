@@ -61,7 +61,7 @@ def new_board(
     path: str,
     layers: int = 2,
     thickness: float = 1.6,
-    placement_grid: float = 0.25,
+    placement_grid: float = 0.1,
 ) -> dict[str, Any]:
     """Start a new board and open it for editing.
 

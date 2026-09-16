@@ -9,7 +9,7 @@ from typing import Any
 
 from .project import _atomic_text
 
-DEFAULT_SPACING_MM = 0.25
+DEFAULT_SPACING_MM = 0.1
 
 
 def _path(board: Path) -> Path:

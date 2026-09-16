@@ -1,4 +1,5 @@
 {
+  "placement_grid_mm": 0.1,
   "fabrication_profile": {
     "provider": "jlcpcb",
     "selection": {
@@ -47,6 +48,7 @@
       "Through-vias only; blind and buried vias are not enabled.",
       "The annular-width limit applies to vias. PTH/NPTH pad annular rings and plated-slot subtype checks need future hole APIs.",
       "Impedance control records eligibility; select a published JLC stackup before claiming an impedance value."
-    ]
+    ],
+    "thickness_tolerance_mm": 0.16000000000000003
   }
 }

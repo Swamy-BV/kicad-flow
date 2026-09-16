@@ -31,7 +31,7 @@ PCB = (
 
     "Every coordinate, size, clearance, drill, width and stackup thickness is "
     "in millimetres. Keep the design in millimetres; do not convert values to "
-    "mils before calling the tools. `new_board` recommends a 0.25 mm "
+    "mils before calling the tools. `new_board` recommends a 0.1 mm "
     "footprint-origin grid by default; set `placement_grid` to choose another "
     "spacing, or use `set_board_grid` later. `get_board_grid` reports off-grid "
     "footprint origins. Plan ordinary footprint origins, vias and free routing "
@@ -200,9 +200,9 @@ PCB = (
     "Connectivity reduction is never permission to apply new shorts. With no "
     "candidates, `check_board` checks the open board and names each violation by "
     "part and pad; only its `clean=true` means it found nothing. "
-    "`what_is_on_board` answers the same question one point at "
-    "a time -- "
-    "is this actually connected?\n\n"
+    "`what_is_on_board` reports native connected groups for copper at one "
+    "point; overlapping front/back pads are separate until a via joins "
+    "them. Inspect the groups as well as `connected`.\n\n"
 
     "Then LOOK AT IT. `render_board` writes a 3D PNG or JPEG, and it is the only thing "
     "that sees a designator printed over a pad, a part 6 mm from where you "

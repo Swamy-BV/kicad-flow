@@ -1480,7 +1480,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 40.64 58.42 0)
+		(at 55.88 58.42 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -1488,7 +1488,7 @@
 		(dnp no)
 		(uuid "2ba7c4e9-5006-5a81-8c6b-6de56d33d4c0")
 		(property "Reference" "#PWR0002"
-			(at 43.18 57.15 0)
+			(at 58.42 57.15 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1498,7 +1498,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 43.18 59.69 0)
+			(at 58.42 59.69 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1507,7 +1507,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 40.64 58.42 0)
+			(at 55.88 58.42 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1687,113 +1687,102 @@
 	)
 	(wire
 		(pts
-			(xy 58.42 63.5)
-			(xy 58.42 78.74)
+			(xy 48.26 63.5)
+			(xy 48.26 78.74)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "7e891b5e-97c7-542c-b9bb-5fb28faad49e")
+		(uuid "ae80d394-dfd3-564b-9565-5e0b19fbfa61")
 	)
 	(wire
 		(pts
-			(xy 58.42 78.74)
+			(xy 48.26 78.74)
 			(xy 85.09 78.74)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "62bab1b8-d48a-5b7a-bd01-54e69cc9eb45")
+		(uuid "9a47c2b8-fb61-54d5-9ea8-fa4af15be8cd")
 	)
 	(wire
 		(pts
-			(xy 55.88 63.5)
-			(xy 55.88 106.68)
+			(xy 45.72 63.5)
+			(xy 45.72 106.68)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "440433e8-b47e-5149-b46e-e8cf66ede732")
+		(uuid "e962930a-be73-5b3a-bf7e-9ec4765092a2")
 	)
 	(wire
 		(pts
-			(xy 55.88 106.68)
+			(xy 45.72 106.68)
 			(xy 85.09 106.68)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "622cb71a-e1e9-53ae-8379-da9b6be67f06")
+		(uuid "d06cd689-0d6a-529d-9c2b-63a624261064")
 	)
 	(wire
 		(pts
-			(xy 53.34 63.5)
-			(xy 53.34 134.62)
+			(xy 43.18 63.5)
+			(xy 43.18 134.62)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "45682989-84f6-5a65-94b5-1c04f7450312")
+		(uuid "6a12b1b5-fa0d-5187-bc49-cdd367446d9a")
 	)
 	(wire
 		(pts
-			(xy 53.34 134.62)
+			(xy 43.18 134.62)
 			(xy 85.09 134.62)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "c5c96472-1601-5c4b-b663-1a869e9c3255")
+		(uuid "77c22938-4211-5fd6-897b-a6618ada63f3")
 	)
 	(wire
 		(pts
-			(xy 50.8 63.5)
-			(xy 50.8 162.56)
+			(xy 40.64 63.5)
+			(xy 40.64 162.56)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "97329b08-5450-5bd9-9b03-d5de0cd4febf")
+		(uuid "98897297-5974-57c7-8359-21fba4b99c75")
 	)
 	(wire
 		(pts
-			(xy 50.8 162.56)
+			(xy 40.64 162.56)
 			(xy 85.09 162.56)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "f9f08fa3-7ffa-53e8-8576-226b968997a2")
+		(uuid "08fb671a-5207-58be-ad91-4435e692f373")
 	)
 	(wire
 		(pts
-			(xy 45.72 63.5)
-			(xy 45.72 57.15)
+			(xy 58.42 63.5)
+			(xy 58.42 57.15)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "92aad2c9-9ebd-5ae7-aea9-dfe76713013d")
-	)
-	(wire
-		(pts
-			(xy 43.18 63.5)
-			(xy 43.18 57.15)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "c6a9aeb5-755d-5453-abe2-9354442a566e")
+		(uuid "8265bf69-a075-505e-bb62-a377451900a2")
 	)
 	(wire
 		(pts
@@ -1808,14 +1797,14 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 63.5)
-			(xy 40.64 58.42)
+			(xy 55.88 63.5)
+			(xy 55.88 58.42)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "545c8a92-b1e2-5e23-9427-98db092b6357")
+		(uuid "de6c8c18-d115-5f77-bfd0-989b463fc34f")
 	)
 	(wire
 		(pts
@@ -2039,25 +2028,14 @@
 	)
 	(global_label "VBAT"
 		(shape input)
-		(at 45.72 57.15 90)
+		(at 58.42 57.15 90)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 			(justify left)
 		)
-		(uuid "3471dc42-df0d-5056-8289-c9b1acc32350")
-	)
-	(global_label "+3V3"
-		(shape input)
-		(at 43.18 57.15 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "066d9258-7bcc-5428-b36f-ca88de2ea014")
+		(uuid "ad67e226-e6c0-5f36-a663-be1114e405a7")
 	)
 	(global_label "+3V3"
 		(shape input)
@@ -2071,8 +2049,12 @@
 		(uuid "8e1d9fc5-2ed3-5550-bd47-d8614ebb6840")
 	)
 	(no_connect
-		(at 48.26 63.5)
-		(uuid "12577a29-fac1-5f64-94b5-767a582b1b29")
+		(at 53.34 63.5)
+		(uuid "370f2987-ff88-561d-94be-ded45d8c71e5")
+	)
+	(no_connect
+		(at 50.8 63.5)
+		(uuid "baf6b70e-62f1-5a7a-9fa6-2a4c9442b609")
 	)
 	(junction
 		(at 71.12 27.94)
@@ -2124,7 +2106,7 @@
 	)
 	(text "AM32 target required; DShot signal is bidirectional"
 		(exclude_from_sim no)
-		(at 88.9 195.58 0)
+		(at 172.72 55.88 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2132,6 +2114,30 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "8580e7de-f247-5774-9f56-fe6acc23d62b")
+		(uuid "47d3561d-1ea0-5375-9021-a7aa0548b90f")
+	)
+	(text "Betaflight ESC: 1 VBAT, 2 GND, 3 CURRENT NC, 4 TELEMETRY NC, 5-8 M1-M4"
+		(exclude_from_sim no)
+		(at 172.72 63.5 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.254)
+			)
+			(justify left bottom)
+		)
+		(uuid "d13ee1cf-ae81-597f-a03f-1779ff68ca57")
+	)
+	(text "NOT OPERABLE: controller regulator, protection and sensing circuits incomplete"
+		(exclude_from_sim no)
+		(at 172.72 71.12 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.254)
+			)
+			(justify left bottom)
+		)
+		(uuid "c0201984-a5d7-5103-9927-3f8d8ea97ebc")
 	)
 )

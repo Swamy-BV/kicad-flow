@@ -470,7 +470,7 @@ class Board(ABC):
 
     @abstractmethod
     def connectivity(self, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
-        """Pad-bearing connected copper groups for the requested nets."""
+        """Native pad-bearing connected copper groups for the requested nets."""
 
     @abstractmethod
     def route_metrics(self, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
@@ -537,10 +537,10 @@ class Board(ABC):
 
     @abstractmethod
     def at(self, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
-        """What touches a point: pads, track interiors, vias and zones.
+        """Copper at a point and native connected groups of those items.
 
-        The one query worth having while routing, because it answers the only
-        question that matters -- *is this actually connected?*
+        Filled zones are included only where their stored fill reaches the
+        point. An overlap in X/Y across different layers is not a connection.
         """
 
     @abstractmethod

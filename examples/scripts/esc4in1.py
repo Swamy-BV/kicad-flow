@@ -1,6 +1,8 @@
 """AM32 2-6S four-in-one ESC reference design, built only through MCP.
 
-This is intentionally a reviewable reference design, not a current rating.
+This is intentionally an incomplete, reviewable topology reference, not an
+operable ESC or a current rating. The controller supply and sensing circuits
+still require design; a clean ERC cannot establish that omitted circuits work.
 Four STSPIN32F0A devices each run one independent AM32 channel and drive six
 external 60 V MOSFETs.  The board exercise stresses staged placement,
 courtyard measurements, four-layer construction, high-current net classes,
@@ -302,20 +304,21 @@ async def build(client: Client) -> int:
     stub, label, _ = label_pin(bat_p, "1", "VBAT")
     root_wires += stub
     root_labels.append(label)
+    # Betaflight's 8-pin ESC connector: VBAT, GND, current, telemetry,
+    # then motor signals 1-4. Current and serial telemetry are not fitted.
     for motor, box in enumerate(boxes, start=1):
         root_wires += connect(
-            pin(fc, str(motor)),
+            pin(fc, str(motor + 4)),
             box["pins"][0],
-            elbow_x=pin(fc, str(motor))["x"],
+            elbow_x=pin(fc, str(motor + 4))["x"],
         )
-    for pin_name, text in (("6", "VBAT"), ("7", "+3V3")):
-        stub, label, _ = label_pin(fc, pin_name, text)
-        root_wires += stub
-        root_labels.append(label)
+    stub, label, _ = label_pin(fc, "1", "VBAT")
+    root_wires += stub
+    root_labels.append(label)
 
     root_power_specs = []
     root_power_sources = []
-    for part, pin_name in ((bat_n, "1"), (fc, "8")):
+    for part, pin_name in ((bat_n, "1"), (fc, "2")):
         spec, source = power_pin(part, pin_name, "GND")
         root_power_specs.append(spec)
         root_power_sources.append(source)
@@ -401,7 +404,11 @@ async def build(client: Client) -> int:
 
     await call("add_wires", path=root, wires=root_wires)
     await call("add_labels", path=root, labels=root_labels)
-    await call("add_no_connects", path=root, points=[xy(pin(fc, "5"))])
+    await call(
+        "add_no_connects",
+        path=root,
+        points=[xy(pin(fc, number)) for number in ("3", "4")],
+    )
     await call(
         "add_junctions",
         path=root,
@@ -416,11 +423,29 @@ async def build(client: Client) -> int:
         path=root,
         notes=[
             {
-                "x": 88.9,
-                "y": 195.58,
+                "x": 172.72,
+                "y": 55.88,
                 "text": "AM32 target required; DShot signal is bidirectional",
                 "size": 1.27,
-            }
+            },
+            {
+                "x": 172.72,
+                "y": 63.5,
+                "text": (
+                    "Betaflight ESC: 1 VBAT, 2 GND, 3 CURRENT NC, "
+                    "4 TELEMETRY NC, 5-8 M1-M4"
+                ),
+                "size": 1.27,
+            },
+            {
+                "x": 172.72,
+                "y": 71.12,
+                "text": (
+                    "NOT OPERABLE: controller regulator, protection "
+                    "and sensing circuits incomplete"
+                ),
+                "size": 1.27,
+            },
         ],
     )
     await call("save_sheet", path=root)
@@ -1066,11 +1091,12 @@ async def build(client: Client) -> int:
             {"ref": f"C{index}", "pad": "1", "net": "VBAT"},
             {"ref": f"C{index}", "pad": "2", "net": "GND"},
         ]
-    for pad, net in enumerate(
-        ("DSHOT1", "DSHOT2", "DSHOT3", "DSHOT4", "CURRENT", "VBAT", "+3V3", "GND"),
-        start=1,
+    for pad, net in (
+        ("1", "VBAT"), ("2", "GND"),
+        ("5", "DSHOT1"), ("6", "DSHOT2"),
+        ("7", "DSHOT3"), ("8", "DSHOT4"),
     ):
-        pad_nets.append({"ref": "J3", "pad": str(pad), "net": net})
+        pad_nets.append({"ref": "J3", "pad": pad, "net": net})
     for motor in range(1, 5):
         pad_nets += [
             {"ref": f"U{motor}", "pad": "8", "net": "VBAT"},
@@ -1299,24 +1325,228 @@ async def build(client: Client) -> int:
                 width=0.35,
                 net=net,
             )
-            track(
-                point(board_pad(f"J{11 + (motor - 1) * 3 + phase_index}", "1")),
-                high_middle,
-                layer="F.Cu",
-                width=1.5,
-                net=net,
+            # The rear source pins need a via beyond the front high-side drain
+            # before they can reach the buried ground plane.
+            ground_pad = point(board_pad(f"Q{low_q}", "1"))
+            ground_via = (
+                round(ground_pad[0] + 0.995 * tx, 3),
+                round(ground_pad[1] + 0.995 * ty, 3),
             )
+            vias.append(
+                {"x": ground_via[0], "y": ground_via[1],
+                 "net": "GND", "diameter": 0.6, "drill": 0.3}
+            )
+            track(ground_pad, ground_via,
+                  layer="B.Cu", width=0.35, net="GND")
+            terminal = point(
+                board_pad(f"J{11 + (motor - 1) * 3 + phase_index}", "1")
+            )
+            if dx:
+                run = abs(high_middle[0] - terminal[0]) - abs(
+                    high_middle[1] - terminal[1]
+                )
+                entry = (
+                    terminal[0] + (1 if high_middle[0] > terminal[0] else -1) * run,
+                    terminal[1],
+                )
+            else:
+                run = abs(high_middle[1] - terminal[1]) - abs(
+                    high_middle[0] - terminal[0]
+                )
+                entry = (
+                    terminal[0],
+                    terminal[1] + (1 if high_middle[1] > terminal[1] else -1) * run,
+                )
+            track(terminal, entry, layer="F.Cu", width=1.5, net=net)
+            track(entry, high_middle, layer="F.Cu", width=1.5, net=net)
 
-    # The bottom capacitors use a common via row placed between the three
-    # The rear bulk-capacitor row shares the motor-3 escape corridor. Its
-    # dogbones are intentionally deferred until that corridor is complete;
-    # crossing a phase route merely to reduce the ratsnest is not acceptable.
+            # The rear low-side gate escapes beside its FET, then crosses to
+            # the front between the two resistor pads. The same local path
+            # rotates with each of the four motor banks.
+            low_gate = point(board_pad(f"Q{low_q}", "4"))
+            low_gate_net = f"{net}_GL"
+            low_path = [
+                (
+                    round(low_gate[0] + along * tx - inward * dx, 3),
+                    round(low_gate[1] + along * ty - inward * dy, 3),
+                )
+                for along, inward in (
+                    (0.0, 0.0),
+                    (0.9, 0.9),
+                    (1.155, 0.9),
+                    (1.415, 0.9),
+                    (1.905, 1.39),
+                )
+            ]
+            if low_path[-1] != point(board_pad(f"R{low_q}", "2")):
+                raise RuntimeError(f"low-side gate geometry changed at Q{low_q}")
+            vias.append(
+                {"x": low_path[2][0], "y": low_path[2][1],
+                 "net": low_gate_net, "diameter": 0.45, "drill": 0.2}
+            )
+            for segment in range(4):
+                track(
+                    low_path[segment], low_path[segment + 1],
+                    layer="B.Cu" if segment < 2 else "F.Cu",
+                    width=0.2, net=low_gate_net,
+                )
+
+            # Top and bottom high-side gates use the rear channel between
+            # phase pads. On the side banks that channel is crossed by phase
+            # copper, so the gate instead leaves outward and crosses In1.Cu.
+            high_gate = point(board_pad(f"Q{high_q}", "4"))
+            high_resistor = point(board_pad(f"R{high_q}", "2"))
+            high_gate_net = f"{net}_GH"
+            if motor in (1, 3):
+                high_path = [
+                    (
+                        round(high_gate[0] + along * tx - inward * dx, 3),
+                        round(high_gate[1] + along * ty - inward * dy, 3),
+                    )
+                    for along, inward in (
+                        (0.0, 0.0),
+                        (-0.995, 0.0),
+                        (-0.995, 6.3),
+                        (-0.105, 7.19),
+                        (0.405, 7.19),
+                    )
+                ]
+                if high_path[-1] != high_resistor:
+                    raise RuntimeError(f"high-side gate geometry changed at Q{high_q}")
+                for via_at in (high_path[1], high_path[2]):
+                    vias.append(
+                        {"x": via_at[0], "y": via_at[1],
+                         "net": high_gate_net, "diameter": 0.45,
+                         "drill": 0.2}
+                    )
+                for segment in range(4):
+                    track(
+                        high_path[segment], high_path[segment + 1],
+                        layer="B.Cu" if segment == 1 else "F.Cu",
+                        width=0.2, net=high_gate_net,
+                    )
+            else:
+                outer_via = (high_gate[0] + 1.6 * dx,
+                             high_gate[1] + 1.6 * dy)
+                inner_via = (high_resistor[0], high_gate[1])
+                for via_at in (outer_via, inner_via):
+                    vias.append(
+                        {"x": via_at[0], "y": via_at[1],
+                         "net": high_gate_net, "diameter": 0.45,
+                         "drill": 0.2}
+                    )
+                track(high_gate, outer_via,
+                      layer="F.Cu", width=0.2, net=high_gate_net)
+                track(outer_via, inner_via,
+                      layer="In1.Cu", width=0.2, net=high_gate_net)
+                track(inner_via, high_resistor,
+                      layer="F.Cu", width=0.2, net=high_gate_net)
+
+    # Escape the rear bulk capacitors between the front motor terminals.
+    # C104 takes the right-hand gap; J19 occupies its left-hand gap.
+    for index in range(101, 105):
+        cap_pad = point(board_pad(f"C{index}", "1"))
+        via_x = cap_pad[0] + (1.225 if index == 104 else -1.775)
+        via_at = (via_x, 40.1)
+        entry = (via_x + (-0.4 if index == 104 else 0.4), cap_pad[1])
+        vias.append(
+            {"x": via_at[0], "y": via_at[1],
+             "net": "VBAT", "diameter": 0.6, "drill": 0.3}
+        )
+        track(cap_pad, entry, layer="B.Cu", width=0.25, net="VBAT")
+        track(entry, via_at, layer="B.Cu", width=0.25, net="VBAT")
+
+    # The three remaining rear capacitor returns use the gaps between the
+    # motor terminals and the VBAT dogbones already placed above.
+    for index, via_at, bend in (
+        (102, (17.725, 39.5), None),
+        (103, (24.5, 39.2), (23.125, 39.2)),
+        (104, (30.1, 40.1), (29.7, 40.5)),
+    ):
+        cap_ground = point(board_pad(f"C{index}", "2"))
+        vias.append(
+            {"x": via_at[0], "y": via_at[1],
+             "net": "GND", "diameter": 0.6, "drill": 0.3}
+        )
+        if bend is None:
+            track(cap_ground, via_at,
+                  layer="B.Cu", width=0.25, net="GND")
+        else:
+            track(cap_ground, bend,
+                  layer="B.Cu", width=0.25, net="GND")
+            track(bend, via_at,
+                  layer="B.Cu", width=0.25, net="GND")
+
+    # The large front battery-return pad needs its own ground-plane entry.
+    battery_return = point(board_pad("J2", "1"))
+    battery_return_via = (battery_return[0], 17.0)
+    vias.append(
+        {"x": battery_return_via[0], "y": battery_return_via[1],
+         "net": "GND", "diameter": 0.8, "drill": 0.3}
+    )
+    track(battery_return, battery_return_via,
+          layer="F.Cu", width=0.45, net="GND")
+    for ref, via_at in (
+        ("U1", (17.8, 15.4)),
+        ("U3", (26.2, 28.1)),
+        ("U4", (17.8, 28.1)),
+    ):
+        exposed_pad = point(board_pad(ref, "49"))
+        vias.append(
+            {"x": via_at[0], "y": via_at[1],
+             "net": "GND", "diameter": 0.6, "drill": 0.3}
+        )
+        track(exposed_pad, via_at,
+              layer="B.Cu", width=0.3, net="GND")
+
+    # Three perimeter ground pins share the 0.65 mm channel between drivers;
+    # the 0.15 mm trace keeps the specified 0.25 mm pad clearance on each side.
+    ground_trunk_top = (22.0, 18.05)
+    ground_trunk_bottom = (22.0, 25.45)
+    vias.append(
+        {"x": 22.0, "y": 21.5, "net": "GND",
+         "diameter": 0.45, "drill": 0.2}
+    )
+    track(point(board_pad("U1", "44")), ground_trunk_top,
+          layer="B.Cu", width=0.15, net="GND")
+    track(ground_trunk_top, ground_trunk_bottom,
+          layer="B.Cu", width=0.15, net="GND")
+    track(point(board_pad("U3", "44")), ground_trunk_bottom,
+          layer="B.Cu", width=0.15, net="GND")
+    u4_ground = point(board_pad("U4", "44"))
+    u4_ground_corner = (u4_ground[0], 22.0)
+    track(u4_ground, u4_ground_corner,
+          layer="B.Cu", width=0.15, net="GND")
+    track(u4_ground_corner, (22.0, 22.0),
+          layer="B.Cu", width=0.15, net="GND")
+    u2_ground = point(board_pad("U2", "44"))
+    u2_ground_corner = (u2_ground[0], 21.75)
+    u2_ground_via = (28.5, 21.75)
+    vias.append(
+        {"x": u2_ground_via[0], "y": u2_ground_via[1],
+         "net": "GND", "diameter": 0.45, "drill": 0.2}
+    )
+    track(u2_ground, u2_ground_corner,
+          layer="B.Cu", width=0.15, net="GND")
+    track(u2_ground_corner, u2_ground_via,
+          layer="B.Cu", width=0.15, net="GND")
+    u1_vbat = point(board_pad("U1", "8"))
+    u1_vbat_corner = (u1_vbat[0], 21.7)
+    u1_vbat_via = (15.8, 21.7)
+    vias.append(
+        {"x": u1_vbat_via[0], "y": u1_vbat_via[1],
+         "net": "VBAT", "diameter": 0.45, "drill": 0.2}
+    )
+    track(u1_vbat, u1_vbat_corner,
+          layer="B.Cu", width=0.2, net="VBAT")
+    track(u1_vbat_corner, u1_vbat_via,
+          layer="B.Cu", width=0.2, net="VBAT")
 
     # The SMD flight-controller header reaches the planes through two short
     # back-side dogbones clear of the top motor terminals.
-    header_vbat = point(board_pad("J3", "6"))
-    header_vbat_corner = (header_vbat[0], 5.3)
-    header_vbat_via = (32.5, 5.3)
+    header_vbat = point(board_pad("J3", "1"))
+    # Escape above the first motor-phase route, which crosses y=5.1.
+    header_vbat_via = (header_vbat[0], 4.2)
     vias.append(
         {
             "x": header_vbat_via[0],
@@ -1328,18 +1558,19 @@ async def build(client: Client) -> int:
     )
     track(
         header_vbat,
-        header_vbat_corner,
-        layer="B.Cu",
-        width=0.35,
-        net="VBAT",
-    )
-    track(
-        header_vbat_corner,
         header_vbat_via,
         layer="B.Cu",
         width=0.35,
         net="VBAT",
     )
+    header_ground = point(board_pad("J3", "2"))
+    header_ground_via = (header_ground[0], 4.2)
+    vias.append(
+        {"x": header_ground_via[0], "y": header_ground_via[1],
+         "net": "GND", "diameter": 0.6, "drill": 0.3}
+    )
+    track(header_ground, header_ground_via,
+          layer="B.Cu", width=0.25, net="GND")
 
     # Declare unfilled planes before the non-mutating copper preflight. The
     # scratch board fills them only after candidate copper is present, so stale
@@ -1381,7 +1612,11 @@ async def build(client: Client) -> int:
     await call("add_zones", path=board, zones=zones)
 
     copper_preflight = await call(
-        "check_board", path=board, tracks=tracks, vias=vias
+        "check_board",
+        path=board,
+        tracks=tracks,
+        vias=vias,
+        track_angle_step=45,
     )
     new_critical = [
         finding
@@ -1410,7 +1645,7 @@ async def build(client: Client) -> int:
         f"0 shorts/crossings, kinds={new_kind_counts}; applying the inspected copper"
     )
     await call("add_vias", path=board, vias=vias)
-    await call("add_tracks", path=board, tracks=tracks)
+    await call("add_tracks", path=board, tracks=tracks, track_angle_step=45)
     all_refs = (
         ["J1", "J2", "J3"]
         + [f"H{i}" for i in range(1, 5)]
@@ -1462,10 +1697,18 @@ async def build(client: Client) -> int:
         "measure_placement", path=board, edge_clearance=0.4, net_limit=12
     )
     unrouted = await call("unrouted_connections", path=board)
-    drc = await call("check_board", path=board)
+    drc = await call("check_board", path=board, track_angle_step=45)
     drc_errors = [
         item for item in drc.get("findings", []) if item.get("severity") == "error"
     ]
+    native_unconnected = sum(
+        item.get("kind") == "unconnected_items" for item in drc_errors
+    )
+    if unrouted["count"] != native_unconnected:
+        raise RuntimeError(
+            "API connectivity and KiCad DRC disagree: "
+            f"{unrouted['count']} versus {native_unconnected}"
+        )
     physical_errors = [
         item for item in drc_errors if item.get("kind") != "unconnected_items"
     ]
@@ -1478,8 +1721,10 @@ async def build(client: Client) -> int:
     print(
         f"board: {final_placement.get('footprint_count', '?')} footprints, "
         f"{final_placement.get('overlap_count', '?')} overlaps, "
+        f"{final_placement.get('edge_violation_count', '?')} edge violations, "
         f"{unrouted.get('count', '?')} unrouted, {len(drc_errors)} DRC errors"
     )
+    print("NOT OPERABLE: controller power and sensing circuits require design review")
 
     await call(
         "render_board_layout",
