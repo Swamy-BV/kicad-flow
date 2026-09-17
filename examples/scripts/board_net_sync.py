@@ -129,11 +129,11 @@ async def main() -> None:
         signal = next(p for p in (
             await call("get_footprint", path=board, ref="R1"))["pads"]
             if p["number"] == "2")
-        await call("add_tracks", path=board, tracks=[{
+        track = (await call("add_tracks", path=board, tracks=[{
             "x1": signal["x"], "y1": signal["y"],
             "x2": signal["x"] + 2, "y2": signal["y"],
             "layer": "F.Cu", "width": 0.2, "net": connected["name"],
-        }])
+        }]))["tracks"][0]
         preview = await call(
             "sync_board_nets", schematic_path=sheet, board_path=board,
             net_names={connected["name"]: "RENAMED"}, dry_run=True,
@@ -144,7 +144,43 @@ async def main() -> None:
             "net_names": {connected["name"]: "RENAMED"},
         })).data
         assert not refused["ok"] and "existing copper" in refused["error"]
-        print("PASS: PCB nets follow schematic; unsafe updates are refused")
+
+        old = await call("get_footprint", path=board, ref="R1")
+        await call("set_fields", path=sheet, fields=[{
+            "ref": "R1", "name": "Footprint",
+            "value": "Resistor_SMD:R_0805_2012Metric",
+        }])
+        pose = [{"ref": "R1", "x": 22, "y": 24, "rotation": 180}]
+        no_pose = (await client.call_tool("update_board_from_schematic", {
+            "schematic_path": sheet, "board_path": board,
+        })).data
+        assert not no_pose["ok"] and "R1" in no_pose["error"]
+        blocked = (await client.call_tool("update_board_from_schematic", {
+            "schematic_path": sheet, "board_path": board,
+            "placements": pose,
+        })).data
+        assert not blocked["ok"] and "R1.2" in blocked["error"]
+        assert "existing copper" in blocked["error"]
+        unchanged = await call("get_footprint", path=board, ref="R1")
+        assert unchanged["uuid"] == old["uuid"]
+        await call("remove_copper", path=board, uuid=track["uuid"])
+        await call("add_tracks", path=board, tracks=[{
+            "x1": 40, "y1": 40, "x2": 42, "y2": 40,
+            "layer": "F.Cu", "width": 0.2, "net": connected["name"],
+        }])
+        changed = await call(
+            "update_board_from_schematic", schematic_path=sheet,
+            board_path=board, placements=pose,
+        )
+        assert changed["changed_footprints"] == ["R1"]
+        fresh = await call("get_footprint", path=board, ref="R1")
+        assert fresh["uuid"] != old["uuid"]
+        assert fresh["fp_id"] == "Resistor_SMD:R_0805_2012Metric"
+        assert (fresh["x"], fresh["y"], fresh["rotation"]) == (22, 24, 180)
+        assert next(p for p in fresh["pads"] if p["number"] == "2")["net"] == (
+            connected["name"]
+        )
+        print("PASS: schematic nets and footprint changes; copper refusal is atomic")
 
 
 if __name__ == "__main__":

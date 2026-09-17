@@ -84,7 +84,8 @@ def sync_board_nets(
             if actual[(ref, pad)] != name
         ]
         copper_blocks = bool(
-            changes and (board.tracks() or board.vias() or board.zones())
+            any(change["before"] for change in changes)
+            and (board.tracks() or board.vias() or board.zones())
         )
         if copper_blocks and not dry_run:
             raise ValueError("net changes would leave existing copper on old nets")

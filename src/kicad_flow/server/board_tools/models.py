@@ -94,7 +94,7 @@ class GraphicMove(_StrictModel):
 
 
 class SchematicPlacement(_StrictModel):
-    """Caller-chosen pose for a schematic component missing from the PCB."""
+    """Caller-chosen pose for a new or changed schematic footprint."""
 
     ref: str = Field(description="Reference in the schematic netlist.")
     x: float = Field(description="Anchor X in mm.")
