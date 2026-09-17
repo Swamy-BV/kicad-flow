@@ -99,7 +99,11 @@ async def main() -> None:
         first = await call("query_board_region", **scope)
         assert first["graphics"], "Edge.Cuts omitted under copper filter"
         rear = next(p for p in first["pads"] if p["ref"] == "R1")
-        assert rear["shape"] == "roundrect" and rear["rotation"] == 90
+        # The footprint reports its caller-facing 90 degrees. Pad rotation is
+        # its absolute board angle: KiCad stores 270 degrees after the B flip.
+        resistor = next(f for f in placed["footprints"] if f["ref"] == "R1")
+        assert resistor["rotation"] == 90 and resistor["side"] == "B"
+        assert rear["shape"] == "roundrect" and rear["rotation"] == 270
         assert rear["copper_layers"] == ["B.Cu"]
         assert rear["geometry_supported"] and rear["bounds"]
         same = await call("query_board_region", **scope, since=first["revision"])
