@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
+from threading import Lock
 
 from kicad_flow.backend.kicad import _sexpr as sexpr
 from kicad_flow.backend.kicad._sexpr import Node
@@ -105,6 +106,7 @@ def find_library(nickname: str, project_dir: Path | None = None) -> Path:
 
 #: Where flattened KiCad 10 libraries are cached, one file per nickname.
 _FLAT = Path(tempfile.gettempdir()) / "kicad_flow_symbols"
+_FLAT_LOCK = Lock()
 
 
 def _flatten(source: Path, target: Path) -> Path:
@@ -119,6 +121,15 @@ def _flatten(source: Path, target: Path) -> Path:
     directory's newest modification time, so a KiCad update rebuilds it and an
     unchanged install does not.
     """
+    # functools.cache may call its wrapped function more than once when the
+    # first requests arrive together. Serialize the freshness check and the
+    # publication, or one request can replace the file while another loads it.
+    with _FLAT_LOCK:
+        return _flatten_locked(source, target)
+
+
+def _flatten_locked(source: Path, target: Path) -> Path:
+    """Build one flattened library while the process-wide lock is held."""
     parts = sorted(source.glob("*.kicad_sym"))
     if not parts:
         raise FileNotFoundError(f"symbol directory {source} holds no symbols")
@@ -418,5 +429,4 @@ def _split_symbol_name(path_str: str) -> tuple[str, ...]:
             if match:
                 return (match.group(1),)
     return ()
-
 
