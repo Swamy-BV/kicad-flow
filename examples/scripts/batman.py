@@ -244,8 +244,15 @@ async def build(client: Client) -> int:
         {"fp_id": DECOUPLING_FP, "ref": "C2", "x": 57, "y": 31,
          "rotation": 90, "side": "B", "value": "100nF"},
     ]
-    board_parts = await call("place_footprints", path=board,
-                             footprints=footprints)
+    exported = await call(
+        "update_board_from_schematic", schematic_path=sheet, board_path=board,
+        placements=[{key: value for key, value in fp.items()
+                     if key in ("ref", "x", "y", "rotation", "side", "anchor")}
+                    for fp in footprints],
+    )
+    if len(exported["placed"]) != len(footprints):
+        raise RuntimeError("schematic export missed a board footprint")
+    board_parts = await call("list_footprints", path=board, with_pads=True)
     pads_of = {
         fp["ref"]: {pad["number"]: pad for pad in fp["pads"]}
         for fp in board_parts.get("footprints", [])
@@ -256,14 +263,12 @@ async def build(client: Client) -> int:
         for fp in board_parts.get("footprints", [])
     ])
 
-    # Apply the schematic's exact net membership; the board invents none.
+    # The schematic's exact net membership was applied by export.
     net_of: dict[str, str] = {}
     for net in nets.get("nets", []):
         for member in net["pins"]:
             key = f"{member['ref']}.{member['pin']}"
             net_of[key] = net["name"]
-    await call("sync_board_nets", schematic_path=sheet,
-               board_path=board)
 
     vias: list[dict[str, Any]] = []
     tracks: list[dict[str, Any]] = []

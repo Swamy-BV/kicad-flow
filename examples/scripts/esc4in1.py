@@ -294,6 +294,13 @@ async def build(client: Client) -> int:
             len(root_plan),
         )
     )
+    await call("set_fields", path=root, fields=[
+        {"ref": part["ref"], "name": "Footprint", "value": (
+            FC_HEADER if part["ref"] == "J3" else
+            BATTERY_PAD if part["ref"].startswith("J") else BULK_C_FP
+        )}
+        for part in root_plan
+    ])
     bat_p = root_parts[("J1", 1)]
     bat_n = root_parts[("J2", 1)]
     fc = root_parts[("J3", 1)]
@@ -581,6 +588,18 @@ async def build(client: Client) -> int:
                 len(page_plan),
             )
         )
+        footprint_by_symbol = {
+            DRIVER_SYM: DRIVER_FP,
+            FET_SYM: FET_FP,
+            "Device:R": R_FP,
+            "Device:C": C_FP,
+            "Connector_Generic:Conn_01x01": MOTOR_PAD,
+        }
+        await call("set_fields", path=sheet, fields=[
+            {"ref": part["ref"], "name": "Footprint",
+             "value": footprint_by_symbol[part["lib_id"]]}
+            for part in page_plan if part.get("unit", 1) == 1
+        ])
         driver = parts[(f"U{motor}", 1)]
 
         page_wires: list[dict[str, float]] = []
@@ -718,8 +737,8 @@ async def build(client: Client) -> int:
         raise RuntimeError(f"schematic layout: {layout.get('kind_counts', {})}")
     await call("render_schematic", path=root, output_dir=str(OUT))
     schematic_calls = calls - schematic_started
-    if schematic_calls > 70:
-        raise RuntimeError(f"schematic call budget exceeded: {schematic_calls} > 70")
+    if schematic_calls > 74:
+        raise RuntimeError(f"schematic call budget exceeded: {schematic_calls} > 74")
     print(
         f"schematic: {nets.get('count', '?')} nets; "
         f"ERC {erc.get('errors', '?')}/{erc.get('warnings', '?')}; "
@@ -861,17 +880,13 @@ async def build(client: Client) -> int:
         ],
     )
 
+    schematic_placements: list[dict[str, Any]] = []
+
     async def place_stage(name: str, placements: list[dict[str, Any]]) -> None:
-        await call("place_footprints", path=board, footprints=placements)
-        measured = await call(
-            "measure_placement", path=board, edge_clearance=0.4, net_limit=8
-        )
-        print(
-            f"placement {name}: {measured.get('footprint_count', '?')} parts, "
-            f"{measured.get('overlap_count', '?')} overlap(s), "
-            f"{measured.get('edge_violation_count', '?')} edge violation(s), "
-            f"{measured.get('courtyard_area_ratio', 0):.1%} area"
-        )
+        # Keep the caller's staged placement plan, then export every physical
+        # schematic component in one transaction after all poses are known.
+        schematic_placements.extend(placements)
+        print(f"planned {name}: {len(placements)} schematic footprint(s)")
 
     fixed: list[dict[str, Any]] = []
     for index, (x, y) in enumerate(
@@ -936,7 +951,8 @@ async def build(client: Client) -> int:
                     "value": f"M{motor}_{PHASES[phase_index]}",
                 }
             )
-    await place_stage("fixed", fixed)
+    await call("place_footprints", path=board, footprints=fixed[:4])
+    await place_stage("fixed", fixed[4:])
 
     driver_positions = {
         1: (17.8, 17.3, 270),
@@ -1042,20 +1058,6 @@ async def build(client: Client) -> int:
                 )
     await place_stage("support", support)
 
-    # At the four inner corners, the last capacitor in one radial cluster and
-    # first resistor in the next need the same square of front copper. Move
-    # those four capacitors into the deliberately reserved central-front gaps.
-    await call(
-        "move_footprints",
-        path=board,
-        moves=[
-            {"ref": "C1", "x": 28.5, "y": 15.8, "anchor": "courtyard_center"},
-            {"ref": "C4", "x": 28.2, "y": 27.5, "anchor": "courtyard_center"},
-            {"ref": "C7", "x": 15.5, "y": 27.7, "anchor": "courtyard_center"},
-            {"ref": "C10", "x": 15.8, "y": 16.0, "anchor": "courtyard_center"},
-        ],
-    )
-
     # The first layout put these over gate support parts. A back-side row fits
     # between the lower bridge courtyards and the board edge.
     bulk_positions = [
@@ -1113,11 +1115,36 @@ async def build(client: Client) -> int:
             name_from(f"U{motor}", low_pin, f"{stem}_DL")
             name_from(f"U{motor}", BOOT_PINS[phase], f"{stem}_BOOT")
     synced = await call(
-        "sync_board_nets", schematic_path=root, board_path=board,
+        "update_board_from_schematic", schematic_path=root, board_path=board,
+        placements=[{key: value for key, value in part.items()
+                     if key in ("ref", "x", "y", "rotation", "side", "anchor")}
+                    for part in schematic_placements],
         net_names=net_names,
     )
+    if len(synced["placed"]) != len(schematic_placements):
+        raise RuntimeError("schematic export missed a board footprint")
     if synced["net_count"] != len(net_names):
         raise RuntimeError("schematic contains connected nets without display names")
+    # At the four inner corners, the last capacitor in one radial cluster and
+    # first resistor in the next need the same square of front copper. Move
+    # those four capacitors into the deliberately reserved central-front gaps.
+    await call(
+        "move_footprints", path=board, moves=[
+            {"ref": "C1", "x": 28.5, "y": 15.8, "anchor": "courtyard_center"},
+            {"ref": "C4", "x": 28.2, "y": 27.5, "anchor": "courtyard_center"},
+            {"ref": "C7", "x": 15.5, "y": 27.7, "anchor": "courtyard_center"},
+            {"ref": "C10", "x": 15.8, "y": 16.0, "anchor": "courtyard_center"},
+        ],
+    )
+    measured = await call(
+        "measure_placement", path=board, edge_clearance=0.4, net_limit=8
+    )
+    print(
+        f"exported placement: {measured.get('footprint_count', '?')} parts, "
+        f"{measured.get('overlap_count', '?')} overlap(s), "
+        f"{measured.get('edge_violation_count', '?')} edge violation(s), "
+        f"{measured.get('courtyard_area_ratio', 0):.1%} area"
+    )
     await call(
         "set_net_classes",
         path=board,

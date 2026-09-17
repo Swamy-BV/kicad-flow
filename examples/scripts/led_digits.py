@@ -24,8 +24,8 @@ the same sixteen-channel circuit and the whole thing is ten of them: 160 LEDs,
                 times. Nothing else is routed because nothing else has to be.
 
 **The nets come from the schematic, not from here.** `list_nets` on the root
-says which pads share a net; `sync_board_nets` applies it. The board never invents
-a name -- that is the composition the two contracts exist for.
+says which pads share a net; `update_board_from_schematic` applies them while
+placing the footprints. The board never invents a name.
 
 Nothing here decides anything. The grid, the digit shapes and the board size
 are arithmetic in this file; the tools were asked how big each part is, where
@@ -322,6 +322,11 @@ async def build(client: Client) -> int:
                 rails.append({"x": (24 + i * 30) * G, "y": 126 * G,
                               "net": net})
         made = await call("add_components", path=child, parts=parts)
+        await call("set_fields", path=child, fields=[
+            {"ref": part["ref"], "name": "Footprint",
+             "value": RES_FP if part["ref"].startswith("R") else LED_FP}
+            for part in parts
+        ])
         powered = await call("add_power", path=child, symbols=rails)
         if not (made and powered):
             continue
@@ -401,10 +406,22 @@ async def build(client: Client) -> int:
              "y": y, "rotation": 90, "side": "B", "value": "330R"},
         ]
         placed.append((n, digit, x, y))
+    exported = await call(
+        "update_board_from_schematic", schematic_path=root, board_path=board,
+        placements=[{key: value for key, value in put.items()
+                     if key in ("ref", "x", "y", "rotation", "side", "anchor")}
+                    for put in puts],
+    )
     parts_out = (await call(
-        "place_footprints", path=board, footprints=puts)).get("footprints", [])
-    # The pads came back with the placement, already turned and already on the
-    # right side. Nothing needs asking again.
+        "list_footprints", path=board, with_pads=True))["footprints"]
+    if len(exported["placed"]) != len(puts):
+        raise RuntimeError("schematic export missed a board footprint")
+    repeated = await call("sync_board_nets", schematic_path=root,
+                          board_path=board)
+    if repeated["changed_count"] != 0:
+        raise RuntimeError("exported board nets were not already in sync")
+    # Read the pads after export; their coordinates include the requested
+    # rotation and board side.
     pads_of: dict[str, dict[str, dict[str, float]]] = {}
     for fp in parts_out:
         pads_of[fp["ref"]] = {p["number"]: p for p in fp["pads"]}
@@ -413,15 +430,12 @@ async def build(client: Client) -> int:
 
     # -- 4. the nets, from the schematic -----------------------------------
     #
-    # A library footprint carries no nets. Which pad is on which net is a fact
-    # the SCHEMATIC holds, so read it there and apply it here.
+    # The schematic owns pad nets; export applied them while placing footprints.
     of: dict[str, str] = {}
     for net in nets.get("nets", []):
         for p in net["pins"]:
             of[f"{p['ref']}.{p['pin']}"] = net["name"]
-    applied = await call("sync_board_nets", schematic_path=root,
-                         board_path=board)
-    assigned = applied["pad_count"]
+    assigned = sum(bool(pad["net"]) for fp in parts_out for pad in fp["pads"])
     print(f"nets from the schematic: {assigned} pads assigned")
     placement = await call(
         "measure_placement", path=board, edge_clearance=0.25, net_limit=5
