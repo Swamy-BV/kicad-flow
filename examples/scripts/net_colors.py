@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -51,11 +52,11 @@ async def main() -> None:
              "x": x, "y": 10.0}
             for ref, x in (("R1", 10.0), ("R2", 20.0))
         ])
-        await call("set_pad_nets", path=board, pads=[
+        await schematic_nets(call, board, [
             {"ref": "R1", "pad": "1", "net": "VBUS"},
             {"ref": "R1", "pad": "2", "net": "DATA"},
             {"ref": "R2", "pad": "1", "net": "VBUS_A"},
-        ])
+        ], two_pin_refs={"R1", "R2"})
         await call("save_board", path=board)
         await call("set_net_classes", path=board, classes=[
             {"name": "Power", "track_width": 0.8,

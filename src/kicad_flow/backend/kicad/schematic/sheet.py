@@ -10,6 +10,7 @@ from pathlib import Path
 
 from kicad_flow.schematic.api import GRID, Sheet
 from kicad_flow.schematic.types import (
+    BoardComponent,
     Finding,
     Label,
     LayoutFinding,
@@ -504,6 +505,10 @@ class KiCadSheet(Sheet):
     def nets(self) -> list[Net]:
         """What this sheet actually connects, from KiCad's own netlist."""
         return _validation.nets(self)
+
+    def board_components(self) -> list[BoardComponent]:
+        """Physical components and their footprint fields from the netlist."""
+        return _validation.board_components(self)
 
     def check(self) -> list[Finding]:
         """Every violation, mapped from a position back to a part and pin."""

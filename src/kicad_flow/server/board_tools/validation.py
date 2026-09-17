@@ -35,6 +35,7 @@ def check_board(
     vias: list[NewVia] | None = None,
     zones: list[NewZone] | None = None,
     track_angle_step: float | None = None,
+    schematic_parity: bool = False,
 ) -> dict[str, Any]:
     """Every design-rule violation, named by part and pad.
 
@@ -51,6 +52,10 @@ def check_board(
     applied. Candidate findings identify the exact input list and index when
     KiCad names either candidate object in the violation.
 
+    Set `schematic_parity=true` to ask KiCad to compare the PCB with the
+    same-project schematic. This native CLI check requires a real board file,
+    so it cannot be combined with candidate copper previews.
+
     ``ok`` means DRC ran; ``clean`` is true only when the checked state returned
     no findings, and ``kind_counts`` summarizes them without deciding what
     should change.
@@ -59,11 +64,13 @@ def check_board(
         board = _board(path)
         step = _angle_step(track_angle_step)
         proposed = tracks is not None or vias is not None or zones is not None
+        if proposed and schematic_parity:
+            raise ValueError("schematic_parity cannot check candidate copper")
         if proposed:
             refusal = _provider_via_refusal(path, vias or [])
             if refusal is not None:
                 return {**refusal, "proposed": True}
-        current = board.check()
+        current = board.check(schematic_parity=schematic_parity)
         if proposed:
             track_items = tuple(
                 Track(

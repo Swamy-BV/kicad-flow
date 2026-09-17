@@ -24,7 +24,7 @@ the same sixteen-channel circuit and the whole thing is ten of them: 160 LEDs,
                 times. Nothing else is routed because nothing else has to be.
 
 **The nets come from the schematic, not from here.** `list_nets` on the root
-says which pads share a net; `set_pad_nets` applies it. The board never invents
+says which pads share a net; `sync_board_nets` applies it. The board never invents
 a name -- that is the composition the two contracts exist for.
 
 Nothing here decides anything. The grid, the digit shapes and the board size
@@ -45,6 +45,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -415,14 +416,12 @@ async def build(client: Client) -> int:
     # A library footprint carries no nets. Which pad is on which net is a fact
     # the SCHEMATIC holds, so read it there and apply it here.
     of: dict[str, str] = {}
-    sets: list[dict[str, Any]] = []
     for net in nets.get("nets", []):
         for p in net["pins"]:
-            sets.append({"ref": p["ref"], "pad": p["pin"],
-                         "net": net["name"]})
             of[f"{p['ref']}.{p['pin']}"] = net["name"]
-    applied = await call("set_pad_nets", path=board, pads=sets)
-    assigned = len(applied.get("pads", []))
+    applied = await call("sync_board_nets", schematic_path=root,
+                         board_path=board)
+    assigned = applied["pad_count"]
     print(f"nets from the schematic: {assigned} pads assigned")
     placement = await call(
         "measure_placement", path=board, edge_clearance=0.25, net_limit=5
@@ -965,6 +964,16 @@ async def build(client: Client) -> int:
     await call("move_graphics", path=scratch, moves=[{
         "uuid": graphic_uuid, "dx": 1, "dy": 0}])
     await call("remove_graphics", path=scratch, uuids=[graphic_uuid])
+    await call("place_footprints", path=scratch, footprints=[
+        {"fp_id": LAYER_TEST_FP, "ref": "LF", "x": 10, "y": 10,
+         "anchor": "courtyard_center", "side": "F"},
+        {"fp_id": LAYER_TEST_FP, "ref": "LB", "x": 10, "y": 10,
+         "anchor": "courtyard_center", "side": "B"},
+    ])
+    await schematic_nets(call, scratch, [
+        {"ref": "LF", "pad": "1", "net": "LAYER_TEST"},
+        {"ref": "LB", "pad": "1", "net": "LAYER_TEST"},
+    ])
     outline_zone = await call("add_zones", path=scratch, zones=[{
         "boundary": "board_outline", "inset": 0.2, "max_error": 0.02,
         "layer": "B.Cu", "clearance": 0.3,
@@ -992,16 +1001,6 @@ async def build(client: Client) -> int:
     )
     same("zone uuid is an exact removable identity",
          zone_preview.get("removed"), 1)
-    await call("place_footprints", path=scratch, footprints=[
-        {"fp_id": LAYER_TEST_FP, "ref": "LF", "x": 10, "y": 10,
-         "anchor": "courtyard_center", "side": "F"},
-        {"fp_id": LAYER_TEST_FP, "ref": "LB", "x": 10, "y": 10,
-         "anchor": "courtyard_center", "side": "B"},
-    ])
-    await call("set_pad_nets", path=scratch, pads=[
-        {"ref": "LF", "pad": "1", "net": "LAYER_TEST"},
-        {"ref": "LB", "pad": "1", "net": "LAYER_TEST"},
-    ])
     layer_open = await call("unrouted_connections", path=scratch)
     same("coincident pads on opposite copper layers stay disconnected",
          sum(c.get("net") == "LAYER_TEST"

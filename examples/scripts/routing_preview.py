@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -40,7 +41,10 @@ async def main() -> None:
 
     async with Client(mcp) as client:
         async def call(tool: str, **args: Any) -> dict[str, Any]:
-            result = (await client.call_tool(tool, {"path": path, **args})).data
+            arguments = {"path": path, **args}
+            if tool == "update_board_from_schematic":
+                arguments.pop("path")
+            result = (await client.call_tool(tool, arguments)).data
             assert result["ok"], result
             return result
 
@@ -70,9 +74,10 @@ async def main() -> None:
             "fp_id": "TestPoint:TestPoint_Pad_D1.0mm", "ref": ref, "x": x, "y": y}
             for ref, x, y in (("A1", 10, 20), ("A2", 30, 20),
                               ("B1", 10, 22), ("B2", 30, 22), ("G1", 40, 25))])
-        await call("set_pad_nets", pads=[{"ref": ref, "pad": "1", "net": net}
-                   for ref, net in (("A1", "P"), ("A2", "P"),
-                                    ("B1", "N"), ("B2", "N"), ("G1", "GND"))])
+        await schematic_nets(call, path, [
+            {"ref": ref, "pad": "1", "net": net}
+            for ref, net in (("A1", "P"), ("A2", "P"),
+                             ("B1", "N"), ("B2", "N"), ("G1", "GND"))])
         await call("add_tracks", tracks=[{
             "net": net, "layer": "F.Cu", "width": 0.2,
             "x1": x1, "y1": y1, "x2": x2, "y2": y2}

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kicad_flow.schematic.types import (
+    BoardComponent,
     Finding,
     LayoutFinding,
     Net,
@@ -56,6 +57,26 @@ def nets(self: KiCadSheet) -> list[Net]:
             Net(name=name, pins=pins, no_connect=name.startswith("unconnected-("))
         )
     return sorted(found, key=lambda n: n.name)
+
+
+def board_components(self: KiCadSheet) -> list[BoardComponent]:
+    """Read KiCad's flattened component table, preserving footprint fields."""
+    from . import netlist as _netlist
+
+    with self._scratch() as scratch:
+        tree = _netlist.export_netlist(scratch)
+    table = tree.get("components")
+    found: list[BoardComponent] = []
+    for item in table.get_all("comp") if table is not None else []:
+        ref = _text(item.get("ref"))
+        if ref.startswith("#"):
+            continue
+        found.append(BoardComponent(
+            ref=ref,
+            value=_text(item.get("value")),
+            footprint=_text(item.get("footprint")),
+        ))
+    return sorted(found, key=lambda component: component.ref)
 
 
 def check(self: KiCadSheet) -> list[Finding]:

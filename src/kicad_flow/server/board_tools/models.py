@@ -109,6 +109,17 @@ class NewFootprint(_StrictModel):
     value: str = Field(default="", description="Value field.")
 
 
+class SchematicPlacement(_StrictModel):
+    """Caller-chosen pose for a schematic component missing from the PCB."""
+
+    ref: str = Field(description="Reference in the schematic netlist.")
+    x: float = Field(description="Anchor X in mm.")
+    y: float = Field(description="Anchor Y in mm.")
+    anchor: Literal["origin", "courtyard_center"] = "origin"
+    rotation: float = 0.0
+    side: Literal["F", "B"] = "F"
+
+
 class FootprintMove(_StrictModel):
     """One footprint's new absolute position."""
 

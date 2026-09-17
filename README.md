@@ -69,8 +69,9 @@ Set `KICAD_FLOW_MONITOR=0` to disable it, or use another port number.
 
 - **Schematics:** components, wiring, labels, hierarchical sheets, netlists,
   ERC and layout checks.
-- **PCBs:** footprints, schematic-to-board net sync, tracks, vias, zones,
+- **PCBs:** footprint export and net sync from schematics, tracks, vias, zones,
   stackups, outlines, silkscreen, DRC and 2D/3D renders.
+  `check_board(schematic_parity=true)` opts into KiCad's native cross-check.
 - **Net colors:** separate PCB and schematic colors with persistent class
   assignments. See [net colors](docs/net-colors.md).
 - **Preflight:** check proposed component placement or board routing before

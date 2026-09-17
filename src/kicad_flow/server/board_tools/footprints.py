@@ -313,7 +313,8 @@ def get_pad(path: str, ref: str, pad: str) -> dict[str, Any]:
     return {"ok": True, "ref": ref, "pad": pad, **point.as_dict()}
 
 
-@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+# Intentionally not registered as MCP: pad membership belongs to the schematic.
+# Kept only for direct Python compatibility; agents use schematic sync.
 def set_pad_nets(path: str, pads: list[PadNet]) -> dict[str, Any]:
     """Put pads on nets in order.
 
@@ -322,9 +323,8 @@ def set_pad_nets(path: str, pads: list[PadNet]) -> dict[str, Any]:
     nothing is connected, a plane joins nothing, and DRC calls every track a
     short.
 
-    Which pad is on which net is a fact the SCHEMATIC holds. Use
-    `sync_board_nets` for a placed schematic-driven board. This direct
-    primitive remains available for boards without a schematic.
+    Which pad is on which net is a fact the SCHEMATIC holds. This function is
+    intentionally unavailable through MCP; use `update_board_from_schematic`.
     """
     try:
         board = _board(path)

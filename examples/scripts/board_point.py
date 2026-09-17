@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -36,10 +37,10 @@ async def main() -> None:
             for first in front for second in back
             if (first["x"], first["y"]) == (second["x"], second["y"])
         )
-        await call("set_pad_nets", path=path, pads=[
+        await schematic_nets(call, path, [
             {"ref": "R1", "pad": pair[0]["number"], "net": "SIGNAL"},
             {"ref": "R2", "pad": pair[1]["number"], "net": "SIGNAL"},
-        ])
+        ], two_pin_refs={"R1", "R2"})
         x, y = pair[0]["x"], pair[0]["y"]
         separated = await call("what_is_on_board", path=path, x=x, y=y)
         assert not separated["connected"], separated

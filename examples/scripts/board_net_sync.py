@@ -19,8 +19,12 @@ async def main() -> None:
     board = str(root / "pair.kicad_pcb")
     partial = str(root / "partial.kicad_pcb")
     footprint = "Resistor_SMD:R_0603_1608Metric"
+    Path(board).unlink(missing_ok=True)
 
     async with Client(mcp) as client:
+        assert "set_pad_nets" not in {
+            item.name for item in await client.list_tools()
+        }
         async def call(name: str, **kwargs: Any) -> dict[str, Any]:
             data = (await client.call_tool(name, kwargs)).data
             assert data["ok"], data
@@ -31,6 +35,10 @@ async def main() -> None:
             {"lib_id": "Device:R", "ref": "R1", "x": 50.8, "y": 50.8},
             {"lib_id": "Device:R", "ref": "R2", "x": 50.8, "y": 63.5},
         ]))["parts"]
+        await call("set_fields", path=sheet, fields=[
+            {"ref": ref, "name": "Footprint", "value": footprint}
+            for ref in ("R1", "R2")
+        ])
         pins = {
             (part["ref"], pin["number"]): pin
             for part in placed for pin in part["pins"]
@@ -62,25 +70,55 @@ async def main() -> None:
         unchanged = await call("get_footprint", path=partial, ref="R1")
         assert all(not pad["net"] for pad in unchanged["pads"])
 
-        await call("new_board", path=board)
-        await call("place_footprints", path=board, footprints=[
-            {"fp_id": footprint, "ref": "R1", "x": 20, "y": 20},
-            {"fp_id": footprint, "ref": "R2", "x": 30, "y": 20},
-        ])
-        applied = await call(
-            "sync_board_nets", schematic_path=sheet, board_path=board,
+        missing_poses = (await client.call_tool("update_board_from_schematic", {
+            "schematic_path": sheet, "board_path": board,
+        })).data
+        assert not missing_poses["ok"] and not Path(board).exists()
+        exported = await call(
+            "update_board_from_schematic", schematic_path=sheet,
+            board_path=board, placements=[
+                {"ref": "R1", "x": 20, "y": 20},
+                {"ref": "R2", "x": 30, "y": 20,
+                 "rotation": 90, "side": "B"},
+            ], layers=4,
         )
-        assert applied["pad_count"] == 4 and applied["changed_count"] == 2
-        await call("set_pad_nets", path=board, pads=[
-            {"ref": "R1", "pad": "1", "net": "WRONG"},
+        assert exported["created"] and exported["changed_pad_count"] == 2
+        assert Path(board).exists()
+        back = await call("get_footprint", path=board, ref="R2")
+        assert back["side"] == "B" and back["rotation"] == 90
+        repeated = await call(
+            "update_board_from_schematic", schematic_path=sheet,
+            board_path=board,
+        )
+        assert not repeated["created"] and repeated["changed_pad_count"] == 0
+        await call("remove_wires", path=sheet, wires=[{
+            "x1": a["x"], "y1": a["y"], "x2": b["x"], "y2": b["y"],
+        }])
+        await call("add_no_connects", path=sheet, points=[
+            {"x": a["x"], "y": a["y"]},
+            {"x": b["x"], "y": b["y"]},
         ])
         cleared = await call(
             "sync_board_nets", schematic_path=sheet, board_path=board,
         )
-        assert cleared["changed_count"] == 1
+        assert cleared["changed_count"] == 2
         pads = (await call("get_footprint", path=board, ref="R1"))["pads"]
-        assert not next(p for p in pads if p["number"] == "1")["net"]
-        signal = next(p for p in pads if p["number"] == "2")
+        assert not next(p for p in pads if p["number"] == "2")["net"]
+        await call("remove_no_connects", path=sheet, points=[
+            {"x": a["x"], "y": a["y"]},
+            {"x": b["x"], "y": b["y"]},
+        ])
+        await call("add_wires", path=sheet, wires=[{
+            "x1": a["x"], "y1": a["y"], "x2": b["x"], "y2": b["y"],
+        }])
+        restored = await call(
+            "update_board_from_schematic", schematic_path=sheet,
+            board_path=board,
+        )
+        assert restored["changed_pad_count"] == 2
+        signal = next(p for p in (
+            await call("get_footprint", path=board, ref="R1"))["pads"]
+            if p["number"] == "2")
         await call("add_tracks", path=board, tracks=[{
             "x1": signal["x"], "y1": signal["y"],
             "x2": signal["x"] + 2, "y2": signal["y"],

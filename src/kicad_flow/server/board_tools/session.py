@@ -41,6 +41,11 @@ def _fail(exc: Exception) -> dict[str, Any]:
 _ERRORS = (LookupError, ValueError, OSError, RuntimeError)
 
 
+def _fresh_board(path: str, layers: int, thickness: float) -> Board:
+    """Construct an unregistered board; the caller registers it on success."""
+    return create_board(path, layers=layers, thickness=thickness)
+
+
 def _atomic_items(
     board: Board, items: list[Any], key: str, each: Any
 ) -> dict[str, Any]:

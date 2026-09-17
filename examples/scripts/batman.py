@@ -257,15 +257,13 @@ async def build(client: Client) -> int:
     ])
 
     # Apply the schematic's exact net membership; the board invents none.
-    pad_nets: list[dict[str, str]] = []
     net_of: dict[str, str] = {}
     for net in nets.get("nets", []):
         for member in net["pins"]:
             key = f"{member['ref']}.{member['pin']}"
             net_of[key] = net["name"]
-            pad_nets.append({"ref": member["ref"], "pad": member["pin"],
-                             "net": net["name"]})
-    await call("set_pad_nets", path=board, pads=pad_nets)
+    await call("sync_board_nets", schematic_path=sheet,
+               board_path=board)
 
     vias: list[dict[str, Any]] = []
     tracks: list[dict[str, Any]] = []
@@ -342,7 +340,8 @@ async def build(client: Client) -> int:
     await call("refill_zones", path=board)
     await call("save_board", path=board)
     unrouted = await call("unrouted_connections", path=board)
-    drc = await call("check_board", path=board, track_angle_step=45)
+    drc = await call("check_board", path=board, track_angle_step=45,
+                     schematic_parity=True)
     graphics = await call("list_graphics", path=board)
 
     await call("render_schematic", path=sheet, output_dir=str(OUT))

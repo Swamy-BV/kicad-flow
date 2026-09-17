@@ -70,8 +70,10 @@ regressions for label movement, rotation, back-side placement and exemptions.
 
 ## Net properties before routing
 
-1. Place all schematic footprints, then call `sync_board_nets` to transfer
-   actual schematic membership. `set_pad_nets` remains for schematic-free boards.
+1. Set each schematic component's Footprint field, then call
+   `update_board_from_schematic` with explicit poses for missing footprints.
+   It creates a missing PCB or syncs an existing one. Manual pad-net assignment
+   is unavailable through MCP; the schematic supplies membership.
 2. Set manufacturing limits and choose routing classes deliberately using
    `set_net_classes` and `assign_net_classes`.
 3. Read `list_board_nets(net="SIGNAL", include_rules=true)`. It reports effective

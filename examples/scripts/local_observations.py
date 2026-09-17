@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -69,8 +70,9 @@ async def main() -> None:
             {"fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": "R1",
              "x": 45, "y": 45, "rotation": 90, "side": "B"},
         ])
-        await call("set_pad_nets", path=pcb, pads=[
-            {"ref": ref, "pad": "1", "net": "SIGNAL"} for ref in ("J1", "R1")])
+        await schematic_nets(call, pcb, [
+            {"ref": ref, "pad": "1", "net": "SIGNAL"} for ref in ("J1", "R1")
+        ], two_pin_refs={"R1"})
         await call("set_net_classes", path=pcb,
                    classes=[{"name": "Signal", "track_width": 0.3}])
         await call("assign_net_classes", path=pcb,

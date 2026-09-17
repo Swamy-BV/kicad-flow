@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -56,7 +57,7 @@ async def main() -> None:
             "fp_id": "TestPoint:TestPoint_Pad_D1.0mm", "ref": ref, "x": x, "y": y}
             for ref, x, y in (("A1", 10, 20), ("A2", 30, 20),
                               ("B1", 10, 22), ("B2", 30, 22))])
-        await call("set_pad_nets", path=path, pads=[{
+        await schematic_nets(call, path, [{
             "ref": ref, "pad": "1", "net": net}
             for ref, net in (("A1", "P"), ("A2", "P"), ("B1", "N"), ("B2", "N"))])
         straight = [track("P", 10, 20, 30, 20), track("N", 10, 22, 30, 22)]

@@ -82,8 +82,6 @@ async def main() -> None:
         await call("render_board", path=path,
                    output_file=str(root / "fabrication-flush-3d.png"),
                    width=800, height=800)
-        await call("set_pad_nets", path=path, pads=[{
-            "ref": "J1", "pad": definition["pads"][0]["number"], "net": "GND"}])
         await call("set_board_limits", path=path, min_copper_edge_clearance=0.25)
         await call("measure_placement", path=path, edge_exempt_refs=["J1"])
         copper = await call("check_board", path=path, tracks=[{

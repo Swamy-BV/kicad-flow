@@ -147,10 +147,10 @@ def _routing_findings(self: KiCadBoard) -> list[Finding]:
     return out
 
 
-def check(self: KiCadBoard) -> list[Finding]:
+def check(self: KiCadBoard, *, schematic_parity: bool = False) -> list[Finding]:
     """Every violation, mapped from a position back to a part and pad."""
     self.save()
-    data = _kicad.drc(self._path)
+    data = _kicad.drc(self._path, schematic_parity=schematic_parity)
     where: dict[tuple[float, float], tuple[str, str]] = {}
     for part in self.footprints():
         for p in part.pads:

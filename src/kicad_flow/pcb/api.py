@@ -513,7 +513,7 @@ class Board(ABC):
         """
 
     @abstractmethod
-    def check(self) -> list[Finding]:
+    def check(self, *, schematic_parity: bool = False) -> list[Finding]:
         """Every rule violation, named by part and pad.
 
         The tool reports positions. A position means nothing until it is
@@ -522,6 +522,8 @@ class Board(ABC):
         rather than ``something at (25.46, 10.45)``. Backend-observable
         routing defects such as dangling endpoints, duplicate tracks and
         zero-length tracks are included; routing style remains caller policy.
+        `schematic_parity` asks the backend for native same-project PCB versus
+        schematic parity findings when it supports that check.
         """
 
     @abstractmethod

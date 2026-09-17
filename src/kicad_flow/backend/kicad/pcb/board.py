@@ -611,9 +611,9 @@ class KiCadBoard(Board):
         """Factual copper defects KiCad's DRC does not currently report."""
         return _validation._routing_findings(self)
 
-    def check(self) -> list[Finding]:
+    def check(self, *, schematic_parity: bool = False) -> list[Finding]:
         """Every violation, mapped from a position back to a part and pad."""
-        return _validation.check(self)
+        return _validation.check(self, schematic_parity=schematic_parity)
 
     def check_proposed(
         self,

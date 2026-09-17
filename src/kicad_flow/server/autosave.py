@@ -33,7 +33,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 #: Tool-name prefixes that change a design. `save_*` is excluded because it
 #: has just written; `check_`, `get_`, `list_`, `find_` and `what_` read.
 _WRITES = ("add_", "move_", "remove_", "rotate_", "mirror_", "set_", "place_",
-           "flip_", "refill_", "new_")
+           "flip_", "refill_", "new_", "sync_", "update_")
 
 
 def _enabled() -> bool:
@@ -56,6 +56,8 @@ class AutosaveMiddleware(Middleware):
         data = getattr(result, "structured_content", None)
         if not isinstance(data, dict) or data.get("ok") is not True:
             return result       # a refusal changed nothing worth writing
+        if data.get("dry_run") is True:
+            return result
         for path in _paths_in(getattr(context.message, "arguments", None)):
             with contextlib.suppress(Exception):
                 _save(path)
@@ -70,6 +72,9 @@ def _paths_in(arguments: Any) -> list[str]:
     path = arguments.get("path")
     if isinstance(path, str):
         found.append(path)
+    board_path = arguments.get("board_path")
+    if isinstance(board_path, str) and board_path not in found:
+        found.append(board_path)
     for op in arguments.get("ops") or []:            # batch carries its own
         if isinstance(op, dict):
             inner = (op.get("args") or {}).get("path")

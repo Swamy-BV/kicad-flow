@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from .api import GRID, Sheet, snap
 from .types import (
+    BoardComponent,
     Finding,
     Label,
     LayoutFinding,
@@ -35,8 +36,26 @@ from .types import (
     SymbolDef,
 )
 
-__all__ = ["GRID", "Finding", "Label", "LayoutFinding", "Net", "NetPin",
-           "Part", "PartPlacement", "Pin", "PlacementBounds",
-           "PlacementMeasurement", "Point", "SceneBounds", "SceneFinding",
-           "SceneObject", "SceneSnapshot", "Sheet", "SheetRef", "SymbolDef",
-           "snap"]
+__all__ = [
+    "GRID",
+    "BoardComponent",
+    "Finding",
+    "Label",
+    "LayoutFinding",
+    "Net",
+    "NetPin",
+    "Part",
+    "PartPlacement",
+    "Pin",
+    "PlacementBounds",
+    "PlacementMeasurement",
+    "Point",
+    "SceneBounds",
+    "SceneFinding",
+    "SceneObject",
+    "SceneSnapshot",
+    "Sheet",
+    "SheetRef",
+    "SymbolDef",
+    "snap",
+]

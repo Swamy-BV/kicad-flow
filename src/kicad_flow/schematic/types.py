@@ -228,6 +228,20 @@ class Net:
 
 
 @dataclass(frozen=True)
+class BoardComponent:
+    """One physical component in the schematic's exported netlist."""
+
+    ref: str
+    value: str
+    footprint: str
+
+    def as_dict(self) -> dict[str, str]:
+        """The component's board-facing fields."""
+        return {"ref": self.ref, "value": self.value,
+                "footprint": self.footprint}
+
+
+@dataclass(frozen=True)
 class Finding:
     """Something wrong with a sheet, said in terms of parts rather than mm.
 

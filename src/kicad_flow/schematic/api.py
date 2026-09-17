@@ -29,6 +29,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 
 from .types import (
+    BoardComponent,
     Finding,
     Label,
     LayoutFinding,
@@ -364,6 +365,14 @@ class Sheet(ABC):
         time, and knowing which point to ask about is the hard part.
 
         Nets are returned in name order, power and named nets included.
+        """
+
+    @abstractmethod
+    def board_components(self) -> list[BoardComponent]:
+        """Physical components and footprint fields from the actual netlist.
+
+        One result per reference, including hierarchical and multi-unit parts.
+        A blank footprint means the schematic has not selected a land pattern.
         """
 
     @abstractmethod

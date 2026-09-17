@@ -24,7 +24,7 @@ def sync_board_nets(
     NC pins lose any old board assignment. The write is atomic and refuses
     changed net assignments when existing copper could retain old net names.
     `dry_run` reports the same changes without writing, including whether
-    existing copper blocks their application. Save the board separately.
+    existing copper blocks their application. Successful MCP writes autosave.
     """
     try:
         sheet = _sheet(schematic_path)

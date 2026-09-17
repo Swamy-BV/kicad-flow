@@ -28,7 +28,6 @@ from .board_tools.footprints import (
     remove_footprints,
     rotate_footprints,
     set_footprint_fields,
-    set_pad_nets,
 )
 from .board_tools.graphics import (
     add_board_texts,
@@ -98,6 +97,7 @@ from .board_tools.session import _board as _board
 from .board_tools.session import _fail as _fail
 from .board_tools.session import _key as _key
 from .board_tools.session import new_board, save_board
+from .board_tools.transfer import update_board_from_schematic
 from .board_tools.validation import check_board
 
 __all__ = [
@@ -148,9 +148,9 @@ __all__ = [
     "set_footprint_fields",
     "set_net_class_patterns",
     "set_net_classes",
-    "set_pad_nets",
     "set_stackup",
     "sync_board_nets",
     "unrouted_connections",
+    "update_board_from_schematic",
     "what_is_on_board",
 ]
