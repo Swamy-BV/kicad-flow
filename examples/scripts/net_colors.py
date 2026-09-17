@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import schematic_nets
+from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -47,7 +47,7 @@ async def main() -> None:
         before_nets = (await call("list_nets", path=sheet))["nets"]
         assert {"VBUS", "DATA", "VBUS_A"} <= {n["name"] for n in before_nets}
         await call("new_board", path=board)
-        await call("place_footprints", path=board, footprints=[
+        await export_footprints(call, board, [
             {"fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": ref,
              "x": x, "y": 10.0}
             for ref, x in (("R1", 10.0), ("R2", 20.0))

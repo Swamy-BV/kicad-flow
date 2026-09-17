@@ -93,22 +93,6 @@ class GraphicMove(_StrictModel):
     dy: float = Field(description="Vertical offset in mm.")
 
 
-class NewFootprint(_StrictModel):
-    """One footprint placement."""
-
-    fp_id: str = Field(description="Library footprint id.")
-    ref: str = Field(description="Reference designator, e.g. R1.")
-    x: float = Field(description="Anchor X in mm.")
-    y: float = Field(description="Anchor Y in mm.")
-    anchor: Literal["origin", "courtyard_center"] = Field(
-        default="origin",
-        description="Whether x/y names the library origin or physical centre.",
-    )
-    rotation: float = Field(default=0.0, description="Any angle in degrees.")
-    side: str = Field(default="F", description="F or B.")
-    value: str = Field(default="", description="Value field.")
-
-
 class SchematicPlacement(_StrictModel):
     """Caller-chosen pose for a schematic component missing from the PCB."""
 

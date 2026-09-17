@@ -45,7 +45,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import schematic_nets
+from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -235,6 +235,9 @@ async def build(client: Client) -> int:
         parts=[{"lib_id": "FixtureAssets:Fixture_LED", "ref": "D1",
                 "x": 25.4, "y": 25.4}],
     )
+    await call("set_fields", path=local_sheet, fields=[
+        {"ref": "D1", "name": "Footprint", "value": "FixtureAssets:Fixture_LED"},
+    ])
     local_pins = placed_local_symbol.get("parts", [{}])[0].get("pins", [])
     await call(
         "add_no_connects", path=local_sheet,
@@ -242,11 +245,10 @@ async def build(client: Client) -> int:
     )
     await call("save_sheet", path=local_sheet)
     await call("new_board", path=local_board, layers=2)
-    placed_local_footprint = await call(
-        "place_footprints", path=local_board,
-        footprints=[{"fp_id": "FixtureAssets:Fixture_LED", "ref": "D1",
-                     "x": 25.4, "y": 25.4}],
-    )
+    await call("update_board_from_schematic", schematic_path=local_sheet,
+               board_path=local_board,
+               placements=[{"ref": "D1", "x": 25.4, "y": 25.4}])
+    placed_local_footprint = await call("list_footprints", path=local_board)
     await call(
         "add_graphics", path=local_board,
         graphics=[{"kind": "rectangle", "layer": "Edge.Cuts",
@@ -850,9 +852,9 @@ async def build(client: Client) -> int:
     flipped = (flipped_result.get("flipped") or [{}])[0]
     same("flip: side", flipped.get("side"), "B")
     await call("set_footprint_fields", path=board, fields=[{
-        "ref": ref, "name": "Value", "value": "AUDIT"}])
+        "ref": ref, "name": "MPN", "value": "AUDIT"}])
     fields = await call("get_footprint_fields", path=board, ref=ref)
-    same("set/get footprint field", fields.get("fields", {}).get("Value"),
+    same("set/get footprint field", fields.get("fields", {}).get("MPN"),
          "AUDIT")
     await call("move_footprint_fields", path=board, moves=[{
         "ref": ref, "name": "Reference", "dx": 0.0, "dy": -1.2,
@@ -865,7 +867,7 @@ async def build(client: Client) -> int:
     await call("move_footprints", path=board,
                moves=[{"ref": ref, "x": x_last, "y": y_last}])
     await call("set_footprint_fields", path=board, fields=[{
-        "ref": ref, "name": "Value", "value": "RED"}])
+        "ref": ref, "name": "MPN", "value": ""}])
     restored = await call("get_pad", path=board, ref=ref, pad="2")
     same("restore: pad x", restored.get("x"), before.get("x"))
     same("restore: pad y", restored.get("y"), before.get("y"))
@@ -978,7 +980,7 @@ async def build(client: Client) -> int:
     await call("move_graphics", path=scratch, moves=[{
         "uuid": graphic_uuid, "dx": 1, "dy": 0}])
     await call("remove_graphics", path=scratch, uuids=[graphic_uuid])
-    await call("place_footprints", path=scratch, footprints=[
+    await export_footprints(call, scratch, [
         {"fp_id": LAYER_TEST_FP, "ref": "LF", "x": 10, "y": 10,
          "anchor": "courtyard_center", "side": "F"},
         {"fp_id": LAYER_TEST_FP, "ref": "LB", "x": 10, "y": 10,
@@ -1102,7 +1104,7 @@ async def build(client: Client) -> int:
          replacement.get("tracks", [{}])[0].get("uuid") != scratch_track_uuid,
          True)
     # The removers, where removing something costs nothing.
-    centred = await call("place_footprints", path=scratch, footprints=[
+    centred = await export_footprints(call, scratch, [
         {"fp_id": ASYMMETRIC_FP, "ref": "DX", "x": 5, "y": 15,
          "anchor": "courtyard_center", "value": "SPARE"},
         {"fp_id": ASYMMETRIC_FP, "ref": "DY", "x": 5, "y": 15,

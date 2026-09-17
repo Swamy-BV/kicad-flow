@@ -24,7 +24,6 @@ from .board_tools.footprints import (
     measure_placement,
     move_footprint_fields,
     move_footprints,
-    place_footprints,
     remove_footprints,
     rotate_footprints,
     set_footprint_fields,
@@ -58,7 +57,6 @@ from .board_tools.models import NetClassAssignmentSpec as NetClassAssignmentSpec
 from .board_tools.models import NetClassSpec as NetClassSpec
 from .board_tools.models import NetPairSpec as NetPairSpec
 from .board_tools.models import NewBoardText as NewBoardText
-from .board_tools.models import NewFootprint as NewFootprint
 from .board_tools.models import NewTrack as NewTrack
 from .board_tools.models import NewVia as NewVia
 from .board_tools.models import NewZone as NewZone
@@ -131,7 +129,6 @@ __all__ = [
     "move_footprints",
     "move_graphics",
     "new_board",
-    "place_footprints",
     "query_board_region",
     "refill_zones",
     "remove_copper",

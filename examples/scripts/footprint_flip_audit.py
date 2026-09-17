@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import export_footprints
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -96,7 +97,7 @@ async def main() -> None:
                         "side": side,
                     }
 
-        await call("place_footprints", path=BOARD, footprints=requests)
+        await export_footprints(call, BOARD, requests)
         await call("move_footprint_fields", path=BOARD, moves=[
             {"ref": item["ref"], "name": "Reference", "dx": 0, "dy": 0,
              "hide": True}

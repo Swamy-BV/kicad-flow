@@ -51,8 +51,9 @@ async def batch(
     tool name. The `batch` wrapper is transport only and is not shown when its
     operations can be recorded individually.
 
-    **Two requests, not one.** `add_components` and `place_footprints` return the
-    pin and pad positions that later calls must aim at, so place first, read
+    **Two requests, not one.** `add_components` reports pins and
+    `get_footprint` reports pads after `update_board_from_schematic`; later
+    calls must aim at those reported positions. Export first, read
     the reply, then send the wires or tracks as a second typed list call. A wire
     drawn to a coordinate you guessed instead of one the server reported looks
     connected and is not.

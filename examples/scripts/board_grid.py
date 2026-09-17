@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import export_footprints
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -26,7 +27,7 @@ async def main() -> None:
 
         created = await call("new_board", path=path)
         assert created["placement_grid_mm"] == 0.1
-        await call("place_footprints", path=path, footprints=[
+        await export_footprints(call, path, [
             {"fp_id": resistor, "ref": "R1", "x": 20.2, "y": 20},
             {"fp_id": resistor, "ref": "R2", "x": 24.35, "y": 20},
         ])

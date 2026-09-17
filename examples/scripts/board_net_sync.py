@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import export_footprints
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -22,9 +23,9 @@ async def main() -> None:
     Path(board).unlink(missing_ok=True)
 
     async with Client(mcp) as client:
-        assert "set_pad_nets" not in {
-            item.name for item in await client.list_tools()
-        }
+        available = {item.name for item in await client.list_tools()}
+        assert "set_pad_nets" not in available
+        assert "place_footprints" not in available
         async def call(name: str, **kwargs: Any) -> dict[str, Any]:
             data = (await client.call_tool(name, kwargs)).data
             assert data["ok"], data
@@ -60,7 +61,7 @@ async def main() -> None:
         )
 
         await call("new_board", path=partial)
-        await call("place_footprints", path=partial, footprints=[
+        await export_footprints(call, partial, [
             {"fp_id": footprint, "ref": "R1", "x": 20, "y": 20},
         ])
         missing = (await client.call_tool("sync_board_nets", {
@@ -84,6 +85,14 @@ async def main() -> None:
         )
         assert exported["created"] and exported["changed_pad_count"] == 2
         assert Path(board).exists()
+        for name in ("Footprint", "Value", "Reference"):
+            refused_field = (await client.call_tool("set_footprint_fields", {
+                "path": board,
+                "fields": [{"ref": "R1", "name": name, "value": "WRONG"}],
+            })).data
+            assert not refused_field["ok"] and "belongs to the schematic" in (
+                refused_field["error"]
+            )
         back = await call("get_footprint", path=board, ref="R2")
         assert back["side"] == "B" and back["rotation"] == 90
         repeated = await call(

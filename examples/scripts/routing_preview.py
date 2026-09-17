@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import schematic_nets
+from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -42,7 +42,7 @@ async def main() -> None:
     async with Client(mcp) as client:
         async def call(tool: str, **args: Any) -> dict[str, Any]:
             arguments = {"path": path, **args}
-            if tool == "update_board_from_schematic":
+            if tool in ("update_board_from_schematic", "footprint_pads"):
                 arguments.pop("path")
             result = (await client.call_tool(tool, arguments)).data
             assert result["ok"], result
@@ -70,7 +70,7 @@ async def main() -> None:
         await call("set_board_constraints", rules=[{
             "name": "P width", "condition": "A.NetName == 'P'",
             "constraints": [{"kind": "track_width", "min": 0.09}]}])
-        await call("place_footprints", footprints=[{
+        await export_footprints(call, path, [{
             "fp_id": "TestPoint:TestPoint_Pad_D1.0mm", "ref": ref, "x": x, "y": y}
             for ref, x, y in (("A1", 10, 20), ("A2", 30, 20),
                               ("B1", 10, 22), ("B2", 30, 22), ("G1", 40, 25))])

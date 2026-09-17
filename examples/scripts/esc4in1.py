@@ -281,6 +281,13 @@ async def build(client: Client) -> int:
             ((71.12, 35.56), (91.44, 35.56), (111.76, 35.56), (132.08, 35.56)),
             start=101,
         )
+    ] + [
+        {"lib_id": "Mechanical:MountingHole", "ref": f"H{index}",
+         "x": x, "y": y, "value": "M4"}
+        for index, (x, y) in enumerate(
+            ((220.98, 127.0), (243.84, 127.0),
+             (220.98, 152.4), (243.84, 152.4)), start=1
+        )
     ]
     root_measure = await call("measure_schematic_placement", path=root, parts=root_plan)
     if not root_measure.get("clean", False):
@@ -296,6 +303,7 @@ async def build(client: Client) -> int:
     )
     await call("set_fields", path=root, fields=[
         {"ref": part["ref"], "name": "Footprint", "value": (
+            MOUNT if part["ref"].startswith("H") else
             FC_HEADER if part["ref"] == "J3" else
             BATTERY_PAD if part["ref"].startswith("J") else BULK_C_FP
         )}
@@ -951,7 +959,7 @@ async def build(client: Client) -> int:
                     "value": f"M{motor}_{PHASES[phase_index]}",
                 }
             )
-    await call("place_footprints", path=board, footprints=fixed[:4])
+    schematic_placements.extend(fixed[:4])
     await place_stage("fixed", fixed[4:])
 
     driver_positions = {

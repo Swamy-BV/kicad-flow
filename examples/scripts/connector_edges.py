@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from _board_fixture import export_footprints
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -35,7 +36,7 @@ async def main() -> None:
         await call("add_graphics", path=path, graphics=[{
             "kind": "rectangle", "layer": "Edge.Cuts",
             "x1": 10, "y1": 10, "x2": 40, "y2": 34}])
-        await call("place_footprints", path=path, footprints=[{
+        await export_footprints(call, path, [{
             "fp_id": connector, "ref": "J1", "x": 25, "y": 34 - courtyard_y}])
         initial = await call("get_footprint", path=path, ref="J1")
         assert abs(34 - max(p["y"] for p in initial["fabrication_polygon"])
@@ -69,8 +70,12 @@ async def main() -> None:
         await call("move_footprint_fields", path=path, moves=[
             {"ref": "J1", "name": "Reference", "dx": 0, "dy": 12},
             {"ref": "J1", "name": "Value", "dx": 0, "dy": 16}])
-        await call("set_footprint_fields", path=path, fields=[{
+        source = str(Path(path).with_suffix(".placement.kicad_sch"))
+        await call("set_fields", path=source, fields=[{
             "ref": "J1", "name": "Value", "value": "LONG LABEL IN FRONT OF CONNECTOR"}])
+        await call("save_sheet", path=source)
+        await call("update_board_from_schematic", schematic_path=source,
+                   board_path=path)
         labelled = await call("get_footprint", path=path, ref="J1")
         for key in ("fabrication_polygon", "courtyard_polygon"):
             assert labelled[key] == flush[key], key
@@ -114,7 +119,7 @@ async def main() -> None:
                 assert abs(max(p["y"] for p in aligned["fabrication_polygon"])
                            - 34) < 2e-6
 
-        await call("place_footprints", path=path, footprints=[{
+        await export_footprints(call, path, [{
             "fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": "R1", "x": 50, "y": 20}])
         other = await call("measure_placement", path=path, edge_exempt_refs=["J1"])
         assert not other["valid"] and any(

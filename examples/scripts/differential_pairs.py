@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import schematic_nets
+from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -53,7 +53,7 @@ async def main() -> None:
         await call("add_graphics", path=path, graphics=[{
             "kind": "rectangle", "layer": "Edge.Cuts", "x1": 0, "y1": 0,
             "x2": 40, "y2": 40}])
-        await call("place_footprints", path=path, footprints=[{
+        await export_footprints(call, path, [{
             "fp_id": "TestPoint:TestPoint_Pad_D1.0mm", "ref": ref, "x": x, "y": y}
             for ref, x, y in (("A1", 10, 20), ("A2", 30, 20),
                               ("B1", 10, 22), ("B2", 30, 22))])

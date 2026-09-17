@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import schematic_nets
+from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -26,7 +26,7 @@ async def main() -> None:
             return data
 
         await call("new_board", path=path)
-        await call("place_footprints", path=path, footprints=[
+        await export_footprints(call, path, [
             {"fp_id": resistor, "ref": "R1", "x": 20, "y": 20},
             {"fp_id": resistor, "ref": "R2", "x": 20, "y": 20, "side": "B"},
         ])

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import schematic_nets
+from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -64,7 +64,7 @@ async def main() -> None:
         await call("add_graphics", path=pcb, graphics=[
             {"kind": "rectangle", "layer": "Edge.Cuts",
              "x1": 10, "y1": 10, "x2": 60, "y2": 60}])
-        placed = await call("place_footprints", path=pcb, footprints=[
+        placed = await export_footprints(call, pcb, [
             {"fp_id": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
              "ref": "J1", "x": 25, "y": 25, "rotation": 45},
             {"fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": "R1",

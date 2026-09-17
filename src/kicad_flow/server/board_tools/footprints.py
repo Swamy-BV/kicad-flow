@@ -16,7 +16,6 @@ from .models import (
     FootprintFlip,
     FootprintMove,
     FootprintTurn,
-    NewFootprint,
     PadNet,
     PlacementCandidate,
 )
@@ -27,6 +26,10 @@ from .session import (
     _board,
     _fail,
 )
+
+# No manual footprint-creation MCP tool: the schematic owns footprint IDs.
+# update_board_from_schematic creates them; the tools below only arrange or
+# inspect footprints that already exist on the board.
 
 
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
@@ -64,7 +67,7 @@ def footprint_pads(fp_id: str, project_dir: str = "") -> dict[str, Any]:
     box, which includes silkscreen, and not the pad extent, which excludes the
     body. Its centre and polygon are local to the footprint origin here. For
     positions to actually ROUTE to, place it and read the board-coordinate
-    pads and courtyard that `place_footprints` returns.
+    pads and courtyard from `get_footprint` after schematic export.
     fabrication_polygon separately bounds fabrication graphics, excluding all
     text. It is a drawn envelope, not a verified body or connector mating datum.
     Missing/unsupported graphics return an empty polygon, never a guessed body.
@@ -74,47 +77,6 @@ def footprint_pads(fp_id: str, project_dir: str = "") -> dict[str, Any]:
     except _ERRORS as exc:
         return _fail(exc)
     return {"ok": True, **found.as_dict()}
-
-
-@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def place_footprints(path: str, footprints: list[NewFootprint]) -> dict[str, Any]:
-    """Place footprints on the board in order.
-
-    This applies an already-decided placement pass. Before the first call,
-    query every unique footprint with `footprint_pads` and compose a complete
-    per-face table that reserves mechanical, routing, power and thermal space.
-    This primitive does not imagine, score, spread or repair placements.
-
-    **The returned pads are the point of this call.** Each carries the board
-    position to route to, with rotation and side already applied.
-
-    Set `anchor="courtyard_center"` to make `(x, y)` the part's physical
-    courtyard centre. The legacy default is `origin`, which may sit at pad 1.
-    Every reply reports both coordinates and the rotated courtyard polygon.
-
-    Args:
-        path: The open board.
-        footprints: Placements. Rotation may be any angle; side is F or B.
-    """
-    try:
-        board = _board(path)
-    except _ERRORS as exc:
-        return _fail(exc)
-    return _atomic_items(
-        board,
-        footprints,
-        "footprints",
-        lambda target, item: target.place(
-            item.fp_id,
-            item.ref,
-            item.x,
-            item.y,
-            anchor=item.anchor,
-            rotation=item.rotation,
-            side=item.side,
-            value=item.value,
-        ).as_dict(),
-    )
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
@@ -351,13 +313,18 @@ def get_footprint_fields(path: str, ref: str) -> dict[str, Any]:
 def set_footprint_fields(
     path: str, fields: list[FootprintFieldValue]
 ) -> dict[str, Any]:
-    """Set footprint fields, e.g. ``Value`` or ``LCSC``."""
+    """Set board-local fields; schematic-owned identity and value stay fixed."""
     try:
         board = _board(path)
     except _ERRORS as exc:
         return _fail(exc)
 
     def each(target: Board, field: FootprintFieldValue) -> dict[str, Any]:
+        if field.name in {"Reference", "Value", "Footprint"}:
+            raise ValueError(
+                f"{field.name} belongs to the schematic; use "
+                "update_board_from_schematic"
+            )
         values = target.set_field(field.ref, field.name, field.value)
         return {"ref": field.ref, "fields": values}
 
