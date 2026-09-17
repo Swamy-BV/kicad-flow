@@ -23,7 +23,7 @@ async def main() -> None:
     """Read geometry/rules, repair a conflict, and check scope-safe deltas."""
     root = Path("out/local-observations").resolve()
     root.mkdir(parents=True, exist_ok=True)
-    sch, pcb = str(root / "local.kicad_sch"), str(root / "local.kicad_pcb")
+    sch, pcb = str(root / "local.kicad_sch"), str(root / "local-board.kicad_pcb")
     async with Client(mcp) as client:
         async def call(tool: str, **args: Any) -> dict[str, Any]:
             data = (await client.call_tool(tool, args)).data
@@ -67,12 +67,13 @@ async def main() -> None:
         placed = await export_footprints(call, pcb, [
             {"fp_id": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
              "ref": "J1", "x": 25, "y": 25, "rotation": 45},
-            {"fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": "R1",
+            {"fp_id": "Resistor_SMD:R_0603_1608Metric", "lib_id": "Device:R",
+             "ref": "R1",
              "x": 45, "y": 45, "rotation": 90, "side": "B"},
         ])
         await schematic_nets(call, pcb, [
             {"ref": ref, "pad": "1", "net": "SIGNAL"} for ref in ("J1", "R1")
-        ], two_pin_refs={"R1"})
+        ])
         await call("set_net_classes", path=pcb,
                    classes=[{"name": "Signal", "track_width": 0.3}])
         await call("assign_net_classes", path=pcb,

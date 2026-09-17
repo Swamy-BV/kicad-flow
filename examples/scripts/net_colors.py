@@ -6,7 +6,6 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from _board_fixture import export_footprints, schematic_nets
 from fastmcp import Client
 
 from kicad_flow.server import mcp
@@ -43,20 +42,24 @@ async def main() -> None:
             {"x": 50.8, "y": y, "text": net, "kind": "global"}
             for y, net in ((50.8, "VBUS"), (76.2, "DATA"), (101.6, "VBUS_A"))
         ])
+        await call("add_no_connects", path=sheet, points=[
+            {"x": pin["x"], "y": pin["y"]}
+            for part in parts for pin in part["pins"] if pin["number"] == "2"
+        ])
+        await call("set_fields", path=sheet, fields=[
+            {"ref": f"R{i}", "name": "Footprint",
+             "value": "Resistor_SMD:R_0603_1608Metric"}
+            for i in range(1, 4)
+        ])
         await call("save_sheet", path=sheet)
         before_nets = (await call("list_nets", path=sheet))["nets"]
         assert {"VBUS", "DATA", "VBUS_A"} <= {n["name"] for n in before_nets}
         await call("new_board", path=board)
-        await export_footprints(call, board, [
-            {"fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": ref,
-             "x": x, "y": 10.0}
-            for ref, x in (("R1", 10.0), ("R2", 20.0))
-        ])
-        await schematic_nets(call, board, [
-            {"ref": "R1", "pad": "1", "net": "VBUS"},
-            {"ref": "R1", "pad": "2", "net": "DATA"},
-            {"ref": "R2", "pad": "1", "net": "VBUS_A"},
-        ], two_pin_refs={"R1", "R2"})
+        await call("update_board_from_schematic", schematic_path=sheet,
+                   board_path=board, placements=[
+                       {"ref": f"R{i}", "x": 10.0 * i, "y": 10.0}
+                       for i in range(1, 4)
+                   ])
         await call("save_board", path=board)
         await call("set_net_classes", path=board, classes=[
             {"name": "Power", "track_width": 0.8,

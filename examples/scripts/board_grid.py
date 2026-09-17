@@ -28,8 +28,10 @@ async def main() -> None:
         created = await call("new_board", path=path)
         assert created["placement_grid_mm"] == 0.1
         await export_footprints(call, path, [
-            {"fp_id": resistor, "ref": "R1", "x": 20.2, "y": 20},
-            {"fp_id": resistor, "ref": "R2", "x": 24.35, "y": 20},
+            {"fp_id": resistor, "lib_id": "Device:R",
+             "ref": "R1", "x": 20.2, "y": 20},
+            {"fp_id": resistor, "lib_id": "Device:R",
+             "ref": "R2", "x": 24.35, "y": 20},
         ])
         initial = await call("get_board_grid", path=path)
         assert initial["spacing_mm"] == 0.1

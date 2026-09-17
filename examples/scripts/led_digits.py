@@ -1040,6 +1040,9 @@ async def build(client: Client) -> int:
     await call("remove_copper", path=scratch,
                uuid=layer_via.get("vias", [{}])[0].get("uuid", ""))
     await call("remove_footprints", path=scratch, refs=["LF", "LB"])
+    scratch_source = str(Path(scratch).with_suffix(".kicad_sch"))
+    await call("remove_components", path=scratch_source, refs=["LF", "LB"])
+    await call("save_sheet", path=scratch_source)
     proposed_copper = await call("check_board", path=scratch, tracks=[{
         "x1": 2, "y1": 2, "x2": 18, "y2": 2,
         "layer": "F.Cu", "width": 0.25, "net": "N1"}], vias=[{
@@ -1141,6 +1144,8 @@ async def build(client: Client) -> int:
     n_before = len((await call("list_footprints", path=scratch))
                    .get("footprints", []))
     await call("remove_footprints", path=scratch, refs=["DX", "DY"])
+    await call("remove_components", path=scratch_source, refs=["DX", "DY"])
+    await call("save_sheet", path=scratch_source)
     n_after = len((await call("list_footprints", path=scratch))
                   .get("footprints", []))
     same("remove_footprints dropped two", n_before - n_after, 2)
@@ -1148,7 +1153,7 @@ async def build(client: Client) -> int:
     # need hundreds of scalar operations nested inside it.
     await call("batch", ops=[{
         "tool": "list_footprints", "args": {"path": scratch}}])
-    spare = str(OUT / "_scratch.kicad_sch")
+    spare = str(OUT / "_scratch_edit.kicad_sch")
     await call("new_sheet", path=spare, title="scratch")
     await call("add_components", path=spare, parts=[
         {"lib_id": "Device:R", "ref": "RX", "x": 50, "y": 50}])

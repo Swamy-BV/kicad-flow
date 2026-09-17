@@ -62,7 +62,8 @@ async def main() -> None:
 
         await call("new_board", path=partial)
         await export_footprints(call, partial, [
-            {"fp_id": footprint, "ref": "R1", "x": 20, "y": 20},
+            {"fp_id": footprint, "lib_id": "Device:R",
+             "ref": "R1", "x": 20, "y": 20},
         ])
         missing = (await client.call_tool("sync_board_nets", {
             "schematic_path": sheet, "board_path": partial,

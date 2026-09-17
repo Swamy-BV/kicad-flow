@@ -27,8 +27,10 @@ async def main() -> None:
 
         await call("new_board", path=path)
         await export_footprints(call, path, [
-            {"fp_id": resistor, "ref": "R1", "x": 20, "y": 20},
-            {"fp_id": resistor, "ref": "R2", "x": 20, "y": 20, "side": "B"},
+            {"fp_id": resistor, "lib_id": "Device:R",
+             "ref": "R1", "x": 20, "y": 20},
+            {"fp_id": resistor, "lib_id": "Device:R",
+             "ref": "R2", "x": 20, "y": 20, "side": "B"},
         ])
         front = (await call("get_footprint", path=path, ref="R1"))["pads"]
         back = (await call("get_footprint", path=path, ref="R2"))["pads"]
@@ -40,7 +42,7 @@ async def main() -> None:
         await schematic_nets(call, path, [
             {"ref": "R1", "pad": pair[0]["number"], "net": "SIGNAL"},
             {"ref": "R2", "pad": pair[1]["number"], "net": "SIGNAL"},
-        ], two_pin_refs={"R1", "R2"})
+        ])
         x, y = pair[0]["x"], pair[0]["y"]
         separated = await call("what_is_on_board", path=path, x=x, y=y)
         assert not separated["connected"], separated

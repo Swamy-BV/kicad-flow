@@ -70,9 +70,12 @@ async def main() -> None:
         await call("move_footprint_fields", path=path, moves=[
             {"ref": "J1", "name": "Reference", "dx": 0, "dy": 12},
             {"ref": "J1", "name": "Value", "dx": 0, "dy": 16}])
-        source = str(Path(path).with_suffix(".placement.kicad_sch"))
+        source = str(Path(path).with_suffix(".kicad_sch"))
         await call("set_fields", path=source, fields=[{
             "ref": "J1", "name": "Value", "value": "LONG LABEL IN FRONT OF CONNECTOR"}])
+        await call("move_fields", path=source, moves=[{
+            "ref": "J1", "name": "Value", "dx": 0, "dy": -10.16,
+        }])
         await call("save_sheet", path=source)
         await call("update_board_from_schematic", schematic_path=source,
                    board_path=path)
@@ -120,7 +123,8 @@ async def main() -> None:
                            - 34) < 2e-6
 
         await export_footprints(call, path, [{
-            "fp_id": "Resistor_SMD:R_0603_1608Metric", "ref": "R1", "x": 50, "y": 20}])
+            "fp_id": "Resistor_SMD:R_0603_1608Metric", "lib_id": "Device:R",
+            "ref": "R1", "x": 50, "y": 20}])
         other = await call("measure_placement", path=path, edge_exempt_refs=["J1"])
         assert not other["valid"] and any(
             item["ref"] == "R1" for item in other["edge_violations"])
@@ -129,7 +133,8 @@ async def main() -> None:
                                  "ref": "R1", "x": aligned["x"], "y": aligned["y"],
                                  "side": aligned["side"]}])
         assert not overlap["valid"] and overlap["overlap_count"]
-        await call("remove_footprints", path=path, refs=["R1"])
+        await call("move_footprints", path=path,
+                   moves=[{"ref": "R1", "x": 35, "y": 20}])
         await call("flip_footprints", path=path, flips=[{"ref": "J1", "side": "F"}])
         await call("rotate_footprints", path=path, turns=[{"ref": "J1", "rotation": 0}])
         await call("move_footprints", path=path,
