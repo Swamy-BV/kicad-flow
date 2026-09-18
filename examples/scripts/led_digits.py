@@ -1250,6 +1250,21 @@ async def build(client: Client) -> int:
     Path(via_scratch).with_suffix(".kicad_pro").unlink(missing_ok=True)
     Path(via_scratch).with_suffix(".kicad_dru").unlink(missing_ok=True)
     Path(spare).unlink(missing_ok=True)
+    # The external router is optional in CI. Exercise export and the two
+    # dependency/input refusals here; freerouting_exchange.py covers a real
+    # DSN -> SES -> PCB round trip when a JAR is configured.
+    route_design = str(OUT / "led_digits-routing.dsn")
+    exported = await call("export_routing_design", path=board,
+                          output_file=route_design)
+    if not exported or not Path(route_design).is_file():
+        wrong.append("routing design export did not produce a DSN")
+    await refusal("run_freerouting", dsn_path=route_design,
+                  ses_path=str(OUT / "missing-routing.ses"),
+                  jar_path=str(OUT / "missing-freerouting.jar"))
+    await refusal("import_routing_session", path=board,
+                  session_file=str(OUT / "missing-routing.ses"),
+                  output_file=str(OUT / "missing-routed.kicad_pcb"))
+    Path(route_design).unlink(missing_ok=True)
     await call("render_board", path=board,
                output_file=str(OUT / "led_digits-top.png"), side="top")
     await call("render_board", path=board,

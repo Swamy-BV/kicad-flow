@@ -46,6 +46,7 @@ from . import graphics as _graphics
 from . import grid as _grid
 from . import inspection as _inspection
 from . import placement as _placement
+from . import routing_exchange as _routing_exchange
 from . import settings as _settings
 from . import validation as _validation
 from ._constants import (
@@ -604,6 +605,16 @@ class KiCadBoard(Board):
     def unrouted(self) -> list[Connection]:
         """A minimum set of pad-group separations, nearest endpoints first."""
         return _connectivity.unrouted(self)
+
+    def export_routing_design(self, output_file: str | Path) -> Path:
+        """Export the in-memory board to an external routing design file."""
+        return _routing_exchange.export_design(self, output_file)
+
+    def import_routing_session(
+        self, session_file: str | Path, output_file: str | Path
+    ) -> Path:
+        """Import an external router's result to a separate board file."""
+        return _routing_exchange.import_session(self, session_file, output_file)
 
     def _pad_copper_layers(self, pad: Pad) -> tuple[str, ...]:
         """Copper layers a pad actually reaches."""

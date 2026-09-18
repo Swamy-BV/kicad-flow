@@ -70,6 +70,11 @@ from .board_tools.models import _GraphicBase as _GraphicBase
 from .board_tools.models import _StrictModel as _StrictModel
 from .board_tools.netlist import sync_board_nets
 from .board_tools.rendering import render_board, render_board_layout
+from .board_tools.routing_exchange import (
+    export_routing_design,
+    import_routing_session,
+    run_freerouting,
+)
 from .board_tools.rules import (
     assign_net_classes,
     get_board_grid,
@@ -142,6 +147,7 @@ __all__ = [
     "add_zones",
     "assign_net_classes",
     "check_board",
+    "export_routing_design",
     "find_footprint",
     "flip_footprints",
     "footprint_pads",
@@ -151,6 +157,7 @@ __all__ = [
     "get_footprint_fields",
     "get_pad",
     "get_stackup",
+    "import_routing_session",
     "list_board_constraints",
     "list_board_nets",
     "list_copper",
@@ -173,6 +180,7 @@ __all__ = [
     "render_board",
     "render_board_layout",
     "rotate_footprints",
+    "run_freerouting",
     "save_board",
     "set_board_constraints",
     "set_board_grid",

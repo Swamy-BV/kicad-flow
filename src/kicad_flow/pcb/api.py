@@ -513,6 +513,20 @@ class Board(ABC):
         """
 
     @abstractmethod
+    def export_routing_design(self, output_file: str | Path) -> Path:
+        """Export the current board for an external router without changing it."""
+
+    @abstractmethod
+    def import_routing_session(
+        self, session_file: str | Path, output_file: str | Path
+    ) -> Path:
+        """Apply an external routing session to a separate board file.
+
+        The source stays untouched; the caller inspects the resulting board
+        before deciding whether to use it.
+        """
+
+    @abstractmethod
     def check(self, *, schematic_parity: bool = False) -> list[Finding]:
         """Every rule violation, named by part and pad.
 

@@ -8,6 +8,8 @@ actually produced.
 The boundary is intentional: the caller chooses the circuit, placement and
 routing; KiCadFlow handles file-format mechanics, readback and validation. It
 does not contain an autoplacer, autorouter or inferred design policy.
+An [optional FreeRouting exchange](docs/freerouting.md) lets a caller explicitly
+export DSN, run the external router and inspect a separate imported PCB.
 
 ## Examples
 

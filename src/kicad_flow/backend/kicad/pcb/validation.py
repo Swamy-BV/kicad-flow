@@ -96,7 +96,9 @@ def _routing_findings(self: BoardState) -> list[Finding]:
     seen: dict[tuple[str, str, tuple[float, float], tuple[float, float]], Track] = {}
     for index, track in enumerate(tracks):
         start, end = key(track.start), key(track.end)
-        if start == end:
+        # A valid sub-micron SES segment can collapse when rounded to the
+        # 0.001 mm reporting grid. Zero length means identical stored points.
+        if track.start == track.end:
             out.append(
                 Finding(
                     severity="error",
