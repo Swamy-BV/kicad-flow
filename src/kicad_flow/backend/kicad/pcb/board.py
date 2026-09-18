@@ -72,6 +72,12 @@ class KiCadBoard(Board):
         self._tree = tree
         self._defs: dict[str, Node] = {}
 
+    def _copy_to(self, path: Path) -> KiCadBoard:
+        """An isolated in-memory copy for read-only candidate checks."""
+        duplicate = KiCadBoard(path, copy.deepcopy(self._tree))
+        duplicate._defs = self._defs
+        return duplicate
+
     @property
     def path(self) -> Path:
         """Where this board will be written."""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.schematic.types import (
     Point,
@@ -19,13 +19,11 @@ from ._nodes import (
     _set,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
 def _property(
-    self: KiCadSheet,
+    self: SheetState,
     name: str,
     value: str,
     x: float,
@@ -52,7 +50,7 @@ def _property(
 
 
 def _layout_fields(
-    self: KiCadSheet,
+    self: SheetState,
     node: Node,
     lib_id: str,
     rotation: float,
@@ -139,7 +137,7 @@ def _justify(prop: Node, justify: str) -> None:
 
 
 def remove_field(
-    self: KiCadSheet, ref: str, name: str, *, unit: int = 1
+    self: SheetState, ref: str, name: str, *, unit: int = 1
 ) -> dict[str, str]:
     """Delete a field from a part and return the fields it has left."""
     node = self._require(ref, unit)
@@ -150,7 +148,7 @@ def remove_field(
     return self.fields(ref)
 
 
-def set_field(self: KiCadSheet, ref: str, name: str, value: str) -> dict[str, str]:
+def set_field(self: SheetState, ref: str, name: str, value: str) -> dict[str, str]:
     """Set one of a part's fields and return all of them."""
     node = self._require(ref)
     prop = self._prop_of(node, name)
@@ -163,7 +161,7 @@ def set_field(self: KiCadSheet, ref: str, name: str, value: str) -> dict[str, st
 
 
 def move_field(
-    self: KiCadSheet,
+    self: SheetState,
     ref: str,
     name: str,
     dx: float,
@@ -191,7 +189,7 @@ def move_field(
     return where
 
 
-def fields(self: KiCadSheet, ref: str) -> dict[str, str]:
+def fields(self: SheetState, ref: str) -> dict[str, str]:
     """Every field on a part, by name."""
     node = self._require(ref)
     return {_text(prop, 0): _text(prop, 1) for prop in node.get_all("property")}

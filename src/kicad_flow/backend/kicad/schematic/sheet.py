@@ -70,6 +70,19 @@ class KiCadSheet(Sheet):
             if node.get("uuid") is not None
         }
 
+    def _copy(self) -> KiCadSheet:
+        """An isolated in-memory copy for placement measurements."""
+        duplicate = KiCadSheet(
+            self._path, copy.deepcopy(self._tree), self._paper, self._instance_path
+        )
+        duplicate._defs = dict(self._defs)
+        return duplicate
+
+    def _open_child(self, path: Path) -> KiCadSheet:
+        """Read a child sheet as the same concrete backend type."""
+        tree = loads(path.read_text(encoding="utf-8"))
+        return KiCadSheet(path, tree, _text(tree.get("paper"), 0, "A4"))
+
     def _uid_for(self, key: str) -> str:
         """A stable uuid for *key*, made unique if that key repeats."""
         n = 1

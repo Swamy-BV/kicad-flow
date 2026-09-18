@@ -6,7 +6,6 @@ import hashlib
 import json
 import math
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from kicad_flow.schematic.types import (
@@ -28,9 +27,7 @@ from ._geometry import (
     _text_box,
 )
 from ._nodes import _LABEL_NODE, PAPER, _f, _text
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
 def _bounds(points: tuple[Point, ...]) -> SceneBounds:
@@ -67,7 +64,7 @@ def _text_object(node: Node, identity: str, kind: str, *,
     )
 
 
-def _objects(sheet: KiCadSheet) -> Iterator[SceneObject]:
+def _objects(sheet: SheetState) -> Iterator[SceneObject]:
     """Read each root object once; symbol definitions remain backend-cached."""
     labels = {value: key for key, value in _LABEL_NODE.items()}
     for node in sheet._tree.items:
@@ -210,7 +207,7 @@ def _findings(objects: list[SceneObject]) -> tuple[SceneFinding, ...]:
     return tuple(sorted(findings, key=lambda f: f.id))
 
 
-def body_findings(sheet: KiCadSheet, page: str) -> list[LayoutFinding]:
+def body_findings(sheet: SheetState, page: str) -> list[LayoutFinding]:
     """Share scene body collisions with the hierarchy layout checker.
 
     Text/text and text/wire checks remain in the layout checker. These bounds
@@ -245,7 +242,7 @@ def body_findings(sheet: KiCadSheet, page: str) -> list[LayoutFinding]:
     return out
 
 
-def snapshot(sheet: KiCadSheet, region: SceneBounds | None, *,
+def snapshot(sheet: SheetState, region: SceneBounds | None, *,
              max_objects: int) -> SceneSnapshot:
     """Extract a bounded, content-addressed spatial observation of one sheet."""
     if max_objects < 1 or max_objects > 10000:

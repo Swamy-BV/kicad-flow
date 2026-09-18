@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
 
 from kicad_flow.schematic.api import snap
 from kicad_flow.schematic.types import (
@@ -24,16 +23,14 @@ from ._nodes import (
     _set,
     _text,
 )
+from ._state import SheetState
 from .symbols import (
     _symbol_pins,
 )
 
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
-
 
 def place(
-    self: KiCadSheet,
+    self: SheetState,
     lib_id: str,
     ref: str,
     x: float,
@@ -88,7 +85,7 @@ def place(
     return self.part(ref, unit=unit)
 
 
-def _instances(self: KiCadSheet, ref: str, unit: int = 1) -> Node:
+def _instances(self: SheetState, ref: str, unit: int = 1) -> Node:
     """The ``(instances ...)`` block tying a symbol to this sheet.
 
     KiCad 6 and later record a placed symbol's reference here as well as
@@ -123,7 +120,7 @@ def _instances(self: KiCadSheet, ref: str, unit: int = 1) -> Node:
 
 
 def _ensure_lib_symbol(
-    self: KiCadSheet, lib_id: str, sym: library.LibrarySymbol
+    self: SheetState, lib_id: str, sym: library.LibrarySymbol
 ) -> None:
     """Copy a symbol's definition into the sheet's ``lib_symbols``."""
     table = self._tree.get("lib_symbols")
@@ -137,12 +134,12 @@ def _ensure_lib_symbol(
     table.items.append(copy.deepcopy(sym.definition))
 
 
-def part(self: KiCadSheet, ref: str, *, unit: int = 1) -> Part:
+def part(self: SheetState, ref: str, *, unit: int = 1) -> Part:
     """One placed unit, with its pins at sheet positions."""
     return self._as_part(self._require(ref, unit), ref)
 
 
-def _as_part(self: KiCadSheet, node: Node, ref: str) -> Part:
+def _as_part(self: SheetState, node: Node, ref: str) -> Part:
     """Build a :class:`Part` from a placed ``(symbol ...)`` node."""
     lib_id = _text(node.get("lib_id"))
     at_node = node.get("at")
@@ -179,7 +176,7 @@ def _as_part(self: KiCadSheet, node: Node, ref: str) -> Part:
     )
 
 
-def parts(self: KiCadSheet) -> list[Part]:
+def parts(self: SheetState) -> list[Part]:
     """Every placed part, in reference order."""
     out = []
     for node in self._tree.get_all("symbol"):
@@ -191,7 +188,7 @@ def parts(self: KiCadSheet) -> list[Part]:
     return sorted(out, key=lambda p: p.ref)
 
 
-def move(self: KiCadSheet, ref: str, x: float, y: float, *, unit: int = 1) -> Part:
+def move(self: SheetState, ref: str, x: float, y: float, *, unit: int = 1) -> Part:
     """Move a placed part. Its pins move with it."""
     node = self._require(ref, unit)
     at = node.get("at")
@@ -208,7 +205,7 @@ def move(self: KiCadSheet, ref: str, x: float, y: float, *, unit: int = 1) -> Pa
     return self.part(ref, unit=unit)
 
 
-def rotate(self: KiCadSheet, ref: str, rotation: float, *, unit: int = 1) -> Part:
+def rotate(self: SheetState, ref: str, rotation: float, *, unit: int = 1) -> Part:
     """Set a placed part's rotation in degrees."""
     rotation = _quarter_turn(rotation)
     node = self._require(ref, unit)
@@ -224,7 +221,7 @@ def rotate(self: KiCadSheet, ref: str, rotation: float, *, unit: int = 1) -> Par
     return self.part(ref, unit=unit)
 
 
-def mirror(self: KiCadSheet, ref: str, axis: str, *, unit: int = 1) -> Part:
+def mirror(self: SheetState, ref: str, axis: str, *, unit: int = 1) -> Part:
     """Mirror a placed part about ``"x"``, ``"y"`` or ``""`` for neither."""
     if axis not in ("", "x", "y"):
         raise ValueError(f"mirror axis must be '', 'x' or 'y', not {axis!r}")
@@ -237,12 +234,12 @@ def mirror(self: KiCadSheet, ref: str, axis: str, *, unit: int = 1) -> Part:
     return self.part(ref, unit=unit)
 
 
-def remove(self: KiCadSheet, ref: str, *, unit: int = 1) -> None:
+def remove(self: SheetState, ref: str, *, unit: int = 1) -> None:
     """Take one placed unit off the sheet."""
     self._tree.items.remove(self._require(ref, unit))
 
 
-def pin(self: KiCadSheet, ref: str, pin: str) -> Point:
+def pin(self: SheetState, ref: str, pin: str) -> Point:
     """Where *ref*'s *pin* is on the sheet -- the point to wire to."""
     part = self.part(ref)
     found = part.pin(pin)
@@ -253,7 +250,7 @@ def pin(self: KiCadSheet, ref: str, pin: str) -> Point:
 
 
 def power(
-    self: KiCadSheet, x: float, y: float, net: str, *, rotation: float = 0.0
+    self: SheetState, x: float, y: float, net: str, *, rotation: float = 0.0
 ) -> Part:
     """Place a power symbol for *net* and return it."""
     return self.place(
@@ -261,7 +258,7 @@ def power(
     )
 
 
-def power_flag(self: KiCadSheet, x: float, y: float, *, rotation: float = 0.0) -> Part:
+def power_flag(self: SheetState, x: float, y: float, *, rotation: float = 0.0) -> Part:
     """Place a PWR_FLAG, which tells ERC a net is driven."""
     return self.place(
         "power:PWR_FLAG",
@@ -273,7 +270,7 @@ def power_flag(self: KiCadSheet, x: float, y: float, *, rotation: float = 0.0) -
     )
 
 
-def _next_hash_ref(self: KiCadSheet, prefix: str) -> str:
+def _next_hash_ref(self: SheetState, prefix: str) -> str:
     """The next free ``#PWR0001``-style reference."""
     used = {p.ref for p in self.parts() if p.ref.startswith(prefix)}
     n = 1

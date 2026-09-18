@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.pcb.types import (
     BoardLimits,
@@ -27,12 +27,10 @@ from ._nodes import (
     _set,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 
-def set_stackup(self: KiCadBoard, stackup: Stackup) -> Stackup:
+def set_stackup(self: BoardState, stackup: Stackup) -> Stackup:
     """Replace only the board's stackup, preserving all other setup."""
     if not stackup.layers:
         raise ValueError("stackup needs at least one layer")
@@ -125,7 +123,7 @@ def set_stackup(self: KiCadBoard, stackup: Stackup) -> Stackup:
     return self.stackup()
 
 
-def stackup(self: KiCadBoard) -> Stackup:
+def stackup(self: BoardState) -> Stackup:
     """Read the physical construction without interpreting its choices."""
     setup = self._tree.get("setup")
     node = setup.get("stackup") if setup is not None else None
@@ -166,14 +164,14 @@ def stackup(self: KiCadBoard) -> Stackup:
     )
 
 
-def thickness(self: KiCadBoard) -> float:
+def thickness(self: BoardState) -> float:
     """The finished thickness recorded in the board general block."""
     general = self._tree.get("general")
     node = general.get("thickness") if general is not None else None
     return _f(node, 0) if node is not None else 0.0
 
 
-def set_limits(self: KiCadBoard, limits: BoardLimits) -> BoardLimits:
+def set_limits(self: BoardState, limits: BoardLimits) -> BoardLimits:
     """Update board-wide manufacturing limits without changing geometry."""
     if any(value < 0 for value in limits.as_dict().values()):
         raise ValueError("board limits cannot be negative")
@@ -192,7 +190,7 @@ def set_limits(self: KiCadBoard, limits: BoardLimits) -> BoardLimits:
     return self.limits()
 
 
-def limits(self: KiCadBoard) -> BoardLimits:
+def limits(self: BoardState) -> BoardLimits:
     """Read project-wide limits and the mask bridge stored on the board."""
     values: dict[str, Any] = vars(_project.limits(self._path)).copy()
     setup = self._tree.get("setup")
@@ -201,50 +199,50 @@ def limits(self: KiCadBoard) -> BoardLimits:
     return BoardLimits(**values)
 
 
-def set_net_classes(self: KiCadBoard, classes: tuple[NetClass, ...]) -> list[NetClass]:
+def set_net_classes(self: BoardState, classes: tuple[NetClass, ...]) -> list[NetClass]:
     """Create or update netclasses in the sibling project."""
     return _project.set_net_classes(self._path, classes)
 
 
-def net_classes(self: KiCadBoard) -> list[NetClass]:
+def net_classes(self: BoardState) -> list[NetClass]:
     """Read every project netclass."""
     return _project.net_classes(self._path)
 
 
 def set_net_class_patterns(
-    self: KiCadBoard, patterns: tuple[NetClassPattern, ...]
+    self: BoardState, patterns: tuple[NetClassPattern, ...]
 ) -> list[NetClassPattern]:
     """Replace the complete project pattern list."""
     return _class_patterns.replace(self._path, patterns)
 
 
-def net_class_patterns(self: KiCadBoard) -> list[NetClassPattern]:
+def net_class_patterns(self: BoardState) -> list[NetClassPattern]:
     """Read persistent project pattern assignments."""
     return _class_patterns.read(self._path)
 
 
 def assign_net_classes(
-    self: KiCadBoard, assignments: tuple[NetClassAssignment, ...]
+    self: BoardState, assignments: tuple[NetClassAssignment, ...]
 ) -> list[NetClassAssignment]:
     """Replace memberships for the nets mentioned by the caller."""
     return _project.assign(self._path, assignments)
 
 
-def net_policy(self: KiCadBoard, nets: tuple[str, ...]) -> dict[str, object]:
+def net_policy(self: BoardState, nets: tuple[str, ...]) -> dict[str, object]:
     """Read effective classes with KiCad's own inheritance resolver."""
     return _project.net_policy(self._path, nets)
 
 
-def net_class_assignments(self: KiCadBoard) -> list[NetClassAssignment]:
+def net_class_assignments(self: BoardState) -> list[NetClassAssignment]:
     """Read explicit net-to-netclass memberships."""
     return _project.assignments(self._path)
 
 
-def set_rules(self: KiCadBoard, rules: tuple[BoardRule, ...]) -> list[BoardRule]:
+def set_rules(self: BoardState, rules: tuple[BoardRule, ...]) -> list[BoardRule]:
     """Create or update named custom design rules."""
     return _project.set_rules(self._path, rules)
 
 
-def rules(self: KiCadBoard) -> list[BoardRule]:
+def rules(self: BoardState) -> list[BoardRule]:
     """Read numeric custom design rules."""
     return _project.rules(self._path)

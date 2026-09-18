@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from kicad_flow.schematic.api import snap
 from kicad_flow.schematic.types import (
     Pin,
@@ -18,13 +16,11 @@ from ._nodes import (
     _set,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
 def add_sheet(
-    self: KiCadSheet,
+    self: SheetState,
     name: str,
     filename: str,
     x: float,
@@ -125,7 +121,7 @@ def add_sheet(
     )
 
 
-def _sheet_node(self: KiCadSheet, name: str) -> Node:
+def _sheet_node(self: SheetState, name: str) -> Node:
     """The child-sheet box called *name*."""
     for node in self._tree.get_all("sheet"):
         if _text(self._prop_of(node, "Sheetname"), 1) == name:
@@ -139,7 +135,7 @@ def _sheet_node(self: KiCadSheet, name: str) -> Node:
     raise LookupError(f"no child sheet named {name!r}; this sheet has {have}")
 
 
-def _sheet_ref(self: KiCadSheet, node: Node) -> SheetRef:
+def _sheet_ref(self: SheetState, node: Node) -> SheetRef:
     """Describe a child-sheet box that is already on the sheet."""
     at = node.get("at")
     size = node.get("size")
@@ -166,7 +162,7 @@ def _sheet_ref(self: KiCadSheet, node: Node) -> SheetRef:
     )
 
 
-def move_sheet(self: KiCadSheet, name: str, x: float, y: float) -> SheetRef:
+def move_sheet(self: SheetState, name: str, x: float, y: float) -> SheetRef:
     """Move a child-sheet box, and say where its ports ended up."""
     node = self._sheet_node(name)
     at = node.get("at")
@@ -187,6 +183,6 @@ def move_sheet(self: KiCadSheet, name: str, x: float, y: float) -> SheetRef:
     return self._sheet_ref(node)
 
 
-def remove_sheet(self: KiCadSheet, name: str) -> None:
+def remove_sheet(self: SheetState, name: str) -> None:
     """Take a child-sheet box off this sheet. The child FILE is left."""
     self._tree.items.remove(self._sheet_node(name))

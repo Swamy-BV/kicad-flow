@@ -450,7 +450,15 @@ def _make_httpd(port: int, log_path: Path | None) -> ThreadingHTTPServer:
     return ThreadingHTTPServer(("127.0.0.1", port), handler)
 
 
-_ensured_url: str | None = None
+class _StartupState:
+    """Keep startup idempotent when multiple callers enter concurrently."""
+
+    def __init__(self) -> None:
+        self.url: str | None = None
+        self.lock = threading.Lock()
+
+
+_startup = _StartupState()
 
 
 def ensure_running(
@@ -466,20 +474,18 @@ def ensure_running(
     to be called from ``server.main`` and from examples so the live view comes up
     automatically for any KiCad interaction.
     """
-    global _ensured_url
     url = f"http://localhost:{port}"
-    if _ensured_url is not None:
-        return _ensured_url
-    if _port_in_use(port):  # another process is already serving it
-        _ensured_url = url
-    else:
-        try:
-            httpd = _make_httpd(port, log_path)
-        except OSError:
-            _ensured_url = url  # lost the race to bind; someone else has it
-            return url
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        _ensured_url = url
+    with _startup.lock:
+        if _startup.url is not None:
+            return _startup.url
+        if not _port_in_use(port):
+            try:
+                httpd = _make_httpd(port, log_path)
+            except OSError:
+                pass  # lost the race to bind; another process is serving it
+            else:
+                threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        _startup.url = url
     if open_browser:
         with contextlib.suppress(Exception):
             webbrowser.open(url)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
 
 from kicad_flow.pcb.types import (
     ConnectedPad,
@@ -19,10 +18,7 @@ from kicad_flow.pcb.types import (
 
 from ._geometry import _find_root
 from ._runner import run_pcbnew
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
-
+from ._state import BoardState
 
 _CONNECTED_PADS_SCRIPT = """
 import json
@@ -54,7 +50,7 @@ print(json.dumps({'groups': groups, 'pads': pads}))
 """
 
 
-def nets(self: KiCadBoard) -> list[Net]:
+def nets(self: BoardState) -> list[Net]:
     """What the board is MEANT to connect, from its own pads."""
     found: dict[str, list[NetPad]] = {}
     for part in self.footprints():
@@ -64,7 +60,7 @@ def nets(self: KiCadBoard) -> list[Net]:
     return [Net(name, tuple(pads)) for name, pads in sorted(found.items())]
 
 
-def connectivity(self: KiCadBoard, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
+def connectivity(self: BoardState, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
     """Return KiCad's actual pad-bearing connected copper groups."""
     wanted = set(nets)
     footprints = self.footprints()
@@ -121,7 +117,7 @@ def connectivity(self: KiCadBoard, nets: tuple[str, ...] = ()) -> list[NetConnec
     return out
 
 
-def route_metrics(self: KiCadBoard, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
+def route_metrics(self: BoardState, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
     """Measure authored copper on each intended net."""
     connectivity = {item.net: item for item in self.connectivity(nets)}
     wanted = set(nets)
@@ -155,7 +151,7 @@ def route_metrics(self: KiCadBoard, nets: tuple[str, ...] = ()) -> list[RouteMet
     return out
 
 
-def unrouted(self: KiCadBoard) -> list[Connection]:
+def unrouted(self: BoardState) -> list[Connection]:
     """A minimum set of pad-group separations, nearest endpoints first.
 
     Connected-component membership is factual. The nearest pad pair is a
@@ -211,14 +207,14 @@ def unrouted(self: KiCadBoard) -> list[Connection]:
     return out
 
 
-def _pad_copper_layers(self: KiCadBoard, pad: Pad) -> tuple[str, ...]:
+def _pad_copper_layers(self: BoardState, pad: Pad) -> tuple[str, ...]:
     """Copper layers a pad actually reaches."""
     if pad.kind == "pth" or "*.Cu" in pad.layers:
         return self.layers
     return tuple(layer for layer in pad.layers if layer in self.layers)
 
 
-def _via_copper_layers(self: KiCadBoard, via: Via) -> tuple[str, ...]:
+def _via_copper_layers(self: BoardState, via: Via) -> tuple[str, ...]:
     """Copper layers inside a via's declared span."""
     try:
         first = self.layers.index(via.layers[0])

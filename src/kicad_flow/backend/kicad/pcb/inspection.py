@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.pcb.types import (
     Pad,
@@ -23,10 +23,7 @@ from ._nodes import (
     _text,
 )
 from ._runner import run_pcbnew
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
-
+from ._state import BoardState
 
 _POINT_CONNECTIVITY_SCRIPT = """
 import json
@@ -72,7 +69,7 @@ def _pad_bounds(pad: Pad) -> tuple[float, float, float, float]:
     return (pad.at.x - hx, pad.at.y - hy, pad.at.x + hx, pad.at.y + hy)
 
 
-def at(self: KiCadBoard, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
+def at(self: BoardState, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
     """What geometrically touches a point, including track interiors."""
     if radius < 0 or not all(math.isfinite(value) for value in (x, y, radius)):
         raise ValueError("point coordinates must be finite and radius non-negative")
@@ -175,7 +172,7 @@ def at(self: KiCadBoard, x: float, y: float, radius: float = 0.01) -> dict[str, 
 
 
 def region(
-    self: KiCadBoard,
+    self: BoardState,
     x1: float,
     y1: float,
     x2: float,

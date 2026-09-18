@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.schematic.types import (
     Pin,
@@ -16,9 +16,7 @@ from ._nodes import (
     _f,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
 def _units_of(definition: Node) -> list[int]:
@@ -106,7 +104,7 @@ def _extent(
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def find_symbols(self: KiCadSheet, query: str, limit: int = 20) -> list[SymbolDef]:
+def find_symbols(self: SheetState, query: str, limit: int = 20) -> list[SymbolDef]:
     """Library symbols whose ``Library:Symbol`` id contains *query*.
 
     Matching is on the id alone: checking descriptions would mean loading
@@ -136,7 +134,7 @@ def find_symbols(self: KiCadSheet, query: str, limit: int = 20) -> list[SymbolDe
     return found
 
 
-def symbol(self: KiCadSheet, lib_id: str, *, unit: int = 1) -> SymbolDef:
+def symbol(self: SheetState, lib_id: str, *, unit: int = 1) -> SymbolDef:
     """One unit of a symbol, with its pins at the symbol origin."""
     try:
         sym = self._load(lib_id)

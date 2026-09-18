@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import copy
-from typing import TYPE_CHECKING
-
 from kicad_flow.schematic.types import (
     LayoutFinding,
     PartPlacement,
@@ -26,21 +23,14 @@ from ._nodes import (
     _f,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
 def measure_placement(
-    self: KiCadSheet, placements: tuple[PartPlacement, ...]
+    self: SheetState, placements: tuple[PartPlacement, ...]
 ) -> PlacementMeasurement:
     """Apply explicit poses to an in-memory clone and measure the result."""
-    from .sheet import KiCadSheet
-
-    clone = KiCadSheet(
-        self._path, copy.deepcopy(self._tree), self._paper, self._instance_path
-    )
-    clone._defs = dict(self._defs)
+    clone = self._copy()
     predicted = tuple(
         clone.place(
             item.lib_id,
@@ -61,7 +51,7 @@ def measure_placement(
     )
 
 
-def _placement_bounds(self: KiCadSheet) -> list[PlacementBounds]:
+def _placement_bounds(self: SheetState) -> list[PlacementBounds]:
     """Symbol and visible-field rectangles in sheet coordinates."""
     found: list[PlacementBounds] = []
     for node in self._tree.get_all("symbol"):
@@ -123,7 +113,7 @@ def _placement_bounds(self: KiCadSheet) -> list[PlacementBounds]:
 
 
 def _placement_findings(
-    self: KiCadSheet, bounds: tuple[PlacementBounds, ...]
+    self: SheetState, bounds: tuple[PlacementBounds, ...]
 ) -> list[LayoutFinding]:
     """Conservative overlap and page-boundary facts for placement bounds."""
     findings: list[LayoutFinding] = []

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 import shutil
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from kicad_flow.pcb.types import (
     Finding,
@@ -26,12 +24,10 @@ from ._geometry import (
 from ._nodes import (
     _uid,
 )
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 
-def _routing_findings(self: KiCadBoard) -> list[Finding]:
+def _routing_findings(self: BoardState) -> list[Finding]:
     """Factual copper defects KiCad's DRC does not currently report.
 
     This deliberately does not judge corner angles. Choosing 45-degree,
@@ -147,7 +143,7 @@ def _routing_findings(self: KiCadBoard) -> list[Finding]:
     return out
 
 
-def check(self: KiCadBoard, *, schematic_parity: bool = False) -> list[Finding]:
+def check(self: BoardState, *, schematic_parity: bool = False) -> list[Finding]:
     """Every violation, mapped from a position back to a part and pad."""
     self.save()
     data = _kicad.drc(self._path, schematic_parity=schematic_parity)
@@ -189,18 +185,16 @@ def check(self: KiCadBoard, *, schematic_parity: bool = False) -> list[Finding]:
 
 
 def check_proposed(
-    self: KiCadBoard,
+    self: BoardState,
     tracks: tuple[Track, ...] = (),
     vias: tuple[Via, ...] = (),
     zones: tuple[Zone, ...] = (),
 ) -> list[Finding]:
     """Check caller-supplied copper on a temporary board copy."""
-    from .board import KiCadBoard
-
     scratch = self._path.with_name(
         f".{self._path.stem}.route-check-{_uid()}{self._path.suffix}"
     )
-    candidate = KiCadBoard(scratch, copy.deepcopy(self._tree))
+    candidate = self._copy_to(scratch)
     inputs: dict[str, tuple[str, int]] = {}
     try:
         # KiCad resolves design settings and custom rules by board basename.

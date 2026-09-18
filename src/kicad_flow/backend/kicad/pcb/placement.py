@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import copy
-from typing import TYPE_CHECKING
-
 from kicad_flow.pcb.types import (
     Footprint,
     PlacementEdge,
@@ -23,29 +20,24 @@ from ._geometry import (
     _polygon_intersection,
     _segment_distance,
 )
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 
 def measure_placement(
-    self: KiCadBoard,
+    self: BoardState,
     proposals: tuple[PlacementProposal, ...] = (),
     *,
     edge_clearance: float = 0.0,
     edge_exempt_refs: tuple[str, ...] = (),
 ) -> PlacementMeasurement:
     """Measure current or proposed poses without modifying this board."""
-    from .board import KiCadBoard
-
     if edge_clearance < 0:
         raise ValueError("edge_clearance cannot be negative")
     for ref in edge_exempt_refs:
         self._require(ref)
     target = self
     if proposals:
-        target = KiCadBoard(self._path, copy.deepcopy(self._tree))
-        target._defs = self._defs
+        target = self._copy_to(self._path)
         seen: set[str] = set()
         for proposal in proposals:
             if proposal.ref in seen:
@@ -65,7 +57,7 @@ def measure_placement(
 
 
 def _measure_current_placement(
-    self: KiCadBoard, edge_clearance: float, edge_exempt_refs: tuple[str, ...]
+    self: BoardState, edge_clearance: float, edge_exempt_refs: tuple[str, ...]
 ) -> PlacementMeasurement:
     """Measure the current tree; caller choices have already been applied."""
     footprints = self.footprints()
@@ -156,7 +148,7 @@ def _inside_or_on_outline(point: Point, outline: list[Point]) -> bool:
 
 
 def _placement_net_lengths(
-    self: KiCadBoard, footprints: list[Footprint]
+    self: BoardState, footprints: list[Footprint]
 ) -> list[PlacementNetLength]:
     """Euclidean minimum-spanning-tree length for every multi-pad net."""
     pads = {(part.ref, pad.number): pad.at for part in footprints for pad in part.pads}

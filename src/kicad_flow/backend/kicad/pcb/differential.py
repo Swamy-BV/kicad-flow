@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import math
 from itertools import pairwise
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.pcb.routing import RoutePath
 
+from ._state import BoardState
 from .routing_path import resolve
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
 
 
 def _spans(
@@ -81,7 +79,7 @@ def _spans(
 
 
 def inspect_pair(
-    board: KiCadBoard,
+    board: BoardState,
     first: RoutePath,
     second: RoutePath,
     *,

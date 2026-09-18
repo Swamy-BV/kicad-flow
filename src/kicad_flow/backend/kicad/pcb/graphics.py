@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.pcb.types import (
     Graphic,
@@ -27,13 +27,11 @@ from ._nodes import (
     _text,
     _uid,
 )
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 
 def graphic(
-    self: KiCadBoard,
+    self: BoardState,
     kind: str,
     points: list[tuple[float, float]],
     *,
@@ -99,7 +97,7 @@ def graphic(
     return Graphic(uid, kind, layer, made, float(width), fill)
 
 
-def graphics(self: KiCadBoard, layer: str = "") -> list[Graphic]:
+def graphics(self: BoardState, layer: str = "") -> list[Graphic]:
     """Every outline and silkscreen primitive, in file order."""
     if layer and layer not in _GRAPHIC_LAYERS:
         raise ValueError(
@@ -116,7 +114,7 @@ def graphics(self: KiCadBoard, layer: str = "") -> list[Graphic]:
 
 
 def outline_polygon(
-    self: KiCadBoard, *, inset: float, max_error: float
+    self: BoardState, *, inset: float, max_error: float
 ) -> tuple[Point, ...]:
     """Return KiCad's resolved outside contour as bounded-error points."""
     if inset < 0:
@@ -155,7 +153,7 @@ def outline_polygon(
     return tuple(Point(float(item[0]), float(item[1])) for item in raw)
 
 
-def move_graphic(self: KiCadBoard, uuid: str, dx: float, dy: float) -> Graphic:
+def move_graphic(self: BoardState, uuid: str, dx: float, dy: float) -> Graphic:
     """Shift one graphic primitive by an offset."""
     node = self._graphic_node(uuid)
     for name in ("start", "mid", "end", "center"):
@@ -177,12 +175,12 @@ def move_graphic(self: KiCadBoard, uuid: str, dx: float, dy: float) -> Graphic:
     return self._graphic_from_node(node)
 
 
-def remove_graphic(self: KiCadBoard, uuid: str) -> None:
+def remove_graphic(self: BoardState, uuid: str) -> None:
     """Remove one graphic primitive by UUID."""
     self._tree.items.remove(self._graphic_node(uuid))
 
 
-def _graphic_node(self: KiCadBoard, uuid: str) -> Node:
+def _graphic_node(self: BoardState, uuid: str) -> Node:
     """The top-level graphic carrying *uuid*."""
     for item in self._tree.items:
         if (
@@ -194,7 +192,7 @@ def _graphic_node(self: KiCadBoard, uuid: str) -> Node:
     raise LookupError(f"no graphic with uuid {uuid!r}")
 
 
-def _graphic_from_node(self: KiCadBoard, node: Node) -> Graphic:
+def _graphic_from_node(self: BoardState, node: Node) -> Graphic:
     """Read one KiCad graphical node into the board contract."""
     kind = _GRAPHIC_KINDS[node.name]
     names = {
@@ -226,7 +224,7 @@ def _graphic_from_node(self: KiCadBoard, node: Node) -> Graphic:
 
 
 def text(
-    self: KiCadBoard,
+    self: BoardState,
     x: float,
     y: float,
     text: str,

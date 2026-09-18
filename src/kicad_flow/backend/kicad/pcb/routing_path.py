@@ -6,16 +6,14 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.pcb.routing import RoutePath, RouteTerminal
 from kicad_flow.pcb.types import Point
 
 from ._geometry import _point_on_segment, _segments_intersect
 from ._nodes import _net_name
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 NodeKey = tuple[float, float, str]
 
@@ -36,7 +34,7 @@ def _key(x: float, y: float, layer: str) -> NodeKey:
     return round(x, 6), round(y, 6), layer
 
 
-def _terminal(board: KiCadBoard, terminal: RouteTerminal, net: str) -> NodeKey:
+def _terminal(board: BoardState, terminal: RouteTerminal, net: str) -> NodeKey:
     pads = [p for p in board.footprint(terminal.ref).pads if p.number == terminal.pad]
     if len(pads) != 1:
         raise ValueError(f"{terminal.ref}.{terminal.pad}: expected one physical pad")
@@ -50,7 +48,7 @@ def _terminal(board: KiCadBoard, terminal: RouteTerminal, net: str) -> NodeKey:
     return _key(pad.at.x, pad.at.y, terminal.layer)
 
 
-def _depths(board: KiCadBoard) -> dict[str, float]:
+def _depths(board: BoardState) -> dict[str, float]:
     """Copper-center depths only when the saved stackup specifies every layer."""
     setup = board._tree.get("setup")
     saved = setup.get("stackup") if setup is not None else None
@@ -92,7 +90,7 @@ def _depths(board: KiCadBoard) -> dict[str, float]:
     return result
 
 
-def resolve(board: KiCadBoard, request: RoutePath) -> dict[str, Any]:
+def resolve(board: BoardState, request: RoutePath) -> dict[str, Any]:
     """Return a path or explicit unresolved/ambiguous topology observations.
 
     Contacts are at centerlines. Pad-edge contacts and plane traversal are not

@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+# Shared format constants used by the board implementation modules.
+__all__ = [
+    "_GRAPHIC_KINDS",
+    "_GRAPHIC_LAYERS",
+    "_ISLAND_MODES_BY_NUMBER",
+    "_OUTLINE_POLYGON",
+    "_REFILL",
+    "_SIDES",
+    "_STACKUP_KINDS",
+    "_TEMPLATE",
+    "_VIA_KINDS",
+]
+
 _COPPER_COUNTS = (2, 4, 6, 8)
 
 

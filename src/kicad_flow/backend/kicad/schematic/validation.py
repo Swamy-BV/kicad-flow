@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from kicad_flow.schematic.types import (
     BoardComponent,
@@ -14,7 +13,6 @@ from kicad_flow.schematic.types import (
     Point,
 )
 
-from .._sexpr import loads
 from ._geometry import (
     _Box,
     _hidden,
@@ -28,12 +26,10 @@ from ._nodes import (
     _f,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
-def nets(self: KiCadSheet) -> list[Net]:
+def nets(self: SheetState) -> list[Net]:
     """What this sheet actually connects, from KiCad's own netlist."""
     # Imported here, not at module scope: the package root imports both
     # this and the interchange layer, and one of the two has to go second.
@@ -59,7 +55,7 @@ def nets(self: KiCadSheet) -> list[Net]:
     return sorted(found, key=lambda n: n.name)
 
 
-def board_components(self: KiCadSheet) -> list[BoardComponent]:
+def board_components(self: SheetState) -> list[BoardComponent]:
     """Read KiCad's flattened component table, preserving footprint fields."""
     from . import netlist as _netlist
 
@@ -79,15 +75,14 @@ def board_components(self: KiCadSheet) -> list[BoardComponent]:
     return sorted(found, key=lambda component: component.ref)
 
 
-def check(self: KiCadSheet) -> list[Finding]:
+def check(self: SheetState) -> list[Finding]:
     """Every violation, mapped from a position back to a part and pin."""
     from ..cli import cli as _kicad
-    from .sheet import KiCadSheet
 
     where_by_page: dict[str, dict[tuple[float, float], tuple[str, str]]] = {}
     seen: set[Path] = set()
 
-    def index(sheet: KiCadSheet, page: str) -> None:
+    def index(sheet: SheetState, page: str) -> None:
         """Index every page in the same hierarchy KiCad checks."""
         resolved = sheet.path.resolve()
         if resolved in seen:
@@ -106,10 +101,7 @@ def check(self: KiCadSheet) -> list[Finding]:
             if not filename:
                 continue
             child_path = sheet.path.parent / filename
-            tree = loads(child_path.read_text(encoding="utf-8"))
-            child_sheet = KiCadSheet(
-                child_path, tree, _text(tree.get("paper"), 0, "A4")
-            )
+            child_sheet = sheet._open_child(child_path)
             child_page = f"{page.rstrip('/')}/{name}/"
             index(child_sheet, child_page)
 
@@ -148,7 +140,7 @@ def check(self: KiCadSheet) -> list[Finding]:
     return out
 
 
-def _visible_text(self: KiCadSheet) -> list[_VisibleText]:
+def _visible_text(self: SheetState) -> list[_VisibleText]:
     """Fields, labels and notes visible on this page."""
     out: list[_VisibleText] = []
     for node in self._tree.get_all("symbol"):
@@ -214,7 +206,7 @@ def _visible_text(self: KiCadSheet) -> list[_VisibleText]:
     return out
 
 
-def _check_layout_page(self: KiCadSheet, page: str) -> list[LayoutFinding]:
+def _check_layout_page(self: SheetState, page: str) -> list[LayoutFinding]:
     """Graphical findings for this page, without following child sheets."""
     from .scene import body_findings
 
@@ -277,14 +269,12 @@ def _check_layout_page(self: KiCadSheet, page: str) -> list[LayoutFinding]:
     return findings
 
 
-def check_layout(self: KiCadSheet) -> list[LayoutFinding]:
+def check_layout(self: SheetState) -> list[LayoutFinding]:
     """Return potential graphical collisions across this hierarchy."""
-    from .sheet import KiCadSheet
-
     findings: list[LayoutFinding] = []
     seen: set[Path] = set()
 
-    def visit(sheet: KiCadSheet, page: str) -> None:
+    def visit(sheet: SheetState, page: str) -> None:
         resolved = sheet.path.resolve()
         if resolved in seen:
             return
@@ -298,10 +288,7 @@ def check_layout(self: KiCadSheet) -> list[LayoutFinding]:
             if not filename:
                 continue
             child_path = sheet.path.parent / filename
-            tree = loads(child_path.read_text(encoding="utf-8"))
-            child_sheet = KiCadSheet(
-                child_path, tree, _text(tree.get("paper"), 0, "A4")
-            )
+            child_sheet = sheet._open_child(child_path)
             child_page = f"{page.rstrip('/')}/{name}/"
             visit(child_sheet, child_page)
 

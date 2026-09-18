@@ -8,6 +8,8 @@ from typing import Any
 
 from .._sexpr import Node, Sym
 
+__all__ = ["PAPER", "_LABEL_NODE", "_MARGIN"]
+
 # Larger designs use child sheets rather than larger paper.
 PAPER = {"A4": (297.0, 210.0), "A3": (420.0, 297.0)}
 

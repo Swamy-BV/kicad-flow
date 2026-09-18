@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
 
 from kicad_flow.pcb.types import (
     Footprint,
@@ -35,13 +34,11 @@ from ._nodes import (
     _turn_pads,
     _uid,
 )
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 
 def find_footprints(
-    self: KiCadBoard, query: str, limit: int = 20
+    self: BoardState, query: str, limit: int = 20
 ) -> list[FootprintDef]:
     """Library footprints whose ``Library:Footprint`` id contains *query*."""
     out: list[FootprintDef] = []
@@ -53,7 +50,7 @@ def find_footprints(
     return out
 
 
-def footprint_def(self: KiCadBoard, fp_id: str) -> FootprintDef:
+def footprint_def(self: BoardState, fp_id: str) -> FootprintDef:
     """One library footprint, with its pads at the footprint origin."""
     tree = self._load_def(fp_id)
     pads = tuple(
@@ -84,7 +81,7 @@ def footprint_def(self: KiCadBoard, fp_id: str) -> FootprintDef:
     )
 
 
-def _load_def(self: KiCadBoard, fp_id: str) -> Node:
+def _load_def(self: BoardState, fp_id: str) -> Node:
     """Load and cache a library footprint's tree."""
     if fp_id not in self._defs:
         self._defs[fp_id] = _fplib.load(fp_id, self._path.parent)
@@ -92,7 +89,7 @@ def _load_def(self: KiCadBoard, fp_id: str) -> Node:
 
 
 def place(
-    self: KiCadBoard,
+    self: BoardState,
     fp_id: str,
     ref: str,
     x: float,
@@ -175,7 +172,7 @@ def _mirror(node: Node) -> None:
                 _toggle_mirror(shape)
 
 
-def _set_property(self: KiCadBoard, node: Node, name: str, value: str) -> None:
+def _set_property(self: BoardState, node: Node, name: str, value: str) -> None:
     """Set a footprint property, adding it if absent."""
     prop = self._prop_of(node, name)
     if prop is None:
@@ -200,7 +197,7 @@ def _set_property(self: KiCadBoard, node: Node, name: str, value: str) -> None:
         _set(prop, 1, value)
 
 
-def _find(self: KiCadBoard, ref: str) -> Node | None:
+def _find(self: BoardState, ref: str) -> Node | None:
     """The ``(footprint ...)`` node placed as *ref*, if any."""
     for node in self._tree.get_all("footprint"):
         prop = self._prop_of(node, "Reference")
@@ -209,7 +206,7 @@ def _find(self: KiCadBoard, ref: str) -> Node | None:
     return None
 
 
-def _require(self: KiCadBoard, ref: str) -> Node:
+def _require(self: BoardState, ref: str) -> Node:
     """The node for *ref*, or a :class:`LookupError`."""
     node = self._find(ref)
     if node is None:
@@ -218,7 +215,7 @@ def _require(self: KiCadBoard, ref: str) -> Node:
 
 
 def move(
-    self: KiCadBoard, ref: str, x: float, y: float, *, anchor: str = "origin"
+    self: BoardState, ref: str, x: float, y: float, *, anchor: str = "origin"
 ) -> Footprint:
     """Move a footprint by origin or courtyard centre; copper stays."""
     node = self._require(ref)
@@ -231,7 +228,7 @@ def move(
     return self.footprint(ref)
 
 
-def rotate(self: KiCadBoard, ref: str, rotation: float) -> Footprint:
+def rotate(self: BoardState, ref: str, rotation: float) -> Footprint:
     """Set a placed footprint's rotation in degrees."""
     node = self._require(ref)
     at = node.get("at")
@@ -245,7 +242,7 @@ def rotate(self: KiCadBoard, ref: str, rotation: float) -> Footprint:
     return self.footprint(ref)
 
 
-def flip(self: KiCadBoard, ref: str, side: str) -> Footprint:
+def flip(self: BoardState, ref: str, side: str) -> Footprint:
     """Put a footprint on ``"F"`` or ``"B"``."""
     if side not in _SIDES:
         raise ValueError(f"side must be 'F' or 'B', not {side!r}")
@@ -266,12 +263,12 @@ def flip(self: KiCadBoard, ref: str, side: str) -> Footprint:
     return self.footprint(ref)
 
 
-def remove(self: KiCadBoard, ref: str) -> None:
+def remove(self: BoardState, ref: str) -> None:
     """Take a footprint off the board."""
     self._tree.items.remove(self._require(ref))
 
 
-def footprints(self: KiCadBoard) -> list[Footprint]:
+def footprints(self: BoardState) -> list[Footprint]:
     """Every placed footprint, in reference order."""
     out = []
     for node in self._tree.get_all("footprint"):
@@ -281,12 +278,12 @@ def footprints(self: KiCadBoard) -> list[Footprint]:
     return sorted(out, key=lambda f: f.ref)
 
 
-def footprint(self: KiCadBoard, ref: str) -> Footprint:
+def footprint(self: BoardState, ref: str) -> Footprint:
     """One placed footprint, with its pads at board positions."""
     return self._as_footprint(self._require(ref), ref)
 
 
-def _as_footprint(self: KiCadBoard, node: Node, ref: str) -> Footprint:
+def _as_footprint(self: BoardState, node: Node, ref: str) -> Footprint:
     """Build a :class:`Footprint` from a placed ``(footprint ...)``."""
     at_node = node.get("at")
     at = Point(_f(at_node, 0), _f(at_node, 1))
@@ -323,7 +320,7 @@ def _as_footprint(self: KiCadBoard, node: Node, ref: str) -> Footprint:
     )
 
 
-def _pad_of(self: KiCadBoard, node: Node, at: Point, rotation: float) -> Pad:
+def _pad_of(self: BoardState, node: Node, at: Point, rotation: float) -> Pad:
     """Build a :class:`Pad` from a ``(pad ...)`` node."""
     pat = node.get("at")
     size = node.get("size")
@@ -358,20 +355,20 @@ def _pad_of(self: KiCadBoard, node: Node, at: Point, rotation: float) -> Pad:
     )
 
 
-def fields(self: KiCadBoard, ref: str) -> dict[str, str]:
+def fields(self: BoardState, ref: str) -> dict[str, str]:
     """Every field on a footprint, by name."""
     node = self._require(ref)
     return {_text(p, 0): _text(p, 1) for p in node.get_all("property")}
 
 
-def set_field(self: KiCadBoard, ref: str, name: str, value: str) -> dict[str, str]:
+def set_field(self: BoardState, ref: str, name: str, value: str) -> dict[str, str]:
     """Set one of a footprint's fields and return all of them."""
     self._set_property(self._require(ref), name, value)
     return self.fields(ref)
 
 
 def move_field(
-    self: KiCadBoard,
+    self: BoardState,
     ref: str,
     name: str,
     dx: float,
@@ -408,7 +405,7 @@ def move_field(
     return _pad_on_board(float(dx), float(dy), Point(_f(at, 0), _f(at, 1)), _f(at, 2))
 
 
-def set_net(self: KiCadBoard, ref: str, pad: str, net: str) -> str:
+def set_net(self: BoardState, ref: str, pad: str, net: str) -> str:
     """Put EVERY pad of *ref* numbered *pad* on *net*, and return the net.
 
     A pad number is not unique. A USB-C receptacle carries four shield lugs
@@ -433,7 +430,7 @@ def set_net(self: KiCadBoard, ref: str, pad: str, net: str) -> str:
     raise LookupError(f"{ref} has no pad {pad!r}; it has {have}")
 
 
-def pad(self: KiCadBoard, ref: str, pad: str) -> Point:
+def pad(self: BoardState, ref: str, pad: str) -> Point:
     """Where *ref*'s *pad* is on the board -- the point to route to."""
     part = self.footprint(ref)
     found = part.pad(pad)

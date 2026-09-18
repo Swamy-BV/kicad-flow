@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from kicad_flow.schematic.api import snap
 from kicad_flow.schematic.types import (
     Label,
@@ -22,13 +20,11 @@ from ._nodes import (
     _set,
     _text,
 )
-
-if TYPE_CHECKING:
-    from .sheet import KiCadSheet
+from ._state import SheetState
 
 
 def _at_point(
-    self: KiCadSheet, kinds: tuple[str, ...], x: float, y: float
+    self: SheetState, kinds: tuple[str, ...], x: float, y: float
 ) -> list[Node]:
     """Every node of these kinds whose ``at`` is this snapped point."""
     # Coordinates returned through JSON carry KiCad's three decimal
@@ -46,7 +42,7 @@ def _at_point(
 
 
 def _wires_between(
-    self: KiCadSheet, x1: float, y1: float, x2: float, y2: float
+    self: SheetState, x1: float, y1: float, x2: float, y2: float
 ) -> list[Node]:
     """Wire nodes joining these two snapped points, either way round."""
     a = (round(snap(x1), 3), round(snap(y1), 3))
@@ -66,7 +62,7 @@ def _wires_between(
     return found
 
 
-def remove_wire(self: KiCadSheet, x1: float, y1: float, x2: float, y2: float) -> int:
+def remove_wire(self: SheetState, x1: float, y1: float, x2: float, y2: float) -> int:
     """Delete wires running between these two points."""
     found = self._wires_between(x1, y1, x2, y2)
     for node in found:
@@ -75,7 +71,7 @@ def remove_wire(self: KiCadSheet, x1: float, y1: float, x2: float, y2: float) ->
 
 
 def move_wire(
-    self: KiCadSheet, x1: float, y1: float, x2: float, y2: float, dx: float, dy: float
+    self: SheetState, x1: float, y1: float, x2: float, y2: float, dx: float, dy: float
 ) -> int:
     """Shift wires between these points by ``(dx, dy)``."""
     found = self._wires_between(x1, y1, x2, y2)
@@ -87,7 +83,7 @@ def move_wire(
     return len(found)
 
 
-def remove_label(self: KiCadSheet, x: float, y: float) -> int:
+def remove_label(self: SheetState, x: float, y: float) -> int:
     """Delete labels at this point, of any kind."""
     found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
     for node in found:
@@ -95,7 +91,7 @@ def remove_label(self: KiCadSheet, x: float, y: float) -> int:
     return len(found)
 
 
-def _label_from_node(self: KiCadSheet, node: Node) -> Label:
+def _label_from_node(self: SheetState, node: Node) -> Label:
     """Describe one stored label without exposing its S-expression."""
     at = node.get("at")
     effects = node.get("effects")
@@ -113,7 +109,7 @@ def _label_from_node(self: KiCadSheet, node: Node) -> Label:
     )
 
 
-def _label_node(self: KiCadSheet, uuid: str) -> Node:
+def _label_node(self: SheetState, uuid: str) -> Node:
     """The label carrying *uuid*, or a useful refusal."""
     for name in _LABEL_NODE.values():
         for node in self._tree.get_all(name):
@@ -122,12 +118,12 @@ def _label_node(self: KiCadSheet, uuid: str) -> Node:
     raise LookupError(f"no label with uuid {uuid!r}")
 
 
-def remove_label_by_id(self: KiCadSheet, uuid: str) -> None:
+def remove_label_by_id(self: SheetState, uuid: str) -> None:
     """Delete exactly one label by stable identity."""
     self._tree.items.remove(self._label_node(uuid))
 
 
-def move_label(self: KiCadSheet, x: float, y: float, dx: float, dy: float) -> int:
+def move_label(self: SheetState, x: float, y: float, dx: float, dy: float) -> int:
     """Shift labels at this point by ``(dx, dy)``."""
     found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
     for node in found:
@@ -139,7 +135,7 @@ def move_label(self: KiCadSheet, x: float, y: float, dx: float, dy: float) -> in
     return len(found)
 
 
-def move_label_by_id(self: KiCadSheet, uuid: str, dx: float, dy: float) -> Label:
+def move_label_by_id(self: SheetState, uuid: str, dx: float, dy: float) -> Label:
     """Shift exactly one label by stable identity."""
     node = self._label_node(uuid)
     at = node.get("at")
@@ -150,7 +146,7 @@ def move_label_by_id(self: KiCadSheet, uuid: str, dx: float, dy: float) -> Label
     return self._label_from_node(node)
 
 
-def rotate_label(self: KiCadSheet, x: float, y: float, rotation: float) -> int:
+def rotate_label(self: SheetState, x: float, y: float, rotation: float) -> int:
     """Turn labels at this point."""
     turn = _quarter_turn(rotation)
     found = self._at_point(tuple(_LABEL_NODE.values()), x, y)
@@ -165,7 +161,7 @@ def rotate_label(self: KiCadSheet, x: float, y: float, rotation: float) -> int:
     return len(found)
 
 
-def rotate_label_by_id(self: KiCadSheet, uuid: str, rotation: float) -> Label:
+def rotate_label_by_id(self: SheetState, uuid: str, rotation: float) -> Label:
     """Turn exactly one label by stable identity."""
     node = self._label_node(uuid)
     at = node.get("at")
@@ -179,7 +175,7 @@ def rotate_label_by_id(self: KiCadSheet, uuid: str, rotation: float) -> Label:
     return self._label_from_node(node)
 
 
-def remove_junction(self: KiCadSheet, x: float, y: float) -> int:
+def remove_junction(self: SheetState, x: float, y: float) -> int:
     """Delete junctions at this point."""
     found = self._at_point(("junction",), x, y)
     for node in found:
@@ -187,7 +183,7 @@ def remove_junction(self: KiCadSheet, x: float, y: float) -> int:
     return len(found)
 
 
-def remove_no_connect(self: KiCadSheet, x: float, y: float) -> int:
+def remove_no_connect(self: SheetState, x: float, y: float) -> int:
     """Delete no-connect marks at this point."""
     found = self._at_point(("no_connect",), x, y)
     for node in found:
@@ -195,7 +191,7 @@ def remove_no_connect(self: KiCadSheet, x: float, y: float) -> int:
     return len(found)
 
 
-def wire(self: KiCadSheet, x1: float, y1: float, x2: float, y2: float) -> list[Point]:
+def wire(self: SheetState, x1: float, y1: float, x2: float, y2: float) -> list[Point]:
     """Draw one straight wire segment and return its ends."""
     a, b = Point(snap(x1), snap(y1)), Point(snap(x2), snap(y2))
     self._tree.items.append(
@@ -211,7 +207,7 @@ def wire(self: KiCadSheet, x1: float, y1: float, x2: float, y2: float) -> list[P
     return [a, b]
 
 
-def junction(self: KiCadSheet, x: float, y: float) -> Point:
+def junction(self: SheetState, x: float, y: float) -> Point:
     """Mark a point where crossing wires connect."""
     at = Point(snap(x), snap(y))
     self._tree.items.append(
@@ -229,7 +225,7 @@ def junction(self: KiCadSheet, x: float, y: float) -> Point:
 
 
 def label(
-    self: KiCadSheet,
+    self: SheetState,
     x: float,
     y: float,
     text: str,
@@ -283,7 +279,7 @@ def label(
 
 
 def text(
-    self: KiCadSheet,
+    self: SheetState,
     x: float,
     y: float,
     text: str,
@@ -322,7 +318,7 @@ def text(
     return at
 
 
-def no_connect(self: KiCadSheet, x: float, y: float) -> Point:
+def no_connect(self: SheetState, x: float, y: float) -> Point:
     """Mark a pin deliberately unconnected."""
     at = Point(snap(x), snap(y))
     self._tree.items.append(
@@ -337,7 +333,7 @@ def no_connect(self: KiCadSheet, x: float, y: float) -> Point:
     return at
 
 
-def wires(self: KiCadSheet) -> list[tuple[Point, Point]]:
+def wires(self: SheetState) -> list[tuple[Point, Point]]:
     """Every wire segment on the sheet."""
     out = []
     for node in self._tree.get_all("wire"):
@@ -352,7 +348,7 @@ def wires(self: KiCadSheet) -> list[tuple[Point, Point]]:
     return out
 
 
-def labels(self: KiCadSheet) -> list[Label]:
+def labels(self: SheetState) -> list[Label]:
     """Every label, including stable identity for later editing."""
     out: list[Label] = []
     for name in _LABEL_NODE.values():

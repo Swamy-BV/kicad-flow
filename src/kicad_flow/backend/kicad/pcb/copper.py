@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from kicad_flow.pcb.types import (
     Point,
@@ -26,13 +26,11 @@ from ._nodes import (
     _text,
     _uid,
 )
-
-if TYPE_CHECKING:
-    from .board import KiCadBoard
+from ._state import BoardState
 
 
 def track(
-    self: KiCadBoard,
+    self: BoardState,
     x1: float,
     y1: float,
     x2: float,
@@ -77,7 +75,7 @@ def track(
 
 
 def via(
-    self: KiCadBoard,
+    self: BoardState,
     x: float,
     y: float,
     *,
@@ -127,7 +125,7 @@ def via(
 
 
 def zone(
-    self: KiCadBoard,
+    self: BoardState,
     points: list[tuple[float, float]],
     *,
     layer: str,
@@ -255,7 +253,7 @@ def zone(
     return made
 
 
-def refill(self: KiCadBoard) -> int:
+def refill(self: BoardState) -> int:
     """Recompute every pour against the copper as it now stands.
 
     The one thing the file cannot do for itself. Filling a zone means
@@ -276,7 +274,7 @@ def refill(self: KiCadBoard) -> int:
 
 
 def remove_copper(
-    self: KiCadBoard,
+    self: BoardState,
     *,
     uuid: str = "",
     net: str = "",
@@ -323,7 +321,7 @@ def remove_copper(
     return gone
 
 
-def tracks(self: KiCadBoard) -> list[Track]:
+def tracks(self: BoardState) -> list[Track]:
     """Every copper segment on the board."""
     out = []
     for node in self._tree.get_all("segment"):
@@ -341,7 +339,7 @@ def tracks(self: KiCadBoard) -> list[Track]:
     return out
 
 
-def vias(self: KiCadBoard) -> list[Via]:
+def vias(self: BoardState) -> list[Via]:
     """Every via on the board."""
     out = []
     for node in self._tree.get_all("via"):
@@ -372,7 +370,7 @@ def vias(self: KiCadBoard) -> list[Via]:
     return out
 
 
-def zones(self: KiCadBoard) -> list[Zone]:
+def zones(self: BoardState) -> list[Zone]:
     """Every pour and keep-out."""
     out = []
     for node in self._tree.get_all("zone"):

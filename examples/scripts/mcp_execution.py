@@ -7,7 +7,6 @@ an evaluation of model reasoning, tokens, or schematic aesthetics.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import threading
 import time
@@ -78,10 +77,9 @@ async def concurrency() -> None:
         await asyncio.sleep(0.01)
         waiting.cancel()
         running.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await waiting
-        with contextlib.suppress(asyncio.CancelledError):
-            await running
+        outcomes = await asyncio.gather(waiting, running, return_exceptions=True)
+        assert all(isinstance(outcome, asyncio.CancelledError)
+                   for outcome in outcomes)
         await client.call_tool("probe", {"path": str(OUT / "cancel/next")})
         assert waiting_path not in seen and peak == 1 and active == 0
         print(f"Concurrent workers: same project={same}, separate={separate}, "
@@ -212,4 +210,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

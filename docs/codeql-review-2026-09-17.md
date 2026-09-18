@@ -1,26 +1,23 @@
 # Local CodeQL review — 2026-09-17
 
-CodeQL CLI 2.27.0 scanned a clean snapshot of `chore/openssf-baseline` (128
-Python files and 3 GitHub Actions workflows). The default code-scanning and
-security-extended Python suites each returned **0 alerts** after the monitor's
-3D render filename stopped incorporating request data. The broader
-`python-security-and-quality.qls` suite returned **125 findings** after review.
+CodeQL CLI 2.27.0 scanned a clean snapshot matching the branch's Python source
+(130 Python files and 3 GitHub Actions workflows). The full
+`python-security-and-quality.qls` suite returned **0 alerts**. The GitHub
+workflow now runs the matching `security-and-quality` query suite so future
+pull requests exercise the same breadth. No queries were excluded and no
+findings were suppressed.
 
-| Rule | Count | Disposition |
-| --- | ---: | --- |
-| `py/unused-import` | 70 | `server/tools_board.py` and `server/tools_schematic.py` deliberately re-export names for existing callers. Their module docstrings state this compatibility role. Removing imports would change that interface. |
-| `py/cyclic-import` and `py/unsafe-cyclic-import` | 37 | The reported back-edges to `KiCadBoard` and `KiCadSheet` are inside `if TYPE_CHECKING:` blocks; they do not execute at runtime. The facade imports the implementation modules, while those modules need the facade class only for annotations. |
-| `py/unused-global-variable` | 14 | Eleven constants are used by other backend modules; the three `_ensured_url` locations are assignments and reads within `ensure_running`. One actually unused parser constant, `_WHITESPACE`, was removed. |
-| `py/ineffectual-statement` | 3 | These `await` expressions join cancelled tasks so cancellation completes before cleanup or assertions. Their return values are intentionally unused. |
-| `py/empty-except` | 1 | The activity logger intentionally suppresses `CancelledError` when its slow-call timer is cancelled after a tool finishes. The monitor's image fallback has an explanatory comment and no longer triggers this query. |
+The original broad scan reported 125 findings. The changes make existing
+compatibility exports and shared constants explicit with `__all__`, replace
+helper-to-facade type imports with typed internal state protocols, and let the
+facades create their own isolated copies and child sheets. Monitor startup
+state is guarded against concurrent calls. Cancelled-task joins now check for
+unexpected errors, and the best-effort replay logger explains its exception
+handler. These changes preserve the primitive MCP tool catalog; the
+`led_digits.py` example exercised 102/102 tools with 0 failed calls.
 
-To check the two largest groups, 20 fresh Python processes each imported the
-20 flagged modules in a different random order without an import failure. All
-70 flagged compatibility names were also present on their respective modules.
-Those checks verify the current runtime behavior; they do not turn the broad
-suite's reports into security defects.
-
-These are dispositions of the local findings, not a claim that static analysis
-proves the absence of vulnerabilities. The GitHub CodeQL workflow uses the
-security-extended suite; its hosted result still needs to run after the workflow
-reaches GitHub.
+Ruff and strict mypy passed, as did `fc.py`, `led_digits.py`,
+`board_net_sync.py`, `routing_preview.py`, `layout_feedback.py`, and
+`mcp_execution.py` through MCP. A zero static-analysis result does not prove
+the absence of vulnerabilities; the hosted GitHub CodeQL run remains to be
+observed when this branch is published.

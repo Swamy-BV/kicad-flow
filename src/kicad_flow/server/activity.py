@@ -345,9 +345,14 @@ class ActivityMiddleware(Middleware):
             raise
         finally:
             slow_task.cancel()
-            # Cancellation is expected when the tool finishes before the timer.
-            with contextlib.suppress(asyncio.CancelledError):
-                await slow_task
+            # Join the timer, but do not conceal an unexpected logging failure.
+            timer_outcome = (await asyncio.gather(
+                slow_task, return_exceptions=True
+            ))[0]
+            if isinstance(timer_outcome, BaseException) and not isinstance(
+                timer_outcome, asyncio.CancelledError
+            ):
+                raise timer_outcome
             if token is not None:
                 _NESTED_LOGGER.reset(token)
             # A non-empty batch has already emitted the actual primitives.
@@ -527,4 +532,4 @@ class ActivityMiddleware(Middleware):
                 with target.open("a", encoding="utf-8") as stream:
                     stream.write(line)
             except OSError:
-                pass
+                pass  # Replay logging is best-effort and must not fail the tool.
