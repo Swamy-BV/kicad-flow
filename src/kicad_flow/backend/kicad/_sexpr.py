@@ -66,8 +66,6 @@ class Node:
 # Parsing
 # --------------------------------------------------------------------------- #
 
-_WHITESPACE = " \t\r\n"
-
 # One token: a paren, a quoted string, a bareword run, or -- last, so it only
 # wins when the string alternative could not -- a lone `"`. The string
 # alternative consumes escape pairs, so an escaped quote does not end the token;

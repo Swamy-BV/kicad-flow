@@ -71,6 +71,7 @@ def _placeholder_png(message: str = "waiting for a design…") -> bytes:
         )
         data = page.get_pixmap(dpi=96).tobytes("png")
     except Exception:
+        # The transparent PNG is the fallback when optional PDF rendering fails.
         pass
     _PLACEHOLDER_CACHE[message] = data
     return data

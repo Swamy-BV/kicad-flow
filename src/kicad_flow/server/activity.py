@@ -345,6 +345,7 @@ class ActivityMiddleware(Middleware):
             raise
         finally:
             slow_task.cancel()
+            # Cancellation is expected when the tool finishes before the timer.
             with contextlib.suppress(asyncio.CancelledError):
                 await slow_task
             if token is not None:
