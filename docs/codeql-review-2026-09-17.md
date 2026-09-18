@@ -14,7 +14,13 @@ security-extended Python suites each returned **0 alerts** after the monitor's
 | `py/ineffectual-statement` | 3 | These `await` expressions join cancelled tasks so cancellation completes before cleanup or assertions. Their return values are intentionally unused. |
 | `py/empty-except` | 1 | The activity logger intentionally suppresses `CancelledError` when its slow-call timer is cancelled after a tool finishes. The monitor's image fallback has an explanatory comment and no longer triggers this query. |
 
+To check the two largest groups, 20 fresh Python processes each imported the
+20 flagged modules in a different random order without an import failure. All
+70 flagged compatibility names were also present on their respective modules.
+Those checks verify the current runtime behavior; they do not turn the broad
+suite's reports into security defects.
+
 These are dispositions of the local findings, not a claim that static analysis
 proves the absence of vulnerabilities. The GitHub CodeQL workflow uses the
-default security suite; its hosted result still needs to run after the workflow
+security-extended suite; its hosted result still needs to run after the workflow
 reaches GitHub.
