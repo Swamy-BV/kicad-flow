@@ -22,8 +22,8 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
-import hashlib
 import json
+import secrets
 import socket
 import tempfile
 import threading
@@ -126,10 +126,9 @@ def _render_3d(board: Path, view: str) -> bytes | None:
     """Render one named 3D camera to an isolated file; return complete PNG bytes."""
     _RENDER_DIR.mkdir(parents=True, exist_ok=True)
     profile = _3D_VIEWS[view]
-    identity = hashlib.sha256(str(board.resolve()).encode()).hexdigest()[:10]
-    out = _RENDER_DIR / (
-        f".{board.stem}-{identity}-{view}-{threading.get_ident()}-{time.time_ns()}.png"
-    )
+    # The request's view and the board name select what to render, but neither
+    # belongs in a filesystem path. A random name also isolates parallel jobs.
+    out = _RENDER_DIR / f".render-{secrets.token_hex(16)}.png"
     try:
         render.render_board(
             board, out, width=1600, height=1100,
