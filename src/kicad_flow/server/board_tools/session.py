@@ -30,6 +30,8 @@ def _board(path: str) -> Board:
                 f"create one, which OVERWRITES whatever is there."
             )
         _OPEN[key] = load_board(path)
+    else:
+        _OPEN[key].assert_current()
     return _OPEN[key]
 
 
@@ -56,6 +58,7 @@ def _atomic_items(
         with board.transaction():
             for _failed_index, item in enumerate(items):
                 out.append(each(board, item))
+            board.assert_current()
     except (IndexError, *_ERRORS) as exc:
         return {**_fail(exc), "index": _failed_index, "applied_count": 0, key: []}
     return {"ok": True, "count": len(out), key: out}
@@ -115,6 +118,34 @@ def save_board(path: str) -> dict[str, Any]:
         "vias": len(board.vias()),
         "zones": len(board.zones()),
     }
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def reload_board(path: str) -> dict[str, Any]:
+    """Discard the cached board and load the current file from disk."""
+    try:
+        if not Path(path).is_file():
+            raise LookupError(f"no board file to reload at {path}")
+        board = load_board(path)
+    except _ERRORS as exc:
+        return _fail(exc)
+    _OPEN[_key(path)] = board
+    return {
+        "ok": True,
+        "path": str(board.path),
+        "footprints": len(board.footprints()),
+        "tracks": len(board.tracks()),
+        "vias": len(board.vias()),
+        "zones": len(board.zones()),
+        "texts": len(board.texts()),
+    }
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def close_board(path: str) -> dict[str, Any]:
+    """Forget one cached board without writing it; the next call reopens disk."""
+    closed = _OPEN.pop(_key(path), None) is not None
+    return {"ok": True, "path": str(Path(path).resolve()), "closed": closed}
 
 
 def _blank(project_dir: str = "") -> Board:

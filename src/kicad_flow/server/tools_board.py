@@ -31,9 +31,12 @@ from .board_tools.footprints import (
 from .board_tools.graphics import (
     add_board_texts,
     add_graphics,
+    list_board_texts,
     list_graphics,
     move_graphics,
+    remove_board_texts,
     remove_graphics,
+    update_board_texts,
 )
 from .board_tools.inspection import (
     list_board_nets,
@@ -44,6 +47,7 @@ from .board_tools.inspection import (
 )
 from .board_tools.models import ArcGraphic as ArcGraphic
 from .board_tools.models import BoardRuleSpec as BoardRuleSpec
+from .board_tools.models import BoardTextUpdate as BoardTextUpdate
 from .board_tools.models import CircleGraphic as CircleGraphic
 from .board_tools.models import FootprintFieldShift as FootprintFieldShift
 from .board_tools.models import FootprintFieldValue as FootprintFieldValue
@@ -99,7 +103,7 @@ from .board_tools.session import _blank as _blank
 from .board_tools.session import _board as _board
 from .board_tools.session import _fail as _fail
 from .board_tools.session import _key as _key
-from .board_tools.session import new_board, save_board
+from .board_tools.session import close_board, new_board, reload_board, save_board
 from .board_tools.transfer import update_board_from_schematic
 from .board_tools.validation import check_board
 
@@ -109,6 +113,7 @@ __all__ = [
     "_OPEN",
     "ArcGraphic",
     "BoardRuleSpec",
+    "BoardTextUpdate",
     "CircleGraphic",
     "FootprintFieldShift",
     "FootprintFieldValue",
@@ -147,6 +152,7 @@ __all__ = [
     "add_zones",
     "assign_net_classes",
     "check_board",
+    "close_board",
     "export_routing_design",
     "find_footprint",
     "flip_footprints",
@@ -160,6 +166,7 @@ __all__ = [
     "import_routing_session",
     "list_board_constraints",
     "list_board_nets",
+    "list_board_texts",
     "list_copper",
     "list_footprints",
     "list_graphics",
@@ -174,6 +181,8 @@ __all__ = [
     "new_board",
     "query_board_region",
     "refill_zones",
+    "reload_board",
+    "remove_board_texts",
     "remove_copper",
     "remove_footprints",
     "remove_graphics",
@@ -193,5 +202,6 @@ __all__ = [
     "sync_board_nets",
     "unrouted_connections",
     "update_board_from_schematic",
+    "update_board_texts",
     "what_is_on_board",
 ]

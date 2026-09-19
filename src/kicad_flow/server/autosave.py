@@ -14,17 +14,15 @@ the latest state rather than a queue of stale ones. Rendering per call was
 never the right target: `led_digits` makes 150 calls, which at 530 ms each
 would be 80 seconds of rendering for a build that takes 22.
 
-It never affects the call. A save that fails -- KiCad holding the file, a
-read-only directory -- is swallowed, exactly as the activity log is: the design
-in memory is still correct and `save_sheet` will report the problem properly
-when the caller asks for it.
+Ordinary best-effort save failures do not affect the call. A stale-board
+conflict is different: suppressing it would report success after refusing to
+write an external edit, so that RuntimeError is surfaced to the caller.
 
 Set ``KICAD_FLOW_AUTOSAVE=0`` to turn it off.
 """
 
 from __future__ import annotations
 
-import contextlib
 import os
 from typing import Any
 
@@ -59,8 +57,12 @@ class AutosaveMiddleware(Middleware):
         if data.get("dry_run") is True:
             return result
         for path in _paths_in(getattr(context.message, "arguments", None)):
-            with contextlib.suppress(Exception):
+            try:
                 _save(path)
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
         return result
 
 

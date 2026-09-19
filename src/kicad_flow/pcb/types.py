@@ -53,6 +53,60 @@ class Graphic:
 
 
 @dataclass(frozen=True)
+class BoardText:
+    """One literal board text item, identified for exact later editing."""
+
+    uuid: str
+    text: str
+    at: Point
+    layer: str
+    width: float
+    height: float
+    thickness: float
+    rotation: float = 0.0
+    mirror: bool = False
+    justify: str = "center"
+    vertical_justify: str = "center"
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete authored text properties as JSON."""
+        return {
+            "uuid": self.uuid,
+            "text": self.text,
+            "layer": self.layer,
+            **self.at.as_dict(),
+            "width": self.width,
+            "height": self.height,
+            "thickness": self.thickness,
+            "rotation": self.rotation,
+            "mirror": self.mirror,
+            "justify": self.justify,
+            "vertical_justify": self.vertical_justify,
+        }
+
+
+@dataclass(frozen=True)
+class TextBounds:
+    """KiCad's axis-aligned rendered bounds for one board text item."""
+
+    uuid: str
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def as_dict(self) -> dict[str, str | float]:
+        """Return the measured rectangle in board millimetres."""
+        return {
+            "uuid": self.uuid,
+            "x": round(self.x, 6),
+            "y": round(self.y, 6),
+            "width": round(self.width, 6),
+            "height": round(self.height, 6),
+        }
+
+
+@dataclass(frozen=True)
 class Pad:
     """One pad of a placed footprint, at its position **on the board**.
 
@@ -728,10 +782,11 @@ class Finding:
         return out
 
 
-__all__ = ["BoardRule", "ConnectedPad", "Connection", "ConnectivityGroup",
+__all__ = ["BoardRule", "BoardText", "ConnectedPad", "Connection", "ConnectivityGroup",
            "Constraint", "Finding", "Footprint", "FootprintDef", "Net",
            "NetClass", "NetClassAssignment", "NetConnectivity", "NetPad",
            "Pad", "PlacementEdge", "PlacementMeasurement",
            "PlacementNetLength", "PlacementOverlap", "PlacementProposal",
-           "Point", "RouteMetric", "Stackup", "StackupLayer", "Track", "Via",
+           "Point", "RouteMetric", "Stackup", "StackupLayer", "TextBounds",
+           "Track", "Via",
            "Zone"]

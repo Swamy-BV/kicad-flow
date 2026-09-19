@@ -148,9 +148,10 @@ async def build(client: Client) -> int:
 
     await call("add_board_texts", path=board, texts=[
         {"x": 30, "y": 54, "text": "SHAPES, NOT GUESSES",
-         "layer": "F.SilkS", "size": 1.1},
+         "layer": "F.SilkS", "width": 1.1, "height": 1.1, "thickness": 0.165},
         {"x": 30, "y": 40, "text": "KICAD FLOW",
-         "layer": "B.SilkS", "size": 1.4, "mirror": True},
+         "layer": "B.SilkS", "width": 1.4, "height": 1.4,
+         "thickness": 0.21, "mirror": True},
     ])
     listed = await call("list_graphics", path=board)
     final_expected = expected + 1

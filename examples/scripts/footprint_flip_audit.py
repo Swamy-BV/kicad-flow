@@ -116,7 +116,9 @@ async def main() -> None:
                     "y": 9,
                     "text": f"{side} {angle:g}",
                     "layer": layer,
-                    "size": 0.8,
+                    "width": 0.8,
+                    "height": 0.8,
+                    "thickness": 0.12,
                     "mirror": mirror,
                 })
         for row, (_prefix, _fp_id, label) in enumerate(STYLES):
@@ -126,7 +128,9 @@ async def main() -> None:
                     "y": 22.0 + row * 23.0,
                     "text": label,
                     "layer": layer,
-                    "size": 0.8,
+                    "width": 0.8,
+                    "height": 0.8,
+                    "thickness": 0.12,
                     "rotation": 90,
                     "mirror": mirror,
                 })

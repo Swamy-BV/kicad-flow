@@ -37,6 +37,7 @@ from .routing import RoutePath
 from .types import (
     BoardLimits,
     BoardRule,
+    BoardText,
     Connection,
     Finding,
     Footprint,
@@ -52,6 +53,7 @@ from .types import (
     Point,
     RouteMetric,
     Stackup,
+    TextBounds,
     Track,
     Via,
     Zone,
@@ -115,6 +117,10 @@ class Board(ABC):
         destination. Rule violations do not make a structurally valid design
         unsavable.
         """
+
+    @abstractmethod
+    def assert_current(self) -> None:
+        """Refuse when the board file changed since this object loaded or saved."""
 
     @abstractmethod
     def transaction(self) -> AbstractContextManager[None]:
@@ -434,14 +440,38 @@ class Board(ABC):
 
     @abstractmethod
     def text(self, x: float, y: float, text: str, *, layer: str,
-             size: float = 1.0, rotation: float = 0.0,
+             width: float = 1.0, height: float = 1.0,
+             thickness: float = 0.15, rotation: float = 0.0,
              mirror: bool = False, justify: str = "center",
-             vertical_justify: str = "center") -> Point:
-        """Place literal text, aligning its lines and block at the anchor.
+             vertical_justify: str = "center") -> BoardText:
+        """Place literal text and return its stable identity and properties.
 
         Horizontal alignment is left/center/right; vertical is top/center/bottom.
         Alignment is in the text's local frame, before rotation and mirroring.
         """
+
+    @abstractmethod
+    def texts(self, layer: str = "") -> list[BoardText]:
+        """Every literal board text item, optionally restricted to one layer."""
+
+    @abstractmethod
+    def update_text(
+        self, uuid: str, *, x: float | None = None, y: float | None = None,
+        text: str | None = None, layer: str | None = None,
+        width: float | None = None, height: float | None = None,
+        thickness: float | None = None, rotation: float | None = None,
+        mirror: bool | None = None, justify: str | None = None,
+        vertical_justify: str | None = None,
+    ) -> BoardText:
+        """Change only explicitly supplied properties of one text UUID."""
+
+    @abstractmethod
+    def remove_text(self, uuid: str) -> None:
+        """Remove one literal board text item by stable UUID."""
+
+    @abstractmethod
+    def text_bounds(self, uuids: tuple[str, ...] = ()) -> list[TextBounds]:
+        """Return KiCad-measured rendered bounds for selected or all board texts."""
 
     @abstractmethod
     def remove_copper(self, *, uuid: str = "", net: str = "", layer: str = "",

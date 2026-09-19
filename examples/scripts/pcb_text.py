@@ -39,7 +39,8 @@ async def main() -> None:
                 ):
                     notes.append({
                         "x": x, "y": y, "text": "LONG LINE\nMID\nI",
-                        "layer": layer, "size": 1.2, "mirror": mirror,
+                        "layer": layer, "width": 1.2, "height": 1.2,
+                        "thickness": 0.18, "mirror": mirror,
                         "justify": justify, "vertical_justify": vertical,
                         "rotation": angle,
                     })
@@ -54,19 +55,45 @@ async def main() -> None:
         result = await call("add_board_texts", path=path, texts=notes)
         assert len(result["texts"]) == 30
         for request, written in zip(notes, result["texts"], strict=True):
-            for field in ("text", "justify", "vertical_justify", "mirror", "rotation"):
+            for field in (
+                "text", "justify", "vertical_justify", "mirror", "rotation",
+                "width", "height", "thickness",
+            ):
                 assert written[field] == request[field], (field, request, written)
+            assert written["uuid"] and written["bounds"]["width"] > 0
 
-        # Legacy defaults and literal escapes retain their meaning.
+        listed = await call("list_board_texts", path=path)
+        assert listed["count"] == 30
+
+        # Defaults and literal escapes retain their meaning. Exercise exact
+        # update/remove identity without changing the final rendered input.
         default = {"x": 50, "y": 115, "text": r"literal \n", "layer": "F.SilkS"}
         result = await call("add_board_texts", path=path, texts=[default])
         written = result["texts"][0]
         assert written["justify"] == written["vertical_justify"] == "center"
         assert written["text"] == default["text"] and not written["mirror"]
+        assert written["width"] == written["height"] == 1.0
+        assert written["thickness"] == 0.15 and written["uuid"]
+        changed = (await call("update_board_texts", path=path, updates=[{
+            "uuid": written["uuid"], "x": 51, "text": "edited",
+            "width": 1.1, "height": 0.9, "thickness": 0.12,
+        }]))["texts"][0]
+        assert changed["x"] == 51 and changed["text"] == "edited"
+        assert changed["width"] == 1.1 and changed["height"] == 0.9
+        await call("close_board", path=path)
+        await call("reload_board", path=path)
+        round_trip = next(
+            item for item in (await call("list_board_texts", path=path))["texts"]
+            if item["uuid"] == written["uuid"]
+        )
+        assert round_trip["width"] == 1.1 and round_trip["height"] == 0.9
+        assert round_trip["thickness"] == 0.12 and round_trip["text"] == "edited"
+        await call("remove_board_texts", path=path, uuids=[written["uuid"]])
+        await call("add_board_texts", path=path, texts=[default])
         await call("save_board", path=path)
         before = hashlib.sha256(Path(path).read_bytes()).hexdigest()
         for changes in ({"justify": "flush"}, {"vertical_justify": "middle"},
-                        {"size": 0}, {"size": -1}):
+                        {"width": 0}, {"height": -1}, {"thickness": 0}):
             refused = await client.call_tool("add_board_texts", {
                 "path": path, "texts": [default, {**default, **changes}],
             }, raise_on_error=False)
@@ -78,8 +105,8 @@ async def main() -> None:
                        output_file=str(root / f"{side}.png"))
         native = await call("check_board", path=path)
         print(f"Native DRC: {native['errors']} errors (anchor guides intersect text).")
-        print("PASS: 30 text blocks, both sides, horizontal/vertical alignment, "
-              "90/270-degree rotation, default centering, literal escapes, "
+        print("PASS: stable IDs, list/update/remove, native bounds, independent "
+              "dimensions, 30 aligned text blocks on both sides, defaults, "
               "invalid-list refusal and native renders")
 
 

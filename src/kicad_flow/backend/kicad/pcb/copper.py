@@ -266,6 +266,7 @@ def refill(self: BoardState) -> int:
     self.save()
     result = run_pcbnew(_REFILL, {"board_path": str(self._path)})
     self._tree = loads(self._path.read_text(encoding="utf-8"))
+    self._accept_disk_revision()
     # `zones`, not `filled`: pcbnew reports how many it refilled and the
     # first version of this read a key that was never there, so a board
     # with two pours reported none and looked unfilled.

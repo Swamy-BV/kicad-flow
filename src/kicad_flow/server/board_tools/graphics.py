@@ -9,6 +9,7 @@ from .. import _meta
 from .._app import mcp
 from .models import (
     ArcGraphic,
+    BoardTextUpdate,
     CircleGraphic,
     GraphicMove,
     GraphicSpec,
@@ -131,22 +132,93 @@ def add_board_texts(path: str, texts: list[NewBoardText]) -> dict[str, Any]:
         return _fail(exc)
 
     def each(target: Board, note: NewBoardText) -> dict[str, Any]:
-        at = target.text(
+        made = target.text(
             note.x,
             note.y,
             note.text,
             layer=note.layer,
-            size=note.size,
+            width=note.width,
+            height=note.height,
+            thickness=note.thickness,
             rotation=note.rotation,
             mirror=note.mirror,
             justify=note.justify,
             vertical_justify=note.vertical_justify,
         )
-        return {
-            "text": note.text, "layer": note.layer, **at.as_dict(),
-            "size": note.size, "rotation": note.rotation % 360.0,
-            "mirror": note.mirror, "justify": note.justify,
-            "vertical_justify": note.vertical_justify,
-        }
+        return made.as_dict()
 
-    return _atomic_items(board, texts, "texts", each)
+    result = _atomic_items(board, texts, "texts", each)
+    if result.get("ok"):
+        _attach_text_bounds(board, result["texts"])
+    return result
+
+
+@mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
+def list_board_texts(path: str, layer: str = "") -> dict[str, Any]:
+    """List editable literal board text and KiCad-measured rendered bounds."""
+    try:
+        board = _board(path)
+        found = [item.as_dict() for item in board.texts(layer)]
+        _attach_text_bounds(board, found)
+    except _ERRORS as exc:
+        return _fail(exc)
+    return {"ok": True, "count": len(found), "texts": found}
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
+def update_board_texts(
+    path: str, updates: list[BoardTextUpdate]
+) -> dict[str, Any]:
+    """Update exact text UUIDs atomically; omitted properties are preserved."""
+    try:
+        board = _board(path)
+    except _ERRORS as exc:
+        return _fail(exc)
+
+    def each(target: Board, update: BoardTextUpdate) -> dict[str, Any]:
+        return target.update_text(
+            update.uuid,
+            x=update.x,
+            y=update.y,
+            text=update.text,
+            layer=update.layer,
+            width=update.width,
+            height=update.height,
+            thickness=update.thickness,
+            rotation=update.rotation,
+            mirror=update.mirror,
+            justify=update.justify,
+            vertical_justify=update.vertical_justify,
+        ).as_dict()
+
+    result = _atomic_items(board, updates, "texts", each)
+    if result.get("ok"):
+        _attach_text_bounds(board, result["texts"])
+    return result
+
+
+@mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
+def remove_board_texts(path: str, uuids: list[str]) -> dict[str, Any]:
+    """Remove literal board text by stable UUID, atomically and in order."""
+    try:
+        board = _board(path)
+    except _ERRORS as exc:
+        return _fail(exc)
+
+    def each(target: Board, uuid: str) -> str:
+        target.remove_text(uuid)
+        return uuid
+
+    return _atomic_items(board, uuids, "removed", each)
+
+
+def _attach_text_bounds(board: Board, items: list[dict[str, Any]]) -> None:
+    """Attach one native measurement pass to already serialized text items."""
+    if not items:
+        return
+    uuids = tuple(str(item["uuid"]) for item in items)
+    measured = {item.uuid: item.as_dict() for item in board.text_bounds(uuids)}
+    for item in items:
+        bounds = measured[str(item["uuid"])]
+        bounds.pop("uuid", None)
+        item["bounds"] = bounds

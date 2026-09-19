@@ -10,7 +10,8 @@ existing calls. For a note starting at its top-left anchor:
   "texts": [{
     "x": 20, "y": 10,
     "text": "POWER INPUT\n5V\nGND",
-    "layer": "F.SilkS", "size": 1.0,
+    "layer": "F.SilkS",
+    "width": 1.0, "height": 1.0, "thickness": 0.15,
     "justify": "left", "vertical_justify": "top"
   }]
 }
@@ -18,8 +19,9 @@ existing calls. For a note starting at its top-left anchor:
 
 Pass this to `add_board_texts`. JSON `\n` represents a newline; `\\n` is literal
 backslash-n. Horizontal choices are `left`, `center`, `right`; vertical choices
-are `top`, `center`, `bottom`. The reply includes the applied alignment, size,
-rotation and mirror setting. Size must be positive.
+are `top`, `center`, `bottom`. The reply includes a stable UUID, the applied
+alignment, independent character width/height/stroke thickness,
+rotation, mirror setting and KiCad-measured rendered bounds. Dimensions must be positive.
 
 Alignment uses the text's local frame, rotating and mirroring with it. Keep
 coordinates in board space. For readable back-side silkscreen, select
@@ -28,6 +30,11 @@ coordinates in board space. For readable back-side silkscreen, select
 For columns or custom line spacing, submit separate items with explicit anchors
 in the same list. Spaces inside a string do not provide reliable column stops.
 Multiline text uses KiCad's native line spacing and does not wrap automatically.
+
+Use `list_board_texts` to recover UUIDs and current properties,
+`update_board_texts` to change only explicitly supplied properties, and
+`remove_board_texts` to delete exact UUIDs. All writes take lists and roll back
+the entire list if any item fails.
 The saved alignment uses KiCad's [text effects format](https://dev-docs.kicad.org/en/file-formats/sexpr-intro/index.html#_text_effects).
 
 Run `python examples/scripts/pcb_text.py` for front/back renders covering unequal

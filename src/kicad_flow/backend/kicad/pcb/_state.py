@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from kicad_flow.pcb.types import (
     BoardLimits,
+    BoardText,
     Finding,
     Footprint,
     FootprintDef,
@@ -36,6 +37,9 @@ class BoardState(Protocol):
     def _copy_to(self, path: Path) -> BoardState:
         pass
 
+    def _accept_disk_revision(self) -> None:
+        pass
+
     def _as_footprint(self, node: Node, ref: str) -> Footprint:
         pass
 
@@ -46,6 +50,12 @@ class BoardState(Protocol):
         pass
 
     def _graphic_node(self, uuid: str) -> Node:
+        pass
+
+    def _text_from_node(self, node: Node) -> BoardText:
+        pass
+
+    def _text_node(self, uuid: str) -> Node:
         pass
 
     @staticmethod
@@ -120,6 +130,9 @@ class BoardState(Protocol):
         pass
 
     def graphics(self, layer: str = "") -> list[Graphic]:
+        pass
+
+    def texts(self, layer: str = "") -> list[BoardText]:
         pass
 
     @property

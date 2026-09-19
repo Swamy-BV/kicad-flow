@@ -494,7 +494,8 @@ async def build(client: Client) -> int:
     ])
     await call("add_board_texts", path=board, texts=[{
         "x": BOARD_W / 2, "y": BOARD_H - 2.2,
-        "text": "0-9  160 LEDs", "layer": "F.SilkS", "size": 1.4}])
+        "text": "0-9  160 LEDs", "layer": "F.SilkS",
+        "width": 1.4, "height": 1.4, "thickness": 0.21}])
     await call("save_board", path=board)
     filled = await call("refill_zones", path=board)
     print(f"pours: GND on F.Cu under the LEDs, {VCC} on B.Cu under the "
@@ -980,6 +981,26 @@ async def build(client: Client) -> int:
     await call("move_graphics", path=scratch, moves=[{
         "uuid": graphic_uuid, "dx": 1, "dy": 0}])
     await call("remove_graphics", path=scratch, uuids=[graphic_uuid])
+    text_result = await call("add_board_texts", path=scratch, texts=[{
+        "x": 10, "y": 3, "text": "EDIT", "layer": "F.SilkS",
+        "width": 1.0, "height": 0.8, "thickness": 0.12,
+    }])
+    text_uuid = text_result.get("texts", [{}])[0].get("uuid", "")
+    listed_text = await call("list_board_texts", path=scratch, layer="F.SilkS")
+    same("board text list keeps the uuid",
+         listed_text.get("texts", [{}])[0].get("uuid"), text_uuid)
+    updated_text = await call("update_board_texts", path=scratch, updates=[{
+        "uuid": text_uuid, "x": 11, "text": "EDITED", "width": 1.1,
+    }])
+    same("board text update keeps the uuid",
+         updated_text.get("texts", [{}])[0].get("uuid"), text_uuid)
+    same("board text update preserves omitted height",
+         updated_text.get("texts", [{}])[0].get("height"), 0.8)
+    await call("remove_board_texts", path=scratch, uuids=[text_uuid])
+    await call("save_board", path=scratch)
+    closed_board = await call("close_board", path=scratch)
+    same("close_board forgets an open board", closed_board.get("closed"), True)
+    await call("reload_board", path=scratch)
     await export_footprints(call, scratch, [
         {"fp_id": LAYER_TEST_FP, "ref": "LF", "x": 10, "y": 10,
          "anchor": "courtyard_center", "side": "F"},

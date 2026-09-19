@@ -39,5 +39,9 @@ jobs:
         run: python examples/scripts/led_digits.py
       - name: Symbol-search example
         run: python examples/scripts/symbol_search.py
+      - name: PCB text example
+        run: python examples/scripts/pcb_text.py
+      - name: Board session example
+        run: python examples/scripts/board_session.py
       - name: FreeRouting exchange example
         run: python examples/scripts/freerouting_exchange.py

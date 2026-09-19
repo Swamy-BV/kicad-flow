@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import math
 import os
 from collections.abc import Iterator
@@ -15,6 +16,7 @@ from kicad_flow.pcb.routing import RoutePath
 from kicad_flow.pcb.types import (
     BoardLimits,
     BoardRule,
+    BoardText,
     Connection,
     Finding,
     Footprint,
@@ -32,6 +34,7 @@ from kicad_flow.pcb.types import (
     Point,
     RouteMetric,
     Stackup,
+    TextBounds,
     Track,
     Via,
     Zone,
@@ -72,6 +75,17 @@ class KiCadBoard(Board):
         self._path = Path(path)
         self._tree = tree
         self._defs: dict[str, Node] = {}
+        self._disk_revision = self._file_revision()
+
+    def _file_revision(self) -> str | None:
+        """Hash the exact board bytes, or report that no file exists."""
+        if not self._path.is_file():
+            return None
+        return hashlib.sha256(self._path.read_bytes()).hexdigest()
+
+    def _accept_disk_revision(self) -> None:
+        """Record a disk change performed synchronously by this board object."""
+        self._disk_revision = self._file_revision()
 
     def _copy_to(self, path: Path) -> KiCadBoard:
         """An isolated in-memory copy for read-only candidate checks."""
@@ -150,6 +164,7 @@ class KiCadBoard(Board):
 
     def save(self, *, validate: bool = False) -> Path:
         """Atomically write the board and optionally prove KiCad can load it."""
+        self.assert_current()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         scratch = self._path.with_name(f".{self._path.stem}.writing{self._path.suffix}")
         try:
@@ -158,11 +173,23 @@ class KiCadBoard(Board):
                 from ..cli import cli
 
                 cli.drc(scratch)
+            self.assert_current()
             os.replace(scratch, self._path)  # atomic on the same volume
+            self._accept_disk_revision()
         except Exception:
             scratch.unlink(missing_ok=True)
             raise
         return self._path
+
+    def assert_current(self) -> None:
+        """Refuse to overwrite a board changed outside this open object."""
+        current = self._file_revision()
+        if current != self._disk_revision:
+            raise RuntimeError(
+                f"board changed on disk since it was opened: {self._path}. "
+                "Call reload_board to use the external version or close_board "
+                "to discard this cached board."
+            )
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[None]:
@@ -274,6 +301,14 @@ class KiCadBoard(Board):
     def _graphic_from_node(self, node: Node) -> Graphic:
         """Read one KiCad graphical node into the board contract."""
         return _graphics._graphic_from_node(self, node)
+
+    def _text_node(self, uuid: str) -> Node:
+        """The top-level literal board text carrying *uuid*."""
+        return _graphics._text_node(self, uuid)
+
+    def _text_from_node(self, node: Node) -> BoardText:
+        """Read one KiCad text node into the board contract."""
+        return _graphics._text_from_node(self, node)
 
     def find_footprints(self, query: str, limit: int = 20) -> list[FootprintDef]:
         """Library footprints whose ``Library:Footprint`` id contains *query*."""
@@ -526,17 +561,48 @@ class KiCadBoard(Board):
         text: str,
         *,
         layer: str,
-        size: float = 1.0,
+        width: float = 1.0,
+        height: float = 1.0,
+        thickness: float = 0.15,
         rotation: float = 0.0,
         mirror: bool = False,
         justify: str = "center",
         vertical_justify: str = "center",
-    ) -> Point:
-        """Put text on a layer -- a legend, a fab note, a designator."""
+    ) -> BoardText:
+        """Put one identified literal text item on a board layer."""
         return _graphics.text(
-            self, x, y, text, layer=layer, size=size, rotation=rotation, mirror=mirror,
+            self, x, y, text, layer=layer, width=width, height=height,
+            thickness=thickness, rotation=rotation, mirror=mirror,
             justify=justify, vertical_justify=vertical_justify,
         )
+
+    def texts(self, layer: str = "") -> list[BoardText]:
+        """Every literal board text item, in file order."""
+        return _graphics.texts(self, layer)
+
+    def update_text(
+        self, uuid: str, *, x: float | None = None, y: float | None = None,
+        text: str | None = None, layer: str | None = None,
+        width: float | None = None, height: float | None = None,
+        thickness: float | None = None, rotation: float | None = None,
+        mirror: bool | None = None, justify: str | None = None,
+        vertical_justify: str | None = None,
+    ) -> BoardText:
+        """Change only explicitly supplied properties of one text UUID."""
+        return _graphics.update_text(
+            self, uuid, x=x, y=y, text=text, layer=layer, width=width,
+            height=height, thickness=thickness, rotation=rotation,
+            mirror=mirror, justify=justify,
+            vertical_justify=vertical_justify,
+        )
+
+    def remove_text(self, uuid: str) -> None:
+        """Remove one literal board text item by UUID."""
+        _graphics.remove_text(self, uuid)
+
+    def text_bounds(self, uuids: tuple[str, ...] = ()) -> list[TextBounds]:
+        """Return KiCad-measured rendered bounds for board texts."""
+        return _graphics.text_bounds(self, uuids)
 
     def remove_copper(
         self,
@@ -747,7 +813,13 @@ def create(path: str | Path, *, layers: int = 2, thickness: float = 1.6) -> Boar
 def load(path: str | Path) -> Board:
     """Open an existing board."""
     file = Path(path)
-    return KiCadBoard(file, loads(file.read_text(encoding="utf-8")))
+    raw = file.read_bytes()
+    board = KiCadBoard(file, loads(raw.decode("utf-8")))
+    # Bind the parsed tree to the bytes that produced it. If the file changed
+    # during this load, the first access detects the new hash instead of
+    # treating an old tree as current.
+    board._disk_revision = hashlib.sha256(raw).hexdigest()
+    return board
 
 
 __all__ = ["KiCadBoard", "create", "load"]

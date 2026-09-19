@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import tempfile
 from pathlib import Path
+
+from kicad_flow.pcb.types import Point
 
 from .._sexpr import dumps
 from ._runner import run_pcbnew
@@ -36,6 +39,36 @@ if success:
     save_board(board, job['output'])
 print(json.dumps({'ok': bool(success)}))
 """
+
+_RESOLVED_OUTLINE = r"""
+import json, sys
+import pcbnew
+
+job = json.load(open(sys.argv[1], encoding="utf-8"))
+board = pcbnew.LoadBoard(job["board"])
+board.GetDesignSettings().m_MaxError = pcbnew.FromMM(float(job["max_error"]))
+shape = pcbnew.SHAPE_POLY_SET()
+valid = board.GetBoardPolygonOutlines(shape, False, None, True, False)
+if not valid:
+    print(json.dumps({"ok": False, "error": "invalid closed Edge.Cuts outline"}))
+else:
+    contours = []
+    def add(kind, parent, chain):
+        contours.append({
+            "kind": kind,
+            "parent": parent,
+            "points": [[mm(chain.CPoint(i).x, 6), mm(chain.CPoint(i).y, 6)]
+                       for i in range(chain.PointCount())],
+        })
+    for outer in range(shape.OutlineCount()):
+        add("outline", outer, shape.COutline(outer))
+        for hole in range(shape.HoleCount(outer)):
+            add("hole", outer, shape.CHole(outer, hole))
+    print(json.dumps({"ok": True, "contours": contours}))
+"""
+
+_OUTLINE_MAX_ERROR_MM = 0.005
+_OUTLINE_TOLERANCE_MM = 0.02
 
 
 def _snapshot(board: BoardState, directory: Path) -> Path:
@@ -84,7 +117,7 @@ def import_session(
         raise ValueError("routing output must be beside the source project")
     if target.exists():
         raise ValueError(f"routing output already exists: {target}")
-    companions = (".kicad_pro", ".kicad_dru", ".kicad_sch")
+    companions = (".kicad_pro", ".kicad_dru", ".kicad_sch", ".kicad-flow.json")
     for suffix in companions:
         source = board._path.with_suffix(suffix)
         destination = target.with_suffix(suffix)
@@ -102,6 +135,11 @@ def import_session(
         )
         if not result.get("ok") or not scratch.is_file():
             raise RuntimeError("KiCad could not import the routing session")
+        outline_difference = _outline_difference(snapshot, scratch)
+        if outline_difference:
+            raise RuntimeError(
+                f"routing import changed the board outline: {outline_difference}"
+            )
         # Prove the candidate parses before publishing it as a board.
         from .board import load
 
@@ -128,8 +166,6 @@ def import_session(
             raise RuntimeError("routing import changed footprint IDs or pad nets")
         if routed.layers != board.layers:
             raise RuntimeError("routing import changed the copper layer stack")
-        if routed.graphics("Edge.Cuts") != board.graphics("Edge.Cuts"):
-            raise RuntimeError("routing import changed the board outline")
         os.replace(scratch, target)
     for suffix in companions:
         source = board._path.with_suffix(suffix)
@@ -137,3 +173,71 @@ def import_session(
         if source.is_file() and not destination.exists():
             shutil.copyfile(source, destination)
     return target
+
+
+def _resolved_contours(path: Path) -> list[tuple[str, tuple[Point, ...]]]:
+    """Resolve every outside and cutout contour through KiCad itself."""
+    result = run_pcbnew(
+        _RESOLVED_OUTLINE,
+        {"board": str(path), "max_error": _OUTLINE_MAX_ERROR_MM},
+    )
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("error") or "invalid Edge.Cuts outline"))
+    contours: list[tuple[str, tuple[Point, ...]]] = []
+    for raw in result.get("contours", []):
+        points = tuple(Point(float(x), float(y)) for x, y in raw["points"])
+        contours.append((str(raw["kind"]), points))
+    return contours
+
+
+def _outline_difference(source: Path, routed: Path) -> str:
+    """Describe a real geometric outline difference, ignoring representation."""
+    before = _resolved_contours(source)
+    after = _resolved_contours(routed)
+    for kind in ("outline", "hole"):
+        left = [points for name, points in before if name == kind]
+        right = [points for name, points in after if name == kind]
+        if len(left) != len(right):
+            return f"{kind} contour count is {len(right)}, expected {len(left)}"
+        remaining = list(right)
+        for index, contour in enumerate(left):
+            if not remaining:
+                return f"missing {kind} contour {index}"
+            choices = [(_ring_deviation(contour, candidate), offset)
+                       for offset, candidate in enumerate(remaining)]
+            deviation, match = min(choices)
+            if deviation > _OUTLINE_TOLERANCE_MM:
+                return (
+                    f"{kind} contour {index} deviates by {deviation:.6f} mm; "
+                    f"tolerance is {_OUTLINE_TOLERANCE_MM:.6f} mm"
+                )
+            remaining.pop(match)
+    return ""
+
+
+def _ring_deviation(first: tuple[Point, ...], second: tuple[Point, ...]) -> float:
+    """Symmetric point-to-segment deviation for two closed sampled contours."""
+    if len(first) < 3 or len(second) < 3:
+        return math.inf
+    return max(_directed_deviation(first, second), _directed_deviation(second, first))
+
+
+def _directed_deviation(points: tuple[Point, ...], ring: tuple[Point, ...]) -> float:
+    """Largest distance from sampled *points* to the closed polyline *ring*."""
+    segments = list(zip(ring, (*ring[1:], ring[0]), strict=True))
+    return max(
+        min(_point_segment_distance(point, start, end) for start, end in segments)
+        for point in points
+    )
+
+
+def _point_segment_distance(point: Point, start: Point, end: Point) -> float:
+    """Euclidean distance from one point to a finite line segment."""
+    dx, dy = end.x - start.x, end.y - start.y
+    length_squared = dx * dx + dy * dy
+    if length_squared == 0:
+        return math.hypot(point.x - start.x, point.y - start.y)
+    position = ((point.x - start.x) * dx + (point.y - start.y) * dy) / length_squared
+    position = max(0.0, min(1.0, position))
+    x, y = start.x + position * dx, start.y + position * dy
+    return math.hypot(point.x - x, point.y - y)

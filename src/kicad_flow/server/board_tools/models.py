@@ -334,7 +334,9 @@ class NewBoardText(_StrictModel):
     y: float = Field(description="Anchor Y in mm.")
     text: str = Field(description="Literal text; newlines are preserved.")
     layer: str = Field(description="Board layer name, e.g. F.SilkS.")
-    size: float = Field(default=1.0, gt=0, description="Text height and width in mm.")
+    width: float = Field(default=1.0, gt=0, description="Character width in mm.")
+    height: float = Field(default=1.0, gt=0, description="Character height in mm.")
+    thickness: float = Field(default=0.15, gt=0, description="Stroke width in mm.")
     rotation: float = Field(default=0.0, description="Angle in degrees.")
     mirror: bool = Field(default=False, description="Mirror the text.")
     justify: Literal["left", "center", "right"] = Field(
@@ -343,6 +345,42 @@ class NewBoardText(_StrictModel):
     vertical_justify: Literal["top", "center", "bottom"] = Field(
         default="center", description="Vertical alignment of the whole text block."
     )
+
+
+class BoardTextUpdate(_StrictModel):
+    """Explicit changes to one board text UUID; omitted properties are preserved."""
+
+    uuid: str = Field(description="Stable identity returned by add/list_board_texts.")
+    x: float | None = Field(default=None, description="New absolute anchor X in mm.")
+    y: float | None = Field(default=None, description="New absolute anchor Y in mm.")
+    text: str | None = Field(default=None, description="New literal text.")
+    layer: str | None = Field(default=None, description="New board layer.")
+    width: float | None = Field(
+        default=None, gt=0, description="Character width in mm."
+    )
+    height: float | None = Field(
+        default=None, gt=0, description="Character height in mm."
+    )
+    thickness: float | None = Field(
+        default=None, gt=0, description="Stroke width in mm."
+    )
+    rotation: float | None = Field(default=None, description="New absolute angle.")
+    mirror: bool | None = Field(default=None, description="New mirror state.")
+    justify: Literal["left", "center", "right"] | None = None
+    vertical_justify: Literal["top", "center", "bottom"] | None = None
+
+    @model_validator(mode="after")
+    def changes_something(self) -> BoardTextUpdate:
+        """Refuse an update that identifies text but supplies no change."""
+        if all(
+            getattr(self, name) is None
+            for name in (
+                "x", "y", "text", "layer", "width", "height", "thickness",
+                "rotation", "mirror", "justify", "vertical_justify",
+            )
+        ):
+            raise ValueError("a board text update must supply at least one change")
+        return self
 
 
 class StackupLayerSpec(_StrictModel):

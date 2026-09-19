@@ -23,7 +23,7 @@ async def main() -> None:
     routed = str(root / "pair-routed.kicad_pcb")
     for name in (board, dsn, ses, routed):
         Path(name).unlink(missing_ok=True)
-    for suffix in (".kicad_pro", ".kicad_dru", ".kicad_sch"):
+    for suffix in (".kicad_pro", ".kicad_dru", ".kicad_sch", ".kicad-flow.json"):
         Path(routed).with_suffix(suffix).unlink(missing_ok=True)
 
     async with Client(mcp) as client:
@@ -65,8 +65,10 @@ async def main() -> None:
             "kind": "rectangle", "layer": "Edge.Cuts",
             "x1": 10, "y1": 10, "x2": 45, "y2": 30,
         }])
+        await call("set_board_grid", path=board, spacing_mm=0.2)
         await call("save_board", path=board)
         source_bytes = Path(board).read_bytes()
+        source_metadata = Path(board).with_suffix(".kicad-flow.json").read_bytes()
         before = await call("unrouted_connections", path=board)
         assert before["count"] == 1, before
         await call("export_routing_design", path=board, output_file=dsn)
@@ -86,7 +88,10 @@ async def main() -> None:
         assert result["drc_errors"] == 0, result
         assert (await call("unrouted_connections", path=board))["count"] == 1
         assert Path(board).read_bytes() == source_bytes
-        print("PASS FreeRouting DSN -> SES -> KiCad; source board unchanged")
+        routed_metadata = Path(routed).with_suffix(".kicad-flow.json").read_bytes()
+        assert routed_metadata == source_metadata
+        print("PASS FreeRouting DSN -> SES -> KiCad; source board unchanged; "
+              "KiCadFlow metadata preserved")
 
 
 if __name__ == "__main__":

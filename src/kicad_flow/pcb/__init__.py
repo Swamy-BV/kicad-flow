@@ -24,6 +24,7 @@ from .api import Board
 from .types import (
     BoardLimits,
     BoardRule,
+    BoardText,
     ConnectedPad,
     Connection,
     ConnectivityGroup,
@@ -47,17 +48,19 @@ from .types import (
     RouteMetric,
     Stackup,
     StackupLayer,
+    TextBounds,
     Track,
     Via,
     Zone,
 )
 
-__all__ = ["Board", "BoardLimits", "BoardRule", "ConnectedPad", "Connection",
+__all__ = ["Board", "BoardLimits", "BoardRule", "BoardText", "ConnectedPad",
+           "Connection",
            "ConnectivityGroup", "Constraint", "Finding",
            "Footprint", "FootprintDef", "Net", "NetClass",
            "NetClassAssignment", "NetClassPattern", "NetConnectivity", "NetPad", "Pad",
            "PlacementEdge",
            "PlacementMeasurement", "PlacementNetLength", "PlacementOverlap",
            "PlacementProposal", "Point", "RouteMetric", "Stackup",
-           "StackupLayer", "Track",
+           "StackupLayer", "TextBounds", "Track",
            "Via", "Zone"]

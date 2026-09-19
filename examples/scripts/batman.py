@@ -334,11 +334,12 @@ async def build(client: Client) -> int:
     # Keep the silkscreen sparse so the LEDs and silhouette stay legible.
     await call("add_board_texts", path=board, texts=[
         {"x": 50, "y": 31, "text": "GOTHAM // 16",
-         "layer": "F.SilkS", "size": 0.9},
+         "layer": "F.SilkS", "width": 0.9, "height": 0.9,
+         "thickness": 0.135},
         {"x": 55, "y": 39, "text": "+5V", "layer": "B.SilkS",
-         "size": 0.8, "mirror": True},
+         "width": 0.8, "height": 0.8, "thickness": 0.12, "mirror": True},
         {"x": 45, "y": 41.5, "text": "GND", "layer": "B.SilkS",
-         "size": 0.8, "mirror": True},
+         "width": 0.8, "height": 0.8, "thickness": 0.12, "mirror": True},
     ])
 
     await call("save_board", path=board)
