@@ -1,44 +1,52 @@
-# kicad-flow
+<h1 align="center">KiCadFlow</h1>
 
-An MCP server for authoring KiCad 10 schematics and printed circuit boards.
-It exposes small, composable operations—place a part, inspect its pins, draw a
-wire, assign a net, add copper—and reports the geometry or connectivity KiCad
-actually produced.
+<p align="center"><strong>Build, inspect, and validate KiCad designs through MCP.</strong></p>
 
-The boundary is intentional: the caller chooses the circuit, placement and
-routing; KiCadFlow handles file-format mechanics, readback and validation. It
-does not contain an autoplacer, autorouter or inferred design policy.
-An [optional FreeRouting exchange](docs/freerouting.md) lets a caller explicitly
-export DSN, run the external router and inspect a separate imported PCB.
+<p align="center">
+  Small composable tools for schematics, PCB layout, manufacturing constraints,<br>
+  and visual review—backed by KiCad's own file formats and command-line checks.
+</p>
 
-## Examples
+<p align="center">
+  <a href="https://github.com/Swamy-BV/kicad-flow/actions/workflows/ci.yml"><img src="https://github.com/Swamy-BV/kicad-flow/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/Swamy-BV/kicad-flow/actions/workflows/codeql.yml"><img src="https://github.com/Swamy-BV/kicad-flow/actions/workflows/codeql.yml/badge.svg" alt="CodeQL status"></a>
+  <a href="https://github.com/Swamy-BV/kicad-flow/actions/workflows/scorecard.yml"><img src="https://github.com/Swamy-BV/kicad-flow/actions/workflows/scorecard.yml/badge.svg" alt="OpenSSF Scorecard status"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10 or newer"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="AGPL 3.0 license"></a>
+</p>
 
-The scripts in [`examples/scripts/`](examples/scripts/) build these designs
-through MCP and check the results.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#capabilities">Capabilities</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="#development">Development</a>
+</p>
 
-| | |
-| --- | --- |
-| **[fc](examples/fc/)** — Multi-sheet STM32 flight-controller schematic exercise. It reports ERC and visual-layout findings separately.<br><br>[![](examples/fc/fc-3.png)](examples/fc/) | **[led_digits](examples/led_digits/)** — Full schematic/PCB and API-coverage fixture with completed routing.<br><br>[![](examples/led_digits/led_digits-3d.png)](examples/led_digits/) |
-| **[art_board](examples/art_board/)** — Line-and-arc outline, cutouts and editable front/back silkscreen primitives.<br><br>[![](examples/art_board/art_board-3d.png)](examples/art_board/) | **[batman](examples/batman/)** — Shaped LED schematic and PCB with copper pours and reverse-side artwork.<br><br>[![](examples/batman/batman-3d.png)](examples/batman/) |
-| **[esc4in1](examples/esc4in1/)** — AM32 four-channel hierarchy and dense two-sided placement exercise. The schematic is clean; the PCB remains an intentionally reported work in progress, not a fabrication reference.<br><br>[![](examples/esc4in1/esc4in1-3d.png)](examples/esc4in1/) | |
+<p align="center">
+  <a href="examples/led_digits/"><img src="examples/led_digits/led_digits-3d.png" alt="A four-digit LED display PCB generated through KiCadFlow" width="760"></a><br>
+  <sub>A routed four-digit display created and checked end to end through MCP.</sub>
+</p>
 
-Run an example from the repository root, for example:
+KiCadFlow is an MCP server for authoring KiCad 10 schematics and printed
+circuit boards. An AI agent or other MCP client can place components, inspect
+their actual pins, draw wires, synchronize a schematic with a PCB, route
+copper, run ERC and DRC, and render the result for review.
 
-```powershell
-.\.venv\Scripts\python.exe examples\scripts\led_digits.py
-```
-
-Tested on Windows with KiCad 10. Other platforms are not yet supported.
-Coordinates and dimensions are in millimetres.
+The caller chooses the circuit, placement, and routing. KiCadFlow handles the
+file-format mechanics, reports the geometry and connectivity KiCad produced,
+and makes validation results available as structured data. This keeps the API
+predictable: each primitive does one job and returns what it made.
 
 ## Quick start
 
-Requirements:
+### Requirements
 
+- Windows
 - Python 3.10 or newer
-- KiCad 10, with `kicad-cli` on `PATH` or in its default Windows installation
+- KiCad 10, with `kicad-cli` on `PATH` or in its default installation folder
 
-From PowerShell:
+Install from a clone and verify the environment:
 
 ```powershell
 python -m venv .venv
@@ -46,67 +54,24 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m kicad_flow.server doctor
 ```
 
-`doctor` checks the installation without changing files.
-
-## Run the server
-
-| Mode | Command | Connect from the MCP client |
-| --- | --- | --- |
-| stdio | `.\.venv\Scripts\python.exe -m kicad_flow.server` | Configure the client to spawn this command. |
-| HTTP | `.\.venv\Scripts\python.exe -m kicad_flow.server --http` | `http://127.0.0.1:8471/mcp` |
-
-Use stdio for desktop clients. Run with `--help` for server options.
-Add `--tool-search` to discover tool schemas on demand. See
-[execution and discovery](docs/mcp-execution.md) for behavior and benchmarks.
-
-The live monitor at `http://127.0.0.1:8472` shows the active design and tool calls.
-Board 3D view includes top, bottom and edge cameras; the bottom views expose
-back-side placement and routing during a build.
-The feed stays compact. Complete local replay records go to `replay.jsonl`
-beside the activity log and, once a project is known, its `logs/replay.jsonl`;
-neither file is served to the browser.
-Set `KICAD_FLOW_MONITOR=0` to disable it, or use another port number.
-
-## What the server covers
-
-- **Schematics:** components, wiring, labels, hierarchical sheets, netlists,
-  ERC and layout checks.
-- **PCBs:** footprint export and net sync from schematics, tracks, vias, zones,
-  stackups, outlines, silkscreen, DRC and 2D/3D renders.
-  `check_board(schematic_parity=true)` opts into KiCad's native cross-check.
-- **Net colors:** separate PCB and schematic colors with persistent class
-  assignments. See [net colors](docs/net-colors.md).
-- **Preflight:** check proposed component placement or board routing before
-  applying it. List writes are atomic.
-- **Spatial inspection:** local schematic/PCB geometry, revision updates,
-  focused overlap repair and net-class readback without repeated images.
-  See [local observations](docs/local-observations.md).
-
-The caller supplies placement and routing decisions. A successful tool call
-does not mean the design passes ERC or DRC.
-
-## Providers and project assets
-
-Optional JLCPCB support includes manufacturing capabilities and a local parts
-catalogue for `search_parts`. Data is a downloaded snapshot; verify stock and
-pricing before ordering. See [provider setup](src/kicad_flow/providers/jlcpcb/README.md).
-
-Import symbols, footprints and 3D models into project-local libraries without
-changing KiCad's global libraries. For design notes and datasheets, see
-[project documentation guidance](docs/project-documentation.md).
-
-## Windows release
-
-Build a standalone application:
+Start the server over stdio for a desktop MCP client:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+.\.venv\Scripts\python.exe -m kicad_flow.server
 ```
 
-Run `dist\kicad-flow\kicad-flow.exe`. Distribute the entire directory.
-KiCad 10 is still required; the optional parts catalogue is separate.
+Or expose it over HTTP:
 
-## Claude Desktop example
+```powershell
+.\.venv\Scripts\python.exe -m kicad_flow.server --http
+```
+
+The MCP endpoint is `http://127.0.0.1:8471/mcp`. The live monitor opens at
+`http://127.0.0.1:8472` and shows the active design, renders, and tool calls.
+Run with `--help` for all server options.
+
+<details>
+<summary><strong>Claude Desktop configuration</strong></summary>
 
 Use stdio and point `command` at the virtual-environment interpreter:
 
@@ -123,6 +88,115 @@ Use stdio and point `command` at the virtual-environment interpreter:
 
 Restart Claude Desktop after changing its configuration.
 
+</details>
+
+## Capabilities
+
+| Area | What the MCP tools provide |
+| --- | --- |
+| **Schematics** | Components, fields, wiring, labels, hierarchical sheets, footprint assignment, netlists, ERC, and layout checks |
+| **PCB layout** | Schematic-to-PCB export and synchronization, footprint movement, tracks, vias, zones, outlines, stackups, silkscreen, and editable board text |
+| **Inspection** | Pin and pad geometry, connectivity, local spatial observations, revision deltas, text bounds, top/bottom renders, and 3D views |
+| **Validation** | Atomic preflight checks for proposed writes, ERC, DRC, schematic/PCB parity checks, and manufacturing limits |
+| **Manufacturing** | Fabrication profiles, JLCPCB capabilities and local parts data, Gerber/drill export, and project-local library assets |
+| **Routing exchange** | Explicit DSN export and SES import for optional FreeRouting workflows while preserving KiCadFlow project metadata |
+
+All caller-supplied coordinates and dimensions are in millimetres. A successful
+write means the operation completed; the design is complete only when its
+connectivity, ERC, DRC, and rendered output have also been checked.
+
+## Examples
+
+Every example is built through `Client(mcp)`, so the scripts exercise the same
+tool schemas and contracts exposed to an MCP client.
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <a href="examples/led_digits/"><img src="examples/led_digits/led_digits-3d.png" alt="Four-digit LED display PCB" width="100%"></a><br>
+      <strong><a href="examples/led_digits/">LED digits</a></strong><br>
+      Complete schematic, PCB, routing, and API-coverage fixture.
+    </td>
+    <td width="50%" align="center">
+      <a href="examples/batman/"><img src="examples/batman/batman-3d.png" alt="Batman-shaped LED PCB" width="100%"></a><br>
+      <strong><a href="examples/batman/">Batman</a></strong><br>
+      Shaped LED board with copper pours and reverse-side artwork.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="examples/art_board/"><img src="examples/art_board/art_board-3d.png" alt="Art board with rounded outline and cutouts" width="100%"></a><br>
+      <strong><a href="examples/art_board/">Art board</a></strong><br>
+      Line-and-arc outline, cutouts, and front/back silkscreen primitives.
+    </td>
+    <td width="50%" align="center">
+      <a href="examples/esc4in1/"><img src="examples/esc4in1/esc4in1-3d.png" alt="Four-in-one ESC PCB" width="100%"></a><br>
+      <strong><a href="examples/esc4in1/">4-in-1 ESC</a></strong><br>
+      AM32 hierarchy and dense two-sided placement exercise. The PCB remains a reported work in progress, not a fabrication reference.
+    </td>
+  </tr>
+</table>
+
+The [flight-controller example](examples/fc/) exercises a multi-sheet STM32
+schematic and reports electrical and visual-layout findings separately.
+
+Run an example from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe examples\scripts\led_digits.py
+```
+
+## Design model
+
+KiCadFlow separates facts from design decisions. The server resolves facts a
+caller cannot safely infer from the file format, such as the position of a
+rotated and mirrored pin, the net KiCad assigned to a pad, or the exact object
+created by a write. The caller supplies choices such as component placement,
+wire paths, labels, and routing.
+
+Repeatable writes accept lists and apply atomically. This lets an agent submit
+a placement or routing stage, inspect it on an isolated board, and commit it
+without hiding decisions inside an autoplacer or autorouter. The optional
+[FreeRouting exchange](docs/freerouting.md) remains an explicit external step.
+
+## Documentation
+
+- [MCP execution and on-demand tool discovery](docs/mcp-execution.md)
+- [Local schematic and PCB observations](docs/local-observations.md)
+- [Routing preview and fabrication-profile validation](docs/routing-preview-validation.md)
+- [Differential-pair inspection and validation](docs/differential-pairs.md)
+- [PCB text editing and native bounds](docs/pcb-text.md)
+- [Net colors and class assignments](docs/net-colors.md)
+- [Project documentation and datasheet guidance](docs/project-documentation.md)
+- [Code organization](docs/code-organization.md)
+
+Optional JLCPCB support uses a downloaded manufacturing-capability and parts
+snapshot. Verify current stock, pricing, and capabilities before ordering. See
+the [provider setup guide](src/kicad_flow/providers/jlcpcb/README.md).
+
+## Tool discovery and monitoring
+
+Add `--tool-search` to either transport to expose a compact discovery surface
+instead of the full tool catalogue at startup. See the
+[execution guide](docs/mcp-execution.md) for behavior and measured context-size
+results.
+
+The live monitor includes top, bottom, and edge cameras for PCB review. Compact
+activity is shown in the browser; complete local replay records are written to
+`replay.jsonl`. Set `KICAD_FLOW_MONITOR=0` to disable the monitor or set it to a
+different port number.
+
+## Windows release
+
+Build the standalone application:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
+```
+
+Run `dist\kicad-flow\kicad-flow.exe` and distribute the entire directory.
+KiCad 10 remains required; the optional parts catalogue is separate.
+
 ## Development
 
 ```powershell
@@ -133,5 +207,5 @@ python examples\scripts\led_digits.py
 python examples\scripts\symbol_search.py
 ```
 
-Examples are the integration checks; there is no separate unit suite.
-See [code organization](docs/code-organization.md) for module responsibilities.
+The examples are the integration checks; there is no separate unit suite. See
+[code organization](docs/code-organization.md) for module responsibilities.
