@@ -33,7 +33,8 @@ from .limits import BATCH_LIMIT, BatchItems
 async def batch(
     ctx: Context,
     ops: Annotated[BatchItems[dict[str, Any]], Field(
-        description="Calls to run in order, each "
+        description=f"Maximum {BATCH_LIMIT} calls. Do not exceed this limit. "
+                    "Calls to run in order, each "
                     '`{"tool": "save_board", "args": {"path": ...}}`. '
                     "Any schematic or board tool except `batch` itself.")],
     stop_on_error: Annotated[bool, Field(

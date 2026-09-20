@@ -52,6 +52,10 @@ async def main() -> None:
                         )
                 if any("maxItems" in variant for variant in variants):
                     assert any(v.get("maxItems") == BATCH_LIMIT for v in variants)
+                    assert any(
+                        f"Maximum {BATCH_LIMIT} " in v.get("description", "")
+                        for v in variants
+                    ), (tool.name, field)
                     limited.append((tool.name, field))
         assert ("batch", "ops") in limited
         assert ("add_components", "parts") in limited

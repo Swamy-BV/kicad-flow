@@ -22,4 +22,7 @@ def _batch_limit() -> int:
 # Resolve once, so validation and advertised schemas agree for this server process.
 BATCH_LIMIT = _batch_limit()
 _Item = TypeVar("_Item")
-BatchItems = Annotated[list[_Item], Field(max_length=BATCH_LIMIT)]
+BatchItems = Annotated[list[_Item], Field(
+    max_length=BATCH_LIMIT,
+    description=f"Maximum {BATCH_LIMIT} items per call. Do not exceed this limit.",
+)]
