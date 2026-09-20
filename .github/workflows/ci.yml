@@ -37,6 +37,8 @@ jobs:
         run: python examples/scripts/fc.py
       - name: Schematic and PCB example
         run: python examples/scripts/led_digits.py
+      - name: Schematic graphics example
+        run: python examples/scripts/schematic_groups.py
       - name: Symbol-search example
         run: python examples/scripts/symbol_search.py
       - name: PCB text example

@@ -1,4 +1,4 @@
-"""The whole schematic contract: sixteen primitives, and nothing above them.
+"""The whole schematic contract: primitive operations, and nothing above them.
 
 This interface is the only thing the MCP server talks to. It names no file
 format and no tool -- :class:`~kicad_flow.backend.kicad.KiCadSheet` is one
@@ -40,7 +40,9 @@ from .types import (
     Point,
     SceneBounds,
     SceneSnapshot,
+    SheetGraphic,
     SheetRef,
+    SheetText,
     SymbolDef,
 )
 
@@ -435,8 +437,8 @@ class Sheet(ABC):
     @abstractmethod
     def text(self, x: float, y: float, text: str, *, size: float = 1.27,
              rotation: float = 0.0, bold: bool = False,
-             justify: str = "left") -> Point:
-        """Write a note on the sheet, and return where it landed.
+             justify: str = "left") -> SheetText:
+        """Write a note and return its stable identity and properties.
 
         Plain text and nothing else: it names no net, joins nothing, and ERC
         never sees it. That is the difference from `label`, which looks the
@@ -444,6 +446,58 @@ class Sheet(ABC):
         notes a reader needs and the netlist must not have -- a revision
         block, a derivation, "all VBAT caps 50 V".
         """
+
+    @abstractmethod
+    def texts(self) -> list[SheetText]:
+        """Every literal note on this sheet, in file order."""
+
+    @abstractmethod
+    def update_text(
+        self,
+        uuid: str,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+        text: str | None = None,
+        size: float | None = None,
+        rotation: float | None = None,
+        bold: bool | None = None,
+        justify: str | None = None,
+    ) -> SheetText:
+        """Update explicit properties of one note and return its new state."""
+
+    @abstractmethod
+    def remove_text(self, uuid: str) -> None:
+        """Remove exactly one literal note by stable UUID."""
+
+    @abstractmethod
+    def graphic(
+        self,
+        kind: str,
+        points: list[tuple[float, float]],
+        *,
+        width: float = 0.0,
+        stroke: str = "default",
+    ) -> SheetGraphic:
+        """Draw one non-electrical polyline or rectangle.
+
+        The caller supplies every point. A rectangle takes its two opposite
+        corners; a polyline takes two or more vertices. Width zero uses the
+        schematic's configured default. The returned UUID identifies the
+        exact graphic for later movement or removal.
+        """
+
+    @abstractmethod
+    def graphics(self) -> list[SheetGraphic]:
+        """Every root-level schematic graphic, in file order."""
+
+    @abstractmethod
+    def move_graphic(self, uuid: str, dx: float, dy: float) -> SheetGraphic:
+        """Shift one graphic by UUID; symbols, wires and text do not follow."""
+
+    @abstractmethod
+    def remove_graphic(self, uuid: str) -> None:
+        """Remove exactly one graphical primitive by stable UUID."""
 
     # -- editing what is already drawn --------------------------------------
     #

@@ -24,6 +24,57 @@ class Point:
 
 
 @dataclass(frozen=True)
+class SheetGraphic:
+    """One non-electrical schematic drawing primitive.
+
+    ``points`` are the geometry the caller supplied: opposite corners for a
+    rectangle, or every vertex for a polyline.  The stable UUID identifies the
+    exact item for later movement or removal.
+    """
+
+    uuid: str
+    kind: str
+    points: tuple[Point, ...]
+    width: float = 0.0
+    stroke: str = "default"
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete, round-trippable shape as JSON."""
+        return {
+            "uuid": self.uuid,
+            "kind": self.kind,
+            "points": [point.as_dict() for point in self.points],
+            "width": self.width,
+            "stroke": self.stroke,
+        }
+
+
+@dataclass(frozen=True)
+class SheetText:
+    """One literal schematic note, identified for exact later editing."""
+
+    uuid: str
+    text: str
+    at: Point
+    size: float
+    rotation: float = 0.0
+    bold: bool = False
+    justify: str = "left"
+
+    def as_dict(self) -> dict[str, Any]:
+        """The complete authored note properties as JSON."""
+        return {
+            "uuid": self.uuid,
+            "text": self.text,
+            **self.at.as_dict(),
+            "size": self.size,
+            "rotation": self.rotation,
+            "bold": self.bold,
+            "justify": self.justify,
+        }
+
+
+@dataclass(frozen=True)
 class Label:
     """One net label, with stable identity for later editing."""
 

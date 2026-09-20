@@ -6,7 +6,7 @@ then roll back the entire write if any item fails, preserving its error index.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -215,6 +215,78 @@ class SheetNote(_StrictModel):
     justify: Literal["left", "right", "center"] = Field(
         default="left", description="'left', 'right' or 'center'."
     )
+
+
+class SheetTextUpdate(_StrictModel):
+    """Explicit changes to one schematic text UUID."""
+
+    uuid: str = Field(description="Stable identity returned by add/list_texts.")
+    x: float | None = Field(default=None, description="New anchor X in mm.")
+    y: float | None = Field(default=None, description="New anchor Y in mm.")
+    text: str | None = Field(default=None, description="New literal text.")
+    size: float | None = Field(default=None, gt=0, description="New text size in mm.")
+    rotation: float | None = Field(default=None, description="New absolute angle.")
+    bold: bool | None = Field(default=None, description="New bold state.")
+    justify: Literal["left", "right", "center"] | None = None
+
+    @model_validator(mode="after")
+    def changes_something(self) -> SheetTextUpdate:
+        """Refuse an update that identifies a note but supplies no change."""
+        if all(
+            getattr(self, name) is None
+            for name in ("x", "y", "text", "size", "rotation", "bold", "justify")
+        ):
+            raise ValueError("a schematic text update must supply at least one change")
+        return self
+
+
+class _SchematicGraphicBase(_StrictModel):
+    """Style shared by non-electrical schematic graphics."""
+
+    width: float = Field(
+        default=0.0,
+        ge=0,
+        description="Stroke width in mm; zero uses the schematic default.",
+    )
+    stroke: Literal[
+        "dash", "dash_dot", "dash_dot_dot", "dot", "default", "solid"
+    ] = Field(default="default", description="Native KiCad stroke style.")
+
+
+class SchematicPolyline(_SchematicGraphicBase):
+    """One open or closed graphical polyline."""
+
+    kind: Literal["polyline"]
+    points: list[tuple[float, float]] = Field(
+        min_length=2,
+        description="Every caller-chosen vertex as [x, y], in order.",
+    )
+
+
+class SchematicRectangle(_SchematicGraphicBase):
+    """One axis-aligned rectangle by opposite corners."""
+
+    kind: Literal["rectangle"]
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+SchematicGraphicSpec = Annotated[
+    SchematicPolyline | SchematicRectangle,
+    Field(discriminator="kind"),
+]
+
+
+class SchematicGraphicMove(_StrictModel):
+    """One graphical primitive and the offset to apply."""
+
+    uuid: str = Field(
+        description="Stable identity returned by add/list_schematic_graphics."
+    )
+    dx: float = Field(description="Horizontal offset in mm.")
+    dy: float = Field(description="Vertical offset in mm.")
 
 
 class WireEnds(_StrictModel):

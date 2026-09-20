@@ -209,6 +209,16 @@ async def build(client: Client) -> int:
     root = str(OUT / "led_digits.kicad_sch")
     await call("new_sheet", path=root, paper="A4",
                title="0-9 in LEDs -- root")
+    graphic_probe = await call("add_schematic_graphics", path=root, graphics=[{
+        "kind": "rectangle", "x1": 12.7, "y1": 12.7,
+        "x2": 25.4, "y2": 25.4,
+    }])
+    await call("list_schematic_graphics", path=root)
+    await call("move_schematic_graphics", path=root, moves=[{
+        "uuid": graphic_probe["graphics"][0]["uuid"], "dx": 1.27, "dy": 1.27,
+    }])
+    await call("remove_schematic_graphics", path=root,
+               uuids=[graphic_probe["graphics"][0]["uuid"]])
     provider = await call("get_parts_provider_status", provider="jlcpcb")
     choices = await call(
         "search_parts", provider="jlcpcb", query="RP2040", limit=5,
@@ -736,6 +746,15 @@ async def build(client: Client) -> int:
     same("layout check finds wire through note",
          sum(f.get("kind") == "text_wire_overlap"
              for f in visual.get("findings", [])), 1)
+    listed_notes = await call("list_texts", path=scratch_sch)
+    same("list_texts keeps the uuid",
+         listed_notes.get("notes", [{}])[0].get("uuid"), note.get("uuid"))
+    updated_note = await call("update_texts", path=scratch_sch, updates=[{
+        "uuid": note.get("uuid"), "text": "updated note", "bold": True,
+    }])
+    same("update_texts changes exact note",
+         updated_note.get("notes", [{}])[0].get("text"), "updated note")
+    await call("remove_texts", path=scratch_sch, uuids=[note.get("uuid")])
     same("remove layout-check wire", (await call(
         "remove_wires", path=scratch_sch, wires=[crossing]
     )).get("removed"), 1)

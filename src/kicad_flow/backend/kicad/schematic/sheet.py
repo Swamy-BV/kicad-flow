@@ -22,7 +22,9 @@ from kicad_flow.schematic.types import (
     Point,
     SceneBounds,
     SceneSnapshot,
+    SheetGraphic,
     SheetRef,
+    SheetText,
     SymbolDef,
 )
 
@@ -31,6 +33,7 @@ from .._sexpr import Node, dumps, loads
 from . import components as _components
 from . import connections as _connections
 from . import fields as _fields
+from . import graphics as _graphics
 from . import hierarchy as _hierarchy
 from . import placement as _placement
 from . import symbols as _symbols
@@ -470,11 +473,69 @@ class KiCadSheet(Sheet):
         rotation: float = 0.0,
         bold: bool = False,
         justify: str = "left",
-    ) -> Point:
+    ) -> SheetText:
         """Write a note on the sheet. It connects nothing and ERC ignores it."""
         return _connections.text(
             self, x, y, text, size=size, rotation=rotation, bold=bold, justify=justify
         )
+
+    def texts(self) -> list[SheetText]:
+        """Every literal note on this sheet, in file order."""
+        return _connections.texts(self)
+
+    def update_text(
+        self,
+        uuid: str,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+        text: str | None = None,
+        size: float | None = None,
+        rotation: float | None = None,
+        bold: bool | None = None,
+        justify: str | None = None,
+    ) -> SheetText:
+        """Update explicit properties of one literal note."""
+        return _connections.update_text(
+            self,
+            uuid,
+            x=x,
+            y=y,
+            text=text,
+            size=size,
+            rotation=rotation,
+            bold=bold,
+            justify=justify,
+        )
+
+    def remove_text(self, uuid: str) -> None:
+        """Remove one literal note by UUID."""
+        _connections.remove_text(self, uuid)
+
+    def graphic(
+        self,
+        kind: str,
+        points: list[tuple[float, float]],
+        *,
+        width: float = 0.0,
+        stroke: str = "default",
+    ) -> SheetGraphic:
+        """Draw one non-electrical polyline or rectangle."""
+        return _graphics.graphic(
+            self, kind, points, width=width, stroke=stroke
+        )
+
+    def graphics(self) -> list[SheetGraphic]:
+        """Every root-level schematic graphic, in file order."""
+        return _graphics.graphics(self)
+
+    def move_graphic(self, uuid: str, dx: float, dy: float) -> SheetGraphic:
+        """Shift one graphical primitive by UUID."""
+        return _graphics.move_graphic(self, uuid, dx, dy)
+
+    def remove_graphic(self, uuid: str) -> None:
+        """Remove one graphical primitive by UUID."""
+        _graphics.remove_graphic(self, uuid)
 
     def no_connect(self, x: float, y: float) -> Point:
         """Mark a pin deliberately unconnected."""

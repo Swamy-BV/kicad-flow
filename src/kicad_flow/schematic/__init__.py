@@ -32,7 +32,9 @@ from .types import (
     SceneFinding,
     SceneObject,
     SceneSnapshot,
+    SheetGraphic,
     SheetRef,
+    SheetText,
     SymbolDef,
 )
 
@@ -55,7 +57,9 @@ __all__ = [
     "SceneObject",
     "SceneSnapshot",
     "Sheet",
+    "SheetGraphic",
     "SheetRef",
+    "SheetText",
     "SymbolDef",
     "snap",
 ]

@@ -126,8 +126,10 @@ def _objects(sheet: SheetState) -> Iterator[SceneObject]:
             if points:
                 stroke = node.get("stroke")
                 width = _f(stroke.get("width"), 0) if stroke else 0.0
+                style = _text(stroke.get("type"), 0, "default") if stroke else ""
                 yield SceneObject(_identity(node, kind), kind, _bounds(points),
-                                  points[0], properties=(("width", width),),
+                                  points[0], properties=(("width", width),
+                                                        ("stroke", style)),
                                   points=points)
         elif kind in {"junction", "no_connect", "bus_entry"}:
             at, size = node.get("at"), node.get("size")

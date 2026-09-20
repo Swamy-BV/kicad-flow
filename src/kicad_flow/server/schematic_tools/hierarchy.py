@@ -74,7 +74,7 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
         notes: The notes, in order.
 
     Returns:
-        `notes`, each with the point it was snapped to.
+        `notes`, each with its stable UUID, snapped anchor and authored style.
     """
     try:
         sheet = _sheet(path)
@@ -82,7 +82,7 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
         return _fail(exc)
 
     def add(target: Sheet, note: SheetNote) -> dict[str, Any]:
-        at = target.text(
+        made = target.text(
             note.x,
             note.y,
             note.text,
@@ -91,7 +91,7 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
             bold=note.bold,
             justify=note.justify,
         )
-        return {"text": note.text, "size": note.size, **at.as_dict()}
+        return made.as_dict()
 
     return _atomic_items(sheet, list(notes), "notes", add)
 

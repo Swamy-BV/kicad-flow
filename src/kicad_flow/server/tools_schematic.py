@@ -38,6 +38,15 @@ from .schematic_tools.connections import (
     remove_wires,
     rotate_labels,
 )
+from .schematic_tools.graphics import (
+    add_schematic_graphics,
+    list_schematic_graphics,
+    list_texts,
+    move_schematic_graphics,
+    remove_schematic_graphics,
+    remove_texts,
+    update_texts,
+)
 from .schematic_tools.hierarchy import add_sheets, add_texts, move_sheets, remove_sheets
 from .schematic_tools.inspection import _findings_result as _findings_result
 from .schematic_tools.inspection import (
@@ -64,9 +73,14 @@ from .schematic_tools.models import PartFlip as PartFlip
 from .schematic_tools.models import PartMove as PartMove
 from .schematic_tools.models import PartTurn as PartTurn
 from .schematic_tools.models import QuarterTurn as QuarterTurn
+from .schematic_tools.models import SchematicGraphicMove as SchematicGraphicMove
+from .schematic_tools.models import SchematicGraphicSpec as SchematicGraphicSpec
+from .schematic_tools.models import SchematicPolyline as SchematicPolyline
+from .schematic_tools.models import SchematicRectangle as SchematicRectangle
 from .schematic_tools.models import Segment as Segment
 from .schematic_tools.models import SheetMove as SheetMove
 from .schematic_tools.models import SheetNote as SheetNote
+from .schematic_tools.models import SheetTextUpdate as SheetTextUpdate
 from .schematic_tools.models import Spot as Spot
 from .schematic_tools.models import WireEnds as WireEnds
 from .schematic_tools.models import WireShift as WireShift
@@ -102,9 +116,14 @@ __all__ = [
     "PartMove",
     "PartTurn",
     "QuarterTurn",
+    "SchematicGraphicMove",
+    "SchematicGraphicSpec",
+    "SchematicPolyline",
+    "SchematicRectangle",
     "Segment",
     "SheetMove",
     "SheetNote",
+    "SheetTextUpdate",
     "Spot",
     "WireEnds",
     "WireShift",
@@ -126,6 +145,7 @@ __all__ = [
     "add_no_connects",
     "add_power",
     "add_power_flags",
+    "add_schematic_graphics",
     "add_sheets",
     "add_texts",
     "add_wires",
@@ -139,12 +159,15 @@ __all__ = [
     "list_components",
     "list_labels",
     "list_nets",
+    "list_schematic_graphics",
+    "list_texts",
     "list_wires",
     "measure_schematic_placement",
     "mirror_components",
     "move_components",
     "move_fields",
     "move_labels",
+    "move_schematic_graphics",
     "move_sheets",
     "move_wires",
     "new_sheet",
@@ -154,7 +177,9 @@ __all__ = [
     "remove_junctions",
     "remove_labels",
     "remove_no_connects",
+    "remove_schematic_graphics",
     "remove_sheets",
+    "remove_texts",
     "remove_wires",
     "render_schematic",
     "rotate_components",
@@ -162,5 +187,6 @@ __all__ = [
     "save_sheet",
     "set_fields",
     "symbol_pins",
+    "update_texts",
     "what_is_at",
 ]

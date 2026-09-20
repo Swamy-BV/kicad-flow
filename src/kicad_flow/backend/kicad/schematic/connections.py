@@ -6,6 +6,7 @@ from kicad_flow.schematic.api import snap
 from kicad_flow.schematic.types import (
     Label,
     Point,
+    SheetText,
 )
 
 from .._sexpr import Node, Sym
@@ -288,34 +289,154 @@ def text(
     rotation: float = 0.0,
     bold: bool = False,
     justify: str = "left",
-) -> Point:
+) -> SheetText:
     """Write a note on the sheet. It connects nothing and ERC ignores it."""
+    if size <= 0:
+        raise ValueError("text size must be positive")
+    if justify not in {"left", "center", "right"}:
+        raise ValueError("text justify must be 'left', 'center' or 'right'")
     at = Point(snap(x), snap(y))
     font = [_node("size", [size, size]), _node("thickness", [size * 0.2])]
     if bold:
         font.append(_node("bold", [Sym("yes")]))
-    self._tree.items.append(
-        _node(
-            "text",
-            [
-                text,
-                _node("exclude_from_sim", [Sym("no")]),
-                _node("at", [at.x, at.y, rotation % 360.0]),
-                _node(
-                    "effects",
-                    [
-                        _node("font", font),
-                        # `bottom` pins the baseline to the anchor. Without it KiCad
-                        # centres the block on the point, so a multi-line note grows
-                        # upward off the page instead of downward from where it was put.
-                        _node("justify", [Sym(justify), Sym("bottom")]),
-                    ],
-                ),
-                _node("uuid", [self._uid_for(f"text:{text}:{at.x},{at.y}")]),
-            ],
-        )
+    sides = [Sym("bottom")]
+    if justify != "center":
+        sides.insert(0, Sym(justify))
+    node = _node(
+        "text",
+        [
+            text,
+            _node("exclude_from_sim", [Sym("no")]),
+            _node("at", [at.x, at.y, rotation % 360.0]),
+            _node(
+                "effects",
+                [
+                    _node("font", font),
+                    # `bottom` pins the baseline to the anchor. Without it KiCad
+                    # centres the block on the point, so a multi-line note grows
+                    # upward off the page instead of downward from where it was put.
+                    _node("justify", sides),
+                ],
+            ),
+            _node("uuid", [self._uid_for(f"text:{text}:{at.x},{at.y}")]),
+        ],
     )
-    return at
+    self._tree.items.append(node)
+    return _text_from_node(node)
+
+
+def _text_from_node(node: Node) -> SheetText:
+    """Describe one root-level note without exposing its S-expression."""
+    at = node.get("at")
+    effects = node.get("effects")
+    font = effects.get("font") if effects is not None else None
+    size = font.get("size") if font is not None else None
+    justify_node = effects.get("justify") if effects is not None else None
+    sides = {
+        _text(justify_node, index)
+        for index in range(max(0, len(justify_node.items) - 1))
+    } if justify_node is not None else set()
+    justify = next((side for side in ("left", "right") if side in sides), "center")
+    return SheetText(
+        uuid=_text(node.get("uuid")),
+        text=_text(node),
+        at=Point(_f(at, 0), _f(at, 1)),
+        size=_f(size, 0, 1.27),
+        rotation=_f(at, 2),
+        bold=font is not None and font.get("bold") is not None,
+        justify=justify,
+    )
+
+
+def texts(self: SheetState) -> list[SheetText]:
+    """Every root-level note, in file order."""
+    return [
+        _text_from_node(item)
+        for item in self._tree.items
+        if isinstance(item, Node) and item.name == "text"
+    ]
+
+
+def _text_node(self: SheetState, uuid: str) -> Node:
+    """The root note carrying *uuid*, or a useful refusal."""
+    for item in self._tree.items:
+        if (
+            isinstance(item, Node)
+            and item.name == "text"
+            and _text(item.get("uuid")) == uuid
+        ):
+            return item
+    raise LookupError(f"no schematic text with uuid {uuid!r}")
+
+
+def update_text(
+    self: SheetState,
+    uuid: str,
+    *,
+    x: float | None = None,
+    y: float | None = None,
+    text: str | None = None,
+    size: float | None = None,
+    rotation: float | None = None,
+    bold: bool | None = None,
+    justify: str | None = None,
+) -> SheetText:
+    """Update explicit properties of one note."""
+    if size is not None and size <= 0:
+        raise ValueError("text size must be positive")
+    if justify is not None and justify not in {"left", "center", "right"}:
+        raise ValueError("text justify must be 'left', 'center' or 'right'")
+    node = _text_node(self, uuid)
+    if text is not None:
+        node.items[1] = text
+    at = node.get("at")
+    if at is None:
+        raise LookupError(f"schematic text {uuid!r} has no position")
+    if x is not None:
+        _set(at, 0, snap(x))
+    if y is not None:
+        _set(at, 1, snap(y))
+    if rotation is not None:
+        _set(at, 2, rotation % 360.0)
+    effects = node.get("effects")
+    font = effects.get("font") if effects is not None else None
+    if effects is None or font is None:
+        raise LookupError(f"schematic text {uuid!r} has no font effects")
+    if size is not None:
+        size_node = font.get("size")
+        if size_node is None:
+            raise LookupError(f"schematic text {uuid!r} has no font size")
+        _set(size_node, 0, size)
+        _set(size_node, 1, size)
+        thickness = font.get("thickness")
+        if thickness is None:
+            font.items.append(_node("thickness", [size * 0.2]))
+        else:
+            _set(thickness, 0, size * 0.2)
+    if bold is not None:
+        font.items = [
+            item
+            for item in font.items
+            if not (isinstance(item, Node) and item.name == "bold")
+        ]
+        if bold:
+            font.items.append(_node("bold", [Sym("yes")]))
+    if justify is not None:
+        current = effects.get("justify")
+        sides = [Sym("bottom")]
+        if justify != "center":
+            sides.insert(0, Sym(justify))
+        replacement = _node("justify", sides)
+        if current is None:
+            effects.items.append(replacement)
+        else:
+            effects.items[effects.items.index(current)] = replacement
+    return _text_from_node(node)
+
+
+def remove_text(self: SheetState, uuid: str) -> None:
+    """Remove one root-level note by UUID."""
+    self._tree.items.remove(_text_node(self, uuid))
 
 
 def no_connect(self: SheetState, x: float, y: float) -> Point:

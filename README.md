@@ -94,7 +94,7 @@ Restart Claude Desktop after changing its configuration.
 
 | Area | What the MCP tools provide |
 | --- | --- |
-| **Schematics** | Components, fields, wiring, labels, hierarchical sheets, footprint assignment, netlists, ERC, and layout checks |
+| **Schematics** | Components, fields, wiring, labels, visual group boundaries, hierarchical sheets, footprint assignment, netlists, ERC, and layout checks |
 | **PCB layout** | Schematic-to-PCB export and synchronization, footprint movement, tracks, vias, zones, outlines, stackups, silkscreen, and editable board text |
 | **Inspection** | Pin and pad geometry, connectivity, local spatial observations, revision deltas, text bounds, top/bottom renders, and 3D views |
 | **Validation** | Atomic preflight checks for proposed writes, ERC, DRC, schematic/PCB parity checks, and manufacturing limits |

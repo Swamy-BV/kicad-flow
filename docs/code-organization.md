@@ -19,7 +19,7 @@ to modules in the same directory:
 | Electrical and layout checks | `validation.py` | `validation.py`, `connectivity.py` |
 | Spatial observations | `scene.py` | `inspection.py` |
 | Explicit route paths and pair spacing | — | `routing_path.py`, `differential.py` |
-| Outlines and drawn graphics | `connections.py` | `graphics.py` |
+| Outlines and drawn graphics | `graphics.py` | `graphics.py` |
 | Construction and project rules | — | `settings.py`, `project.py` |
 | Net-class colors and patterns | — | `colors.py`, `class_patterns.py` |
 
