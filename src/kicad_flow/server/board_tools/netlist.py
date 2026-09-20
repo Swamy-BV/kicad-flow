@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...pcb.api import Board
+from ...schematic.api import Sheet
 from .. import _meta
 from .._app import mcp
 from ..schematic_tools.session import _sheet
@@ -29,6 +31,25 @@ def sync_board_nets(
     try:
         sheet = _sheet(schematic_path)
         board = _board(board_path)
+        return _sync_board_nets(sheet, board, net_names, dry_run)
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _sync_board_nets(
+    sheet: Sheet,
+    board: Board,
+    net_names: dict[str, str] | None = None,
+    dry_run: bool = False,
+    *,
+    deferred_refs: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    """Sync placed pads, deferring only refs identified by staged transfer.
+
+    The public net-only operation always uses an empty deferred set. Missing
+    pads on any non-deferred footprint remain errors, even during transfer.
+    """
+    try:
         aliases = net_names or {}
         source = sheet.nets()
         connected_names = {
@@ -53,6 +74,8 @@ def sync_board_nets(
                         f"and {item.name!r}"
                     )
             for pin in item.pins:
+                if pin.ref in deferred_refs:
+                    continue
                 key = (pin.ref, pin.pin)
                 if key in desired and desired[key] != target:
                     raise ValueError(f"schematic assigns {key} to two nets")
@@ -60,6 +83,8 @@ def sync_board_nets(
 
         actual: dict[tuple[str, str], str] = {}
         for footprint in board.footprints():
+            if footprint.ref in deferred_refs:
+                continue
             for pad in footprint.pads:
                 if not pad.number or pad.kind == "npth":
                     continue

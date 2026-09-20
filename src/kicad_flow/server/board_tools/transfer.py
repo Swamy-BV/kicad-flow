@@ -12,7 +12,7 @@ from .._app import mcp
 from ..limits import BatchItems
 from ..schematic_tools.session import _sheet
 from .models import SchematicPlacement
-from .netlist import sync_board_nets
+from .netlist import _sync_board_nets
 from .session import _ERRORS, _OPEN, _board, _fail, _fresh_board, _key
 
 
@@ -86,6 +86,9 @@ def update_board_from_schematic(
 
     The schematic supplies footprint IDs, values and pad nets. `placements`
     supplies poses for new components and for changed footprint assignments.
+    Supply one batch within the advertised placement limit, then repeat with
+    refs from `remaining_refs` until `complete` is true. Only supplied refs
+    are placed or replaced; deferred footprints and their nets stay unchanged.
     A changed footprint is removed and added fresh at the supplied pose, rather
     than inheriting its old pose. Other existing poses are preserved. Existing
     copper is never rewritten; a change that cannot preserve its contacts is
@@ -121,12 +124,22 @@ def update_board_from_schematic(
             if source[ref].footprint != existing[ref].fp_id
         )
         missing = sorted(set(source) - set(existing))
-        to_place = sorted(set(missing) | set(mismatched))
-        if set(poses) != set(to_place):
+        pending = set(missing) | set(mismatched)
+        unexpected = sorted(set(poses) - pending)
+        if unexpected:
             raise ValueError(
-                "placements must name exactly the missing or changed schematic "
-                f"components: {to_place}"
+                "placements must name only missing or changed schematic "
+                f"components; unexpected refs: {unexpected}; "
+                f"pending refs: {sorted(pending)}"
             )
+        if pending and not poses:
+            raise ValueError(
+                "supply a placement batch for missing or changed schematic "
+                f"components: {sorted(pending)}"
+            )
+        to_place = sorted(poses)
+        changed = sorted(set(mismatched) & set(poses))
+        remaining = frozenset(pending - set(poses))
 
         aliases = net_names or {}
         desired = {
@@ -140,11 +153,11 @@ def update_board_from_schematic(
                 pad.number for pad in existing[ref].pads
                 if _pad_has_copper(board, pad)
             }
-            for ref in mismatched
+            for ref in changed
         }
 
         with board.transaction():
-            for ref in mismatched:
+            for ref in changed:
                 board.remove(ref)
             for ref in to_place:
                 part, pose = source[ref], poses[ref]
@@ -153,7 +166,7 @@ def update_board_from_schematic(
                     anchor=pose.anchor, rotation=pose.rotation,
                     side=pose.side, value=part.value,
                 )
-                if ref in mismatched:
+                if ref in changed:
                     _check_changed_contacts(
                         existing[ref], new, connected_pads[ref], desired,
                     )
@@ -162,8 +175,8 @@ def update_board_from_schematic(
                     board.set_field(ref, "Value", source[ref].value)
             if created:
                 _OPEN[key] = board
-            synced = sync_board_nets(
-                schematic_path, board_path, net_names=net_names,
+            synced = _sync_board_nets(
+                sheet, board, net_names=net_names, deferred_refs=remaining,
             )
             if not synced["ok"]:
                 raise ValueError(synced["error"])
@@ -177,7 +190,9 @@ def update_board_from_schematic(
         "created": created,
         "board_path": str(board.path),
         "placed": to_place,
-        "changed_footprints": mismatched,
+        "changed_footprints": changed,
+        "remaining_refs": sorted(remaining),
+        "complete": not remaining,
         "extra_board_refs": sorted(set(existing) - set(source)),
         "net_count": synced["net_count"],
         "changed_pad_count": synced["changed_count"],

@@ -21,6 +21,7 @@ from . import (  # noqa: F401  (register)
     tools_manufacturing,
     tools_parts,
     tools_schematic,
+    workflows,
 )
 from ._app import mcp
 from .activity import ActivityMiddleware

@@ -68,6 +68,9 @@ optional local parts catalogue.
 </table>
 
 The [flight controller](examples/fc/) demonstrates a hierarchical STM32 schematic.
+For the default five-item limit, see
+[staged board transfer](docs/staged-board-transfer.md) and run
+`python examples/scripts/staged_board_transfer.py`.
 Run the larger examples with an explicit batch limit:
 
 ```powershell
@@ -83,6 +86,9 @@ Schematic and PCB tabs keep inspection snapshots until you refresh them.
 ![Live PCB preview with a compact toolbar and MCP activity log](assets/live-preview.jpg)
 
 ## Development
+
+MCP startup instructions are compact; detailed workflows are loaded on demand
+through resources or `get_workflow`. See [context delivery](docs/mcp-context.md).
 
 ```powershell
 python -m ruff check .

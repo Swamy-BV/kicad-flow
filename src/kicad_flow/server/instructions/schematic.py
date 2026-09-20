@@ -1,4 +1,4 @@
-"""Short, mandatory schematic workflow injected into every MCP client."""
+"""Schematic workflow fetched on demand by resource or get_workflow."""
 
 from __future__ import annotations
 
