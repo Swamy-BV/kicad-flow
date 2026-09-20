@@ -142,5 +142,8 @@ examples/scripts/       fc and led_digits, both through MCP calls alone
 Neither contract package imports a backend -- measured: `import
 kicad_flow.schematic` and `import kicad_flow.pcb` each load none.
 
-See `docs/code-organization.md` for module ownership. Keep new implementations
-in the appropriate category; the facades and registration modules delegate.
+Keep new implementations in the appropriate category; facades own document
+state and transactions and delegate to feature modules. MCP request models
+belong in `models.py`, open-document state in `session.py`, and registration
+modules only register and re-export tools. Shared code must not import a
+registration module to reach models or state.

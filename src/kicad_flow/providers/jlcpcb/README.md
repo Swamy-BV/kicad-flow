@@ -88,5 +88,10 @@ The snapshot is not fetched at runtime. Review it against the current official
 capability table before production:
 <https://jlcpcb.com/capabilities/pcb-capabilities/>.
 
-See [manufacturing exports](../../../../docs/manufacturing.md) for requirements,
-MCP calls, output validation and remaining limitations.
+For exports, select `set_fabrication_profile`, then read
+`get_manufacturing_requirements` for required files and BOM/CPL columns.
+Export Gerbers, drills, BOM and placements to new destinations; run
+`check_manufacturing_package` before `archive_manufacturing_files`.
+`ok` means validation ran; `passed` means it reported no issues or DRC findings.
+These checks do not certify electrical function, stock availability or assembly
+orientation. Nothing is uploaded or ordered.
