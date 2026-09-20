@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 60
     env:
       KICAD_FLOW_MONITOR: '0'
+      # Preserve large example inputs; production still defaults to five.
+      KICAD_FLOW_BATCH_LIMIT: '1000'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,6 +35,14 @@ jobs:
         run: python -m ruff check .
       - name: Type check
         run: python -m mypy
+      - name: Default batch limit
+        env:
+          KICAD_FLOW_BATCH_LIMIT: '5'
+        run: python examples/scripts/batch_limits.py
+      - name: Configured batch limit
+        env:
+          KICAD_FLOW_BATCH_LIMIT: '7'
+        run: python examples/scripts/batch_limits.py
       - name: Flight-controller example
         run: python examples/scripts/fc.py
       - name: Schematic and PCB example
