@@ -3,19 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kicad-flow live</title>
+<title>KiCadFlow · Design workspace</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div id="main">
-  <div id="projectbar">
-    <strong>KiCadFlow</strong>
-    <div role="group" aria-label="Design view">
-      <button id="tab-sch">Schematic</button><button id="tab-pcb">PCB</button>
+<header id="app-header">
+  <div class="brand"><span class="brand-icon" aria-hidden="true">K</span>
+    <div><strong>KiCadFlow</strong><small>Design workspace</small></div></div>
+  <nav aria-label="Workspace">
+    <button id="tab-live" class="active" aria-current="page"><span class="live-dot" aria-hidden="true"></span>Live activity</button>
+    <button id="tab-sch">Schematic</button>
+    <button id="tab-pcb">PCB</button>
+  </nav>
+  <span id="connection" role="status">Connecting</span>
+  <button id="theme" title="Toggle light / dark" aria-label="Toggle light or dark theme">&#9789;</button>
+</header>
+<div id="workspace">
+<main id="main">
+  <section id="workspace-heading" aria-label="Preview information">
+    <div><span id="view-badge" class="eyebrow">LIVE PREVIEW</span>
+      <h1 id="view-title">Following current work</h1>
+      <p id="view-description">Preview follows the active file. Activity streams alongside it.</p></div>
+    <div class="heading-actions">
+      <button id="pause-live">Pause preview</button>
+      <button id="toggle-log" aria-expanded="true" aria-controls="side">Hide logs</button>
+      <button id="refresh-preview" class="primary" hidden>Refresh preview</button>
     </div>
+  </section>
+  <div id="document-row" hidden>
+    <label for="document">Document</label>
     <select id="document" aria-label="Project document"></select>
-    <span class="grow"></span>
-    <button id="toggle-log" aria-expanded="true" aria-controls="side">Hide activity</button>
+    <span class="manual-note">Updates only when you request them</span>
   </div>
   <div id="bar">
     <button id="b2d" class="active">2D</button>
@@ -52,23 +70,26 @@
       <span id="zoom">100%</span>
     </span>
     <span class="grow"></span>
-    <small id="hint">scroll to zoom &middot; drag to pan &middot; double-click to fit</small>
-    <button id="theme" title="Toggle light / dark">&#9789;</button>
+
   </div>
 
   <div id="view">
     <div id="stage"><img id="img" alt="Preview of the active design" draggable="false"><svg id="scene" hidden role="img" aria-label="Schematic objects and conservative occupied bounds"></svg></div>
+    <div id="preview-empty"><span class="empty-icon" aria-hidden="true">&#9633;</span>
+      <h2 id="empty-title">No design to preview yet</h2><p id="empty-description">Open a schematic or PCB through MCP to start.</p></div>
     <div id="spin" role="status">Updating preview&hellip;</div>
   </div>
   <div id="scene-info" hidden aria-live="polite"></div>
-</div>
+  <footer id="preview-footer"><span id="capture-status" role="status">Waiting for a design</span>
+    <span id="hint">Scroll to zoom &middot; drag to pan &middot; double-click to fit</span></footer>
+</main>
 
-<div id="side">
+<aside id="side">
   <div id="head">
-    <b>MCP activity</b>
+    <b>Activity stream</b>
     <small id="active"></small>
     <span class="grow"></span>
-    <button id="clear" title="Clear the activity feed and the preview">Clear</button>
+    <button id="clear" title="Clear live activity and the live preview; keep manual snapshots">Clear live</button>
   </div>
   <details id="advanced">
     <summary>Interaction statistics</summary>
@@ -86,6 +107,7 @@
     <span id="count" class="tally"></span>
   </div>
   <div id="feed" role="log" aria-live="polite" aria-label="MCP tool calls"></div>
+</aside>
 </div>
 <script type="module" src="/app.js"></script>
 </body>

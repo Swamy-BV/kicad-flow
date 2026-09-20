@@ -1,221 +1,9 @@
-// kicad-flow live monitor -- native ES module, no build step, no dependencies.
-// Renders the active design (2D or 3D) on a pan/zoom stage and streams the MCP
-// tool-call feed over Server-Sent Events.
-import { sceneView } from './scene.js';
-
+// Stream activity independently of the selected preview workspace.
+import { previewWorkspace } from './preview.js';
 const $ = (id) => document.getElementById(id);
-const view = $("view"), stage = $("stage"), img = $("img"), spin = $("spin"),
-  feed = $("feed"), active = $("active"), b2d = $("b2d"), b3d = $("b3d"),
-  zlab = $("zoom"), q = $("q"), onlyBad = $("only-bad"), count = $("count");
-const bscene = $("bscene"), scene = $("scene"), sceneInfo = $("scene-info");
-const view3d = $("view3d"), view3dCtl = $("view3d-ctl");
-const geometry = sceneView(scene, sceneInfo);
-let requestVersion = 0;
-
-let scale = 1, tx = 0, ty = 0, mode = "2d", nat = { w: 0, h: 0 },
-  fitNext = true, kind = "";
-
-const documentSelect = $("document"), zoomPreset = $("zoom-preset"), side2d = $("side2d");
-let documents = [], selectedDocument = "", chosenKind = "", documentRequest = 0;
-const remember = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private mode */ } };
-const recalled = (key, fallback) => { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } };
-selectedDocument = recalled("kf-document", "");
-chosenKind = recalled("kf-document-kind", "");
-zoomPreset.value = recalled("kf-zoom-preset", "1");
-if (!zoomPreset.value || zoomPreset.value === "custom") zoomPreset.value = "1";
-const selectionQuery = () => selectedDocument ? "&doc=" + encodeURIComponent(selectedDocument) : "";
-function documentControls() {
-  kind = documents.find(d => d.id === selectedDocument)?.kind || "";
-  b3d.hidden = b3d.disabled = kind !== "board";
-  bscene.hidden = bscene.disabled = kind !== "schematic";
-  $("side2d-ctl").hidden = kind !== "board" || mode !== "2d";
-  for (const [id, value] of [["tab-sch", "schematic"], ["tab-pcb", "board"]]) {
-    $(id).disabled = !documents.some(d => d.kind === value);
-    $(id).classList.toggle("active", kind === value);
-  }
-  documentSelect.replaceChildren(...documents.filter(d => d.kind === kind).map(d => {
-    const option = document.createElement("option");
-    option.value = d.id; option.textContent = d.name; return option;
-  }));
-  documentSelect.value = selectedDocument;
-  if ((mode === "3d" && kind !== "board") || (mode === "scene" && kind !== "schematic")) setMode("2d");
-}
-async function refreshDocuments() {
-  const request = ++documentRequest;
-  try {
-    const response = await fetch("/documents");
-    const data = await response.json();
-    if (request !== documentRequest) return;
-    documents = data.documents;
-    const previous = selectedDocument;
-    if (!documents.some(d => d.id === selectedDocument)) {
-      selectedDocument = (documents.find(d => d.kind === chosenKind) ||
-        documents.find(d => d.id === data.active) || documents[0])?.id || "";
-    }
-    documentControls();
-    if (previous !== selectedDocument) geometry.clear();
-    reload(previous !== selectedDocument);
-  } catch { active.textContent = "Project list unavailable"; }
-}
-function chooseDocument(id) {
-  selectedDocument = id;
-  chosenKind = documents.find(d => d.id === id)?.kind || "";
-  remember("kf-document", id); remember("kf-document-kind", chosenKind);
-  geometry.clear(); documentControls(); reload(true);
-}
-documentSelect.onchange = () => chooseDocument(documentSelect.value);
-function chooseKind(value) {
-  const current = documents.find(d => d.id === selectedDocument);
-  const stem = current?.name.replace(/\.kicad_(sch|pcb)$/, "");
-  const matching = documents.find(d => d.kind === value && d.name.replace(/\.kicad_(sch|pcb)$/, "") === stem);
-  const next = matching || documents.find(d => d.kind === value);
-  if (next) chooseDocument(next.id);
-}
-$("tab-sch").onclick = () => chooseKind("schematic");
-$("tab-pcb").onclick = () => chooseKind("board");
-side2d.onchange = () => reload(true);
-function logVisible(visible) {
-  $("side").hidden = !visible;
-  document.body.classList.toggle("activity-hidden", !visible);
-  $("toggle-log").textContent = visible ? "Hide activity" : "Show activity";
-  $("toggle-log").setAttribute("aria-expanded", String(visible));
-  remember("kf-log-visible", String(visible));
-}
-logVisible(recalled("kf-log-visible", "true") === "true");
-$("toggle-log").onclick = () => logVisible($("side").hidden);
-
-function apply() {
-  stage.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
-  zlab.textContent = Math.round(scale / (Math.min(view.clientWidth / nat.w, view.clientHeight / nat.h) * 0.9 || 1) * 100) + "% fit";
-}
-
-function fit() {
-  if (!nat.w) return;
-  const vw = view.clientWidth, vh = view.clientHeight;
-  scale = Math.min(vw / nat.w, vh / nat.h) * 0.9 * (Number(zoomPreset.value) || 1);
-  tx = (vw - nat.w * scale) / 2;
-  ty = (vh - nat.h * scale) / 2;
-  apply();
-}
-
-function zoom(f, cx, cy) {
-  zoomPreset.value = "custom";
-  cx = cx == null ? view.clientWidth / 2 : cx;
-  cy = cy == null ? view.clientHeight / 2 : cy;
-  const nx = (cx - tx) / scale, ny = (cy - ty) / scale;
-  scale = Math.max(0.05, Math.min(40, scale * f));
-  tx = cx - nx * scale;
-  ty = cy - ny * scale;
-  apply();
-}
-
-let spinTimer = null;
-const showSpin = () => { spinTimer = setTimeout(() => spin.classList.add("on"), 250); };
-const hideSpin = () => { clearTimeout(spinTimer); spin.classList.remove("on"); };
-
-// Double-buffer: decode the new render off-screen, then swap it in one step so
-// the visible image never blanks (no flash on every re-render). Slow renders
-// show a delayed spinner.
-function reload(refit) {
-  const request = ++requestVersion;
-  hideSpin();
-  if (refit) fitNext = true;
-  img.hidden = mode === 'scene';
-  scene.toggleAttribute('hidden', mode !== 'scene');
-  sceneInfo.hidden = mode !== 'scene';
-  if (mode === 'scene') {
-    fetch('/scene.json?since=' + encodeURIComponent(geometry.revision) + selectionQuery())
-      .then(response => response.json()).then(data => {
-        if (request !== requestVersion || mode !== 'scene') return;
-        nat = geometry.update(data);
-        if (fitNext || zoomPreset.value !== "custom") { fit(); fitNext = false; }
-      }).catch(error => {
-        if (request === requestVersion) { geometry.clear(); sceneInfo.textContent = error.message; }
-      });
-    return;
-  }
-  showSpin();
-  const next = new Image();
-  next.onload = () => {
-    if (request !== requestVersion) return;
-    img.src = next.src;
-    nat = { w: next.naturalWidth, h: next.naturalHeight };
-    if (fitNext || zoomPreset.value !== "custom") { fit(); fitNext = false; }
-    hideSpin();
-  };
-  next.onerror = () => { if (request === requestVersion) hideSpin(); };
-  const camera = mode === "3d" ? `&view=${encodeURIComponent(view3d.value)}` : "";
-  next.src = `/render.png?mode=${mode}${camera}&side=${side2d.value}${selectionQuery()}&v=` + Date.now();
-}
-
-// --- interaction ---------------------------------------------------------
-view.addEventListener("wheel", (e) => {
-  e.preventDefault();
-  // Zoom proportional to the scroll amount so a gesture feels the same on a
-  // mouse wheel and a high-res trackpad; clamp so one event can't jump far.
-  const f = Math.min(Math.max(Math.exp(-e.deltaY * 0.0012), 0.85), 1.18);
-  zoom(f, e.offsetX, e.offsetY);
-}, { passive: false });
-
-let drag = null;
-const endDrag = () => { drag = null; view.classList.remove("drag"); };
-view.addEventListener("pointerdown", (e) => {
-  e.preventDefault();  // stop native image drag from swallowing pointerup
-  drag = { x: e.clientX, y: e.clientY, tx, ty, captured: false };
-  view.classList.add("drag");
-});
-view.addEventListener("pointermove", (e) => {
-  if (!drag) return;
-  if (e.buttons === 0) { endDrag(); return; }  // self-heal a missed pointerup
-  // Preserve a stationary click's SVG target; capture only when panning starts.
-  if (!drag.captured) {
-    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 3) return;
-    view.setPointerCapture(e.pointerId);
-    drag.captured = true;
-  }
-  tx = drag.tx + (e.clientX - drag.x);
-  ty = drag.ty + (e.clientY - drag.y);
-  apply();
-});
-view.addEventListener("pointerup", endDrag);
-view.addEventListener("pointercancel", endDrag);
-function resetFit() { zoomPreset.value = "1"; remember("kf-zoom-preset", "1"); fit(); }
-view.addEventListener("dblclick", resetFit);
-
-$("fit").onclick = resetFit;
-zoomPreset.onchange = () => { remember("kf-zoom-preset", zoomPreset.value); fit(); };
-new ResizeObserver(() => { if (zoomPreset.value !== "custom") fit(); }).observe(view);
-$("zin").onclick = () => zoom(1.25);
-$("zout").onclick = () => zoom(0.8);
-
-// 2D and 3D are two views of the same design and live together in the main
-// toolbar; the side panel stays the agent's activity feed.
-function setMode(m) {
-  if (m === mode) return;
-  mode = m;
-  for (const [btn, name] of [[b2d, "2d"], [b3d, "3d"], [bscene, "scene"]]) {
-    btn.classList.toggle("active", m === name);
-  }
-  view3dCtl.hidden = m !== "3d";
-  $("side2d-ctl").hidden = kind !== "board" || m !== "2d";
-  reload(true);
-}
-b2d.onclick = () => setMode("2d");
-b3d.onclick = () => { if (!b3d.disabled) setMode("3d"); };
-view3d.onchange = () => {
-  try { localStorage.setItem("kf-3d-view", view3d.value); } catch { /* private mode */ }
-  reload(true);
-};
-try {
-  const savedView = localStorage.getItem("kf-3d-view");
-  view3d.value = [...view3d.options].some((option) => option.value === savedView)
-    ? savedView : "top-angle";
-} catch { view3d.value = "top-angle"; }
-bscene.onclick = () => {
-  if (bscene.disabled) return;
-  geometry.clear();
-  if (mode === 'scene') reload(true); else setMode('scene');
-};
+const feed = $("feed"), active = $("active"), q = $("q"),
+  onlyBad = $("only-bad"), count = $("count");
+const preview = previewWorkspace();
 
 // --- theme ---------------------------------------------------------------
 const theme = $("theme");
@@ -421,6 +209,7 @@ $("clear").onclick = () =>
     // The server also drops the active design, so the "active" SSE event
     // resets the title and swaps the image back to the placeholder. Clear
     // the feed here rather than waiting a poll for it to come back empty.
+    preview.clearLive();
     records = [];
     expanded = null;
     active.textContent = "";
@@ -430,11 +219,13 @@ $("clear").onclick = () =>
 
 // --- live stream ---------------------------------------------------------
 const es = new EventSource("/events");
-es.addEventListener("render", refreshDocuments);
+es.addEventListener("open", () => { $("connection").textContent = "Connected"; });
+es.addEventListener("error", () => { $("connection").textContent = "Reconnecting"; });
+es.addEventListener("render", () => preview.changed());
 es.addEventListener("active", (e) => {
   const a = JSON.parse(e.data);
   active.textContent = a.name;
-  refreshDocuments();
+  preview.changed();
 });
 es.addEventListener("activity", (e) => {
   const rec = JSON.parse(e.data);
@@ -451,4 +242,3 @@ es.addEventListener("activity", (e) => {
 });
 
 render();
-refreshDocuments();

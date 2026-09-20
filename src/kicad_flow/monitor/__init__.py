@@ -380,7 +380,7 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             self._serve_static("index.html")
-        elif path in ("/style.css", "/app.js", "/scene.js"):
+        elif path in ("/style.css", "/app.js", "/scene.js", "/preview.js"):
             self._serve_static(path.lstrip("/"))
         elif path == "/render.png":
             self._send_png()
@@ -440,9 +440,10 @@ class _Handler(BaseHTTPRequestHandler):
                 data = _cached_3d(selected, qs.get("view", ["top-angle"])[0])
             else:
                 data = _document_frame(selected, qs.get("side", ["top"])[0])
-            self._send(
-                200, "image/png", data or _placeholder_png("Preview unavailable")
-            )
+            if data is None:
+                self._send(503, "text/plain", b"Preview unavailable")
+            else:
+                self._send(200, "image/png", data)
             return
         if mode == "3d":
             view = qs.get("view", ["top-angle"])[0].lower()

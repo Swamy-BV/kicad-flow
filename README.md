@@ -211,10 +211,19 @@ instead of the full tool catalogue at startup. See the
 [execution guide](docs/mcp-execution.md) for behavior and measured context-size
 results.
 
-The live monitor has separate Schematic and PCB tabs, with a document selector
-for design files in the active project folder. PCB views include 2D top/bottom
-and 3D top, bottom, and edge cameras. Fit full view is the default; zoom presets
-and activity-panel visibility are remembered in your browser.
+The dashboard separates three workspaces:
+
+- **Live activity** follows the active design with a collapsible tool log.
+  Pause the preview while logs continue streaming.
+- **Schematic** captures a selected sheet for inspection, including geometry view.
+- **PCB** captures the board in 2D top/bottom or 3D top, bottom, and edge views.
+
+Schematic and PCB previews retain their own document, view, and zoom while you
+switch tabs. Background activity marks snapshots as changed; it does not replace
+them. Use **Refresh preview** to capture again, or select a document or camera to
+request another view. Snapshots last until the page is reloaded. Fit full view is
+the default; zoom presets and activity-panel visibility are remembered in your
+browser.
 
 Local path-like strings are masked in browser activity. Local activity and
 `replay.jsonl` files retain their original data. Expand **Interaction statistics**
