@@ -5,9 +5,7 @@ nobody else's business. That is the whole point: a flag misspelled in a list
 fails at runtime if you are lucky and produces a quietly different export if
 you are not, and neither shows up until something downstream looks wrong.
 
-The class covers the tool rather than our current appetite for it. `sch export
-bom` and `pcb export pos` have no caller today; they are here because the CLI
-has them, and a method that exists is one nobody writes an argv for later.
+Manufacturing exports use the native BOM, position, Gerber and drill commands.
 
 **It invokes; it does not interpret.** :meth:`erc` and :meth:`drc` hand back
 KiCad's report as parsed JSON, not a verdict -- mapping a violation's position
@@ -206,6 +204,39 @@ class KiCadCLI:
             args.append("--mirror")
         return self._to_file(args, board, output_file, timeout=60.0)
 
+
+    def fabrication(self, board: Path, output: Path, kind: str,
+                    layers: tuple[str, ...], include_map: bool) -> None:
+        """Generate native RS-274X plots or separate Excellon drill files."""
+        if kind == "gerbers":
+            args = ["pcb", "export", "gerbers", "--layers", ",".join(layers),
+                    "--no-x2", "--no-netlist", "--subtract-soldermask",
+                    "--check-zones"]
+        elif kind == "drills":
+            args = ["pcb", "export", "drill", "--format", "excellon",
+                    "--excellon-units", "mm", "--drill-origin", "absolute",
+                    "--excellon-separate-th"]
+            if include_map:
+                args += ["--generate-map", "--map-format", "gerberx2"]
+        else:
+            raise ValueError("kind must be gerbers or drills")
+        self._run([*args, "-o", str(output) + os.sep, str(board)])
+
+    def positions(self, board: Path, output: Path) -> Path:
+        """Export native absolute assembly positions in millimetres."""
+        return self._to_file(["pcb", "export", "pos", "--format", "csv",
+                              "--units", "mm", "--exclude-dnp"], board, output)
+
+    def bom(self, sheet: Path, output: Path, part_field: str) -> Path:
+        """Export ungrouped hierarchical BOM rows through the native exporter."""
+        if not part_field or any(c in part_field for c in ",\r\n"):
+            raise ValueError("part_number_field must be one nonempty field name")
+        return self._to_file([
+            "sch", "export", "bom", "--exclude-dnp",
+            "--fields", f"Value,Reference,Footprint,{part_field}",
+            "--labels", "value,ref,footprint,part_number",
+            "--group-by", "", "--ref-range-delimiter", "",
+        ], sheet, output)
 
     # -- libraries --------------------------------------------------------
 

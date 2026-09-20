@@ -13,7 +13,8 @@ from typing import Any
 
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 
-_HIERARCHY = {"check_sheet", "check_sheet_layout", "list_nets", "render_schematic"}
+_HIERARCHY = {"check_sheet", "check_sheet_layout", "list_nets", "render_schematic",
+              "export_bom", "check_manufacturing_package"}
 _SLOW = _HIERARCHY | {"check_board", "render_board", "render_board_layout",
                        "find_symbol"}
 

@@ -67,6 +67,13 @@ class Sheet(ABC):
 
     # -- the sheet itself -------------------------------------------------
 
+    @abstractmethod
+    def bom_rows(self, part_number_field: str) -> list[dict[str, str]]:
+        """Read hierarchical assembly rows, excluding DNP and BOM exclusions.
+
+        Rows contain value, ref, footprint, and part_number; one ref per row.
+        """
+
     @property
     @abstractmethod
     def path(self) -> Path:

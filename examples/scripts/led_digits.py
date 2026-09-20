@@ -1314,6 +1314,22 @@ async def build(client: Client) -> int:
                height=1000, quality="high", rotate="-30,0,25",
                perspective=True, floor=True, zoom=0.9)
     await call("render_schematic", path=root, output_dir=str(OUT))
+    # Missing-profile refusal coverage; successful outputs are exercised by
+    # manufacturing.py against an isolated copy with an explicit profile.
+    absent = str(OUT / "no-manufacturing-profile.kicad_pcb")
+    await refusal("get_manufacturing_requirements", path=absent, service="pcb")
+    await refusal("export_gerbers", path=absent, service="pcb",
+                  output_dir=str(OUT / "absent-gerbers"))
+    await refusal("export_drills", path=absent,
+                  output_dir=str(OUT / "absent-drills"))
+    await refusal("export_bom", path=absent, schematic_path=root,
+                  output_file=str(OUT / "absent-bom.csv"), assembly_sides=["front"])
+    await refusal("export_placements", path=absent,
+                  output_file=str(OUT / "absent-cpl.csv"), assembly_sides=["front"])
+    await refusal("check_manufacturing_package", path=absent,
+                  service="pcb", files=[])
+    await refusal("archive_manufacturing_files", files=[],
+                  output_zip=str(OUT / "absent.zip"))
     advertised = {tool.name for tool in await client.list_tools()}
     missing = sorted(advertised - used_tools)
     if missing:

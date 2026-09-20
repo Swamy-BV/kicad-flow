@@ -18,6 +18,7 @@ from . import (  # noqa: F401  (register)
     tools_batch,
     tools_board,
     tools_fabrication,
+    tools_manufacturing,
     tools_parts,
     tools_schematic,
 )

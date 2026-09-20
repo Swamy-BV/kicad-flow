@@ -672,6 +672,34 @@ class KiCadBoard(Board):
         """A minimum set of pad-group separations, nearest endpoints first."""
         return _connectivity.unrouted(self)
 
+    def fabrication_files(
+        self, output_dir: str | Path, kind: str, layers: tuple[str, ...] = (),
+        *, include_map: bool = True,
+    ) -> list[Path]:
+        """Export native manufacturing data from an isolated snapshot."""
+        from . import manufacturing
+
+        self.assert_current()
+        return manufacturing.fabrication_files(
+            self, output_dir, kind, layers, include_map,
+        )
+
+    def compare_fabrication_files(
+        self, files: tuple[Path, ...], kind: str, layers: tuple[str, ...],
+    ) -> list[tuple[str, str]]:
+        """Compare native CAM records, ignoring native generation timestamps."""
+        from .manufacturing import compare_files
+
+        self.assert_current()
+        return compare_files(self, files, kind, layers)
+
+    def placement_rows(self) -> list[dict[str, str]]:
+        """Read actual assembly poses through the native position exporter."""
+        from . import manufacturing
+
+        self.assert_current()
+        return manufacturing.placement_rows(self)
+
     def export_routing_design(self, output_file: str | Path) -> Path:
         """Export the in-memory board to an external routing design file."""
         return _routing_exchange.export_design(self, output_file)

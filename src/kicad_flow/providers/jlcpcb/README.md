@@ -1,7 +1,8 @@
 # JLCPCB parts provider
 
 This provider searches a local snapshot of JLCPCB/LCSC assembly parts. It does
-not call JLCPCB during a design session and it does not generate a BOM yet.
+not call JLCPCB during a design session. Manufacturing tools export BOM/CPL
+and native Gerber/drill outputs using the provider requirements contract.
 Stock and prices are therefore the values at the snapshot time; confirm them
 before ordering.
 
@@ -86,3 +87,6 @@ and nominal thickness. Existing saved selections are not silently migrated.
 The snapshot is not fetched at runtime. Review it against the current official
 capability table before production:
 <https://jlcpcb.com/capabilities/pcb-capabilities/>.
+
+See [manufacturing exports](../../../../docs/manufacturing.md) for requirements,
+MCP calls, output validation and remaining limitations.

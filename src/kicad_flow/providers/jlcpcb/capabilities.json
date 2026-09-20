@@ -45,5 +45,63 @@
     "one_oz_black_white": 0.13,
     "two_oz": 0.20
   },
-  "non_plated_slot_width_mm": 1.0
+  "non_plated_slot_width_mm": 1.0,
+  "manufacturing": {
+    "retrieved_at": "2026-09-19",
+    "sources": [
+      "https://jlcpcb.com/help/article/how-to-generate-gerber-and-drill-files-in-kicad-7",
+      "https://jlcpcb.com/help/article/how-to-generate-bom-and-centroid-files-from-kicad-8"
+    ],
+    "gerber": {
+      "format": "RS-274X",
+      "extensions": "protel",
+      "layers": [
+        "F.Mask",
+        "B.Mask",
+        "F.Silkscreen",
+        "B.Silkscreen",
+        "Edge.Cuts"
+      ],
+      "all_copper": true,
+      "subtract_soldermask": true
+    },
+    "drill": {
+      "format": "excellon",
+      "units": "mm",
+      "origin": "absolute",
+      "separate_pth_npth": true,
+      "map": "recommended"
+    },
+    "bom_columns": [
+      "Comment",
+      "Designator",
+      "Footprint",
+      "LCSC Part #"
+    ],
+    "cpl_columns": [
+      "Designator",
+      "Mid X",
+      "Mid Y",
+      "Layer",
+      "Rotation"
+    ],
+    "archive": "zip",
+    "bom_fields": [
+      "value",
+      "ref",
+      "footprint",
+      "part_number"
+    ],
+    "placement_fields": [
+      "ref",
+      "x",
+      "y",
+      "side",
+      "rotation"
+    ],
+    "placement_side_names": {
+      "front": "top",
+      "back": "bottom"
+    }
+  }
 }

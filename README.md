@@ -98,7 +98,7 @@ Restart Claude Desktop after changing its configuration.
 | **PCB layout** | Schematic-to-PCB export and synchronization, footprint movement, tracks, vias, zones, outlines, stackups, silkscreen, and editable board text |
 | **Inspection** | Pin and pad geometry, connectivity, local spatial observations, revision deltas, text bounds, top/bottom renders, and 3D views |
 | **Validation** | Atomic preflight checks for proposed writes, ERC, DRC, schematic/PCB parity checks, and manufacturing limits |
-| **Manufacturing** | Fabrication profiles, JLCPCB capabilities and local parts data, Gerber/drill export, and project-local library assets |
+| **Manufacturing** | Fabrication profiles, JLCPCB capabilities and local parts data, Gerber/drill export, JLCPCB BOM/CPL, package checks, ZIP creation, and project-local library assets |
 | **Routing exchange** | Explicit DSN export and SES import for optional FreeRouting workflows while preserving KiCadFlow project metadata |
 
 All caller-supplied coordinates and dimensions are in millimetres. A successful
@@ -165,6 +165,7 @@ without hiding decisions inside an autoplacer or autorouter. The optional
 - [Local schematic and PCB observations](docs/local-observations.md)
 - [Routing preview and fabrication-profile validation](docs/routing-preview-validation.md)
 - [Differential-pair inspection and validation](docs/differential-pairs.md)
+- [Manufacturing requirements and exports](docs/manufacturing.md)
 - [PCB text editing and native bounds](docs/pcb-text.md)
 - [Net colors and class assignments](docs/net-colors.md)
 - [Project documentation and datasheet guidance](docs/project-documentation.md)

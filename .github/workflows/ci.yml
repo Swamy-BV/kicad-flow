@@ -47,3 +47,5 @@ jobs:
         run: python examples/scripts/board_session.py
       - name: FreeRouting exchange example
         run: python examples/scripts/freerouting_exchange.py
+      - name: Manufacturing export example
+        run: python examples/scripts/manufacturing.py

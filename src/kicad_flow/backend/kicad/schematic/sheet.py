@@ -303,6 +303,13 @@ class KiCadSheet(Sheet):
         """Build a :class:`Part` from a placed ``(symbol ...)`` node."""
         return _components._as_part(self, node, ref)
 
+    def bom_rows(self, part_number_field: str) -> list[dict[str, str]]:
+        """Read native hierarchical BOM records from a schematic snapshot."""
+        from .manufacturing import bom_rows
+
+        with self._scratch() as scratch:
+            return bom_rows(scratch, part_number_field)
+
     def parts(self) -> list[Part]:
         """Every placed part, in reference order."""
         return _components.parts(self)

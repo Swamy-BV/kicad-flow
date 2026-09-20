@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any
 
 from .types import (
     FabricationCapabilities,
@@ -26,6 +27,13 @@ class FabricationProvider(ABC):
     @abstractmethod
     def capabilities(self) -> FabricationCapabilities:
         """Return exact caller choices and their source provenance."""
+
+    @abstractmethod
+    def manufacturing_requirements(
+        self, copper_layers: tuple[str, ...], service: str,
+        assembly_sides: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Return sourced output requirements for explicit service choices."""
 
     @abstractmethod
     def resolve(self, selection: FabricationSelection) -> FabricationProfile:

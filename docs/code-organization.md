@@ -14,6 +14,7 @@ to modules in the same directory:
 | Library definitions and placed parts | `symbols.py`, `components.py` | `footprints.py` |
 | Component fields | `fields.py` | `footprints.py` |
 | Wires, labels and copper | `connections.py` | `copper.py` |
+| Manufacturing rows and exports | `manufacturing.py` | `manufacturing.py` |
 | Child sheets | `hierarchy.py` | — |
 | Placement measurements | `placement.py` | `placement.py` |
 | Electrical and layout checks | `validation.py` | `validation.py`, `connectivity.py` |
@@ -50,3 +51,8 @@ Run lint, strict types and the FC/LED examples before committing. For changes
 to observations, connector placement, search or execution, also run their
 scripts in `examples/scripts/`. Inspect generated renders and report remaining
 findings. Examples are fixed inputs, not fixtures to adjust around a regression.
+
+`server/tools_manufacturing.py` composes provider requirements, neutral CAD
+observations and file packaging. Native CAM parsing stays in
+`backend/kicad/pcb/manufacturing.py`; provider columns and side spellings stay
+in the dated JLCPCB capability snapshot.

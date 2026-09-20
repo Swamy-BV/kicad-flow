@@ -71,6 +71,27 @@ class Board(ABC):
 
     # -- the board itself -------------------------------------------------
 
+    @abstractmethod
+    def fabrication_files(
+        self, output_dir: str | Path, kind: str, layers: tuple[str, ...] = (),
+        *, include_map: bool = True,
+    ) -> list[Path]:
+        """Export copper plots or drill data from a snapshot of the board."""
+
+    @abstractmethod
+    def compare_fabrication_files(
+        self, files: tuple[Path, ...], kind: str, layers: tuple[str, ...],
+    ) -> list[tuple[str, str]]:
+        """Report missing or changed outputs against a fresh native export."""
+
+    @abstractmethod
+    def placement_rows(self) -> list[dict[str, str]]:
+        """Read native assembly positions, excluding DNP and excluded footprints.
+
+        Rows contain ref, x, y, side (front/back), and rotation. Numeric strings
+        preserve the native exporter precision; coordinates are millimetres.
+        """
+
     @property
     @abstractmethod
     def path(self) -> Path:

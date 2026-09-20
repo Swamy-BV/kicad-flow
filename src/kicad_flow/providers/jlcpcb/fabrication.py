@@ -78,6 +78,42 @@ class JlcpcbFabricationProvider(FabricationProvider):
             retrieved_at=str(data["retrieved_at"]),
         )
 
+    def manufacturing_requirements(
+        self, copper_layers: tuple[str, ...], service: str,
+        assembly_sides: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Resolve output layers without choosing the assembly service or sides."""
+        import copy
+
+        if service not in ("pcb", "pcba"):
+            raise ValueError("service must be pcb or pcba")
+        if len(set(assembly_sides)) != len(assembly_sides):
+            raise ValueError("assembly_sides contains duplicates")
+        if any(side not in ("front", "back") for side in assembly_sides):
+            raise ValueError("assembly_sides accepts front and back")
+        if service == "pcba" and not assembly_sides:
+            raise ValueError("pcba requires explicit assembly_sides")
+        if service == "pcb" and assembly_sides:
+            raise ValueError("pcb service has no assembly_sides")
+        data = copy.deepcopy(self._data["manufacturing"])
+        layers = [*copper_layers, *data["gerber"]["layers"]]
+        layers += ["F.Paste" if side == "front" else "B.Paste"
+                   for side in assembly_sides]
+        data["gerber"]["layers"] = layers
+        data.update(provider=self.name, service=service,
+                    assembly_sides=list(assembly_sides))
+        data["required_outputs"] = ["gerbers", "drills"]
+        if service == "pcba":
+            data["required_outputs"] += ["bom", "placements"]
+        data["recommended_outputs"] = ["drill_map"]
+        data["notes"] = [
+            "Drill files may be empty when the board has no corresponding holes.",
+            "LCSC Part # enables explicit part matching; blank identifiers are "
+            "reported for manual part selection, not silently guessed.",
+            "Placement rotations require review against supplier part orientation.",
+        ]
+        return dict(data)
+
     def resolve(self, selection: FabricationSelection) -> FabricationProfile:
         """Validate the selected process and calculate its applicable limits."""
         data = self._data
