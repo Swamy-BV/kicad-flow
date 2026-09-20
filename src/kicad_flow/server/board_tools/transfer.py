@@ -9,6 +9,7 @@ from ...pcb.api import Board
 from ...pcb.types import Footprint, Pad
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from ..schematic_tools.session import _sheet
 from .models import SchematicPlacement
 from .netlist import sync_board_nets
@@ -76,7 +77,7 @@ def _check_changed_contacts(
 def update_board_from_schematic(
     schematic_path: str,
     board_path: str,
-    placements: list[SchematicPlacement] | None = None,
+    placements: BatchItems[SchematicPlacement] | None = None,
     net_names: dict[str, str] | None = None,
     layers: int = 2,
     thickness: float = 1.6,

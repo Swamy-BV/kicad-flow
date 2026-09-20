@@ -16,6 +16,7 @@ from ...pcb.types import (
 )
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     BoardRuleSpec,
     NetClassAssignmentSpec,
@@ -200,7 +201,7 @@ def get_board_limits(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def set_net_classes(path: str, classes: list[NetClassSpec]) -> dict[str, Any]:
+def set_net_classes(path: str, classes: BatchItems[NetClassSpec]) -> dict[str, Any]:
     """Set net-class routing rules and PCB/schematic colors in the board project.
 
     Omitted dimensions remain unchanged on an existing class. A newly created
@@ -242,7 +243,7 @@ def list_net_classes(path: str) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def set_net_class_patterns(
-    path: str, patterns: list[NetClassPatternSpec]
+    path: str, patterns: BatchItems[NetClassPatternSpec]
 ) -> dict[str, Any]:
     """Replace ALL project net-class patterns for both schematic and PCB.
 
@@ -277,7 +278,7 @@ def list_net_class_patterns(path: str) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def assign_net_classes(
-    path: str, assignments: list[NetClassAssignmentSpec]
+    path: str, assignments: BatchItems[NetClassAssignmentSpec]
 ) -> dict[str, Any]:
     """Assign mentioned nets to classes, preserving all other assignments.
 
@@ -312,7 +313,9 @@ def list_net_class_assignments(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def set_board_constraints(path: str, rules: list[BoardRuleSpec]) -> dict[str, Any]:
+def set_board_constraints(
+    path: str, rules: BatchItems[BoardRuleSpec]
+) -> dict[str, Any]:
     """Create or replace named numeric custom DRC rules.
 
     Each condition explicitly selects the objects governed by its constraints.

@@ -16,12 +16,20 @@ The order is the order the work happens in.
 
 from __future__ import annotations
 
+from ..limits import BATCH_LIMIT
 from .documentation import DOCUMENTATION
 from .parts import PARTS
 from .pcb import PCB
 from .schematic import SCHEMATIC
 
 #: The whole instruction text handed to :class:`~fastmcp.FastMCP`.
-INSTRUCTIONS = DOCUMENTATION + PARTS + SCHEMATIC + PCB
+INSTRUCTIONS = (
+    f"Batch request limit: {BATCH_LIMIT} items per operation list, "
+    "including batch.ops. "
+    "Split larger edits into separate calls and inspect each reply. Oversized lists "
+    "are rejected without applying that request. Geometry vertices, stackup layers, "
+    "and returned inventories are not operation batches. The operator can change "
+    "KICAD_FLOW_BATCH_LIMIT and restart the server to advertise a different limit.\n"
+) + DOCUMENTATION + PARTS + SCHEMATIC + PCB
 
 __all__ = ["DOCUMENTATION", "INSTRUCTIONS", "PARTS", "PCB", "SCHEMATIC"]

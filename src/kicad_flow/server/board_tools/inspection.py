@@ -7,6 +7,7 @@ from typing import Any
 from ...pcb.routing import RoutePath, RouteTerminal
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     NetPairSpec,
 )
@@ -108,8 +109,8 @@ def unrouted_connections(path: str, limit: int = 40) -> dict[str, Any]:
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
 def measure_routes(
     path: str,
-    nets: list[str] | None = None,
-    pairs: list[NetPairSpec] | None = None,
+    nets: BatchItems[str] | None = None,
+    pairs: BatchItems[NetPairSpec] | None = None,
     max_bytes: int = 100000,
 ) -> dict[str, Any]:
     """Measure authored copper by explicitly named net.

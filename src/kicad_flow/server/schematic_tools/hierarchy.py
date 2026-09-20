@@ -7,6 +7,7 @@ from typing import Any
 from ...schematic import Sheet
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     NewSheetBox,
     SheetMove,
@@ -20,7 +21,7 @@ from .session import (
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_sheets(path: str, sheets: list[NewSheetBox]) -> dict[str, Any]:
+def add_sheets(path: str, sheets: BatchItems[NewSheetBox]) -> dict[str, Any]:
     """Put child-sheet boxes on this one, and say where their ports landed.
 
     A design of more than one page is two halves that meet BY NAME: a port on
@@ -59,7 +60,7 @@ def add_sheets(path: str, sheets: list[NewSheetBox]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
+def add_texts(path: str, notes: BatchItems[SheetNote]) -> dict[str, Any]:
     """Write notes on the sheet -- plain text that connects nothing.
 
     THIS IS NOT `add_labels`. A label names a net and joins everything it
@@ -97,7 +98,7 @@ def add_texts(path: str, notes: list[SheetNote]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_sheets(path: str, moves: list[SheetMove]) -> dict[str, Any]:
+def move_sheets(path: str, moves: BatchItems[SheetMove]) -> dict[str, Any]:
     """Move child-sheet boxes, and say where their ports ended up.
 
     The box moves and its ports move with it. The child FILE and its
@@ -125,7 +126,7 @@ def move_sheets(path: str, moves: list[SheetMove]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_sheets(path: str, names: list[str]) -> dict[str, Any]:
+def remove_sheets(path: str, names: BatchItems[str]) -> dict[str, Any]:
     """Take child-sheet boxes off this sheet, by name.
 
     The child FILES are left alone. This removes the boxes that refer to them,

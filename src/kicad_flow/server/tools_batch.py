@@ -26,12 +26,13 @@ from pydantic import Field, ValidationError
 from . import _meta, tools_board, tools_schematic
 from ._app import mcp
 from .activity import record_nested_tool
+from .limits import BATCH_LIMIT, BatchItems
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
 async def batch(
     ctx: Context,
-    ops: Annotated[list[dict[str, Any]], Field(
+    ops: Annotated[BatchItems[dict[str, Any]], Field(
         description="Calls to run in order, each "
                     '`{"tool": "save_board", "args": {"path": ...}}`. '
                     "Any schematic or board tool except `batch` itself.")],
@@ -69,6 +70,26 @@ async def batch(
         tool and error of every op that refused, so a failure is locatable
         without matching replies up by hand.
     """
+    # Preflight every enclosed list limit before executing even the first op.
+    # Other errors retain the established stop_on_error behavior.
+    for index, op in enumerate(ops):
+        name = op.get("tool")
+        arguments = op.get("args", {})
+        if not isinstance(name, str) or not isinstance(arguments, dict):
+            continue
+        tool = await mcp.get_tool(name)
+        if tool is None:
+            continue
+        for field, schema in tool.parameters.get("properties", {}).items():
+            variants = [schema, *schema.get("anyOf", [])]
+            if any(item.get("maxItems") == BATCH_LIMIT for item in variants):
+                value = arguments.get(field)
+                if isinstance(value, list) and len(value) > BATCH_LIMIT:
+                    raise ValueError(
+                        f"ops[{index}].args.{field}: maximum {BATCH_LIMIT} items; "
+                        "split the request or configure KICAD_FLOW_BATCH_LIMIT "
+                        "and restart the server. No batch operations were run."
+                    )
     known = set(tools_schematic.__all__) | set(tools_board.__all__)
     await ctx.report_progress(0, len(ops), "Starting batch")
     results: list[Any] = []

@@ -7,6 +7,7 @@ from typing import Any
 from ...schematic import PartPlacement, Point, SceneBounds
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     NewPart,
 )
@@ -194,7 +195,9 @@ def check_sheet_layout(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_INSPECT, annotations=_meta.READ)
-def measure_schematic_placement(path: str, parts: list[NewPart]) -> dict[str, Any]:
+def measure_schematic_placement(
+    path: str, parts: BatchItems[NewPart]
+) -> dict[str, Any]:
     """Measure a complete caller-decided placement without changing the sheet.
 
     Supply the same list intended for `add_components`. The backend resolves

@@ -7,6 +7,7 @@ from typing import Any
 from ...schematic import Sheet
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     LabelShift,
     LabelTarget,
@@ -56,7 +57,7 @@ def list_labels(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_wires(path: str, wires: list[Segment]) -> dict[str, Any]:
+def add_wires(path: str, wires: BatchItems[Segment]) -> dict[str, Any]:
     """Draw wires: the default connection method for nearby components.
 
     A wire connects by TOUCHING a pin, so both ends are snapped to the grid
@@ -85,7 +86,7 @@ def add_wires(path: str, wires: list[Segment]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_labels(path: str, labels: list[NewLabel]) -> dict[str, Any]:
+def add_labels(path: str, labels: BatchItems[NewLabel]) -> dict[str, Any]:
     """Name necessary distant or cross-sheet nets, not ordinary local wiring.
 
     Do not use labels named GND or +3V3; place those rails with `add_power` and
@@ -125,7 +126,7 @@ def add_labels(path: str, labels: list[NewLabel]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
+def add_junctions(path: str, points: BatchItems[Spot]) -> dict[str, Any]:
     """Join crossing wires. Without one, wires that cross are separate nets.
 
     Args:
@@ -148,7 +149,7 @@ def add_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
+def add_no_connects(path: str, points: BatchItems[Spot]) -> dict[str, Any]:
     """Mark pins deliberately unconnected, so ERC stops reporting them.
 
     Args:
@@ -171,7 +172,7 @@ def add_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_power(path: str, symbols: list[NewPower]) -> dict[str, Any]:
+def add_power(path: str, symbols: BatchItems[NewPower]) -> dict[str, Any]:
     """Place power symbols, especially for every local GND and +3V3 cluster.
 
     Use this instead of labels named GND or +3V3. Place a symbol near the
@@ -204,7 +205,7 @@ def add_power(path: str, symbols: list[NewPower]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_power_flags(path: str, flags: list[NewFlag]) -> dict[str, Any]:
+def add_power_flags(path: str, flags: BatchItems[NewFlag]) -> dict[str, Any]:
     """Place PWR_FLAGs, which tell ERC a rail is driven.
 
     A rail of only power INPUTS reads as undriven however many symbols sit on
@@ -259,7 +260,7 @@ def _rotate_label(sheet: Sheet, target: LabelTurn) -> int:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_wires(path: str, wires: list[WireEnds]) -> dict[str, Any]:
+def remove_wires(path: str, wires: BatchItems[WireEnds]) -> dict[str, Any]:
     """Delete wires running between the given pairs of points.
 
     Either direction matches -- a segment does not know which end was drawn
@@ -286,7 +287,7 @@ def remove_wires(path: str, wires: list[WireEnds]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_wires(path: str, wires: list[WireShift]) -> dict[str, Any]:
+def move_wires(path: str, wires: BatchItems[WireShift]) -> dict[str, Any]:
     """Shift wires by an offset. Both ends move, so length and angle survive.
 
     A wire moved off a pin is no longer joined to it and nothing on the sheet
@@ -312,7 +313,7 @@ def move_wires(path: str, wires: list[WireShift]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_labels(path: str, points: list[LabelTarget]) -> dict[str, Any]:
+def remove_labels(path: str, points: BatchItems[LabelTarget]) -> dict[str, Any]:
     """Delete labels by UUID, or legacy snapped position.
 
     Args:
@@ -330,7 +331,7 @@ def remove_labels(path: str, points: list[LabelTarget]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_labels(path: str, moves: list[LabelShift]) -> dict[str, Any]:
+def move_labels(path: str, moves: BatchItems[LabelShift]) -> dict[str, Any]:
     """Shift labels by an offset.
 
     A label names the net it TOUCHES. Move one off its wire and it names
@@ -351,7 +352,7 @@ def move_labels(path: str, moves: list[LabelShift]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def rotate_labels(path: str, turns: list[LabelTurn]) -> dict[str, Any]:
+def rotate_labels(path: str, turns: BatchItems[LabelTurn]) -> dict[str, Any]:
     """Turn labels at these points.
 
     Which way a GLOBAL label points is its justification, not its rotation --
@@ -372,7 +373,7 @@ def rotate_labels(path: str, turns: list[LabelTurn]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
+def remove_junctions(path: str, points: BatchItems[Spot]) -> dict[str, Any]:
     """Delete junctions at these points.
 
     Removing one separates wires that cross there into different nets, so read
@@ -395,7 +396,7 @@ def remove_junctions(path: str, points: list[Spot]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_no_connects(path: str, points: list[Spot]) -> dict[str, Any]:
+def remove_no_connects(path: str, points: BatchItems[Spot]) -> dict[str, Any]:
     """Delete no-connect marks at these points.
 
     A no-connect SUPPRESSES an ERC error. Taking one off lets a real fault be

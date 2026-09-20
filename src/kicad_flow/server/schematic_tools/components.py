@@ -7,6 +7,7 @@ from typing import Any
 from ...schematic import Sheet
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     FieldRef,
     FieldShift,
@@ -91,7 +92,7 @@ def next_ref(path: str, prefix: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def add_components(path: str, parts: list[NewPart]) -> dict[str, Any]:
+def add_components(path: str, parts: BatchItems[NewPart]) -> dict[str, Any]:
     """Place parts on the sheet, in order.
 
     This applies an already-decided functional-block placement. Before calling,
@@ -136,8 +137,8 @@ def add_components(path: str, parts: list[NewPart]) -> dict[str, Any]:
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
 def move_components(
     path: str,
-    moves: list[PartMove] | None = None,
-    refs: list[str] | None = None,
+    moves: BatchItems[PartMove] | None = None,
+    refs: BatchItems[str] | None = None,
     dx: float = 0.0,
     dy: float = 0.0,
     unit: int = 1,
@@ -195,7 +196,7 @@ def move_components(
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def rotate_components(path: str, turns: list[PartTurn]) -> dict[str, Any]:
+def rotate_components(path: str, turns: BatchItems[PartTurn]) -> dict[str, Any]:
     """Turn parts. A rotation moves the pins, and the reply says where to.
 
     Args:
@@ -220,7 +221,7 @@ def rotate_components(path: str, turns: list[PartTurn]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def mirror_components(path: str, mirrors: list[PartFlip]) -> dict[str, Any]:
+def mirror_components(path: str, mirrors: BatchItems[PartFlip]) -> dict[str, Any]:
     """Mirror parts about an axis, and say where the pins ended up.
 
     Args:
@@ -245,7 +246,9 @@ def mirror_components(path: str, mirrors: list[PartFlip]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_components(path: str, refs: list[str], unit: int = 1) -> dict[str, Any]:
+def remove_components(
+    path: str, refs: BatchItems[str], unit: int = 1
+) -> dict[str, Any]:
     """Take parts off the sheet. Wires and labels stay where they are.
 
     Args:
@@ -269,7 +272,7 @@ def remove_components(path: str, refs: list[str], unit: int = 1) -> dict[str, An
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def set_fields(path: str, fields: list[FieldValue]) -> dict[str, Any]:
+def set_fields(path: str, fields: BatchItems[FieldValue]) -> dict[str, Any]:
     """Set fields on parts -- `Footprint`, `Datasheet`, a custom one.
 
     Args:
@@ -295,7 +298,7 @@ def set_fields(path: str, fields: list[FieldValue]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
+def move_fields(path: str, moves: BatchItems[FieldShift]) -> dict[str, Any]:
     """Move a part's text relative to the part, so it stops printing on it.
 
     A library places these and cannot know what ends up beside them.
@@ -327,7 +330,7 @@ def move_fields(path: str, moves: list[FieldShift]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_fields(path: str, fields: list[FieldRef]) -> dict[str, Any]:
+def remove_fields(path: str, fields: BatchItems[FieldRef]) -> dict[str, Any]:
     """Delete fields from parts.
 
     Setting a field to an empty string is a DIFFERENT thing: it stays present

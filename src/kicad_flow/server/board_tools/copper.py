@@ -12,6 +12,7 @@ from ...pcb.types import (
 )
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from ._track_angles import _angle_step, angle_findings
 from .models import (
     NewTrack,
@@ -77,7 +78,7 @@ def _provider_via_refusal(path: str, vias: list[NewVia]) -> dict[str, Any] | Non
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def add_tracks(
     path: str,
-    tracks: list[NewTrack],
+    tracks: BatchItems[NewTrack],
     track_angle_step: float | None = None,
 ) -> dict[str, Any]:
     """Lay straight copper segments in order.
@@ -137,7 +138,7 @@ def add_tracks(
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_vias(path: str, vias: list[NewVia]) -> dict[str, Any]:
+def add_vias(path: str, vias: BatchItems[NewVia]) -> dict[str, Any]:
     """Drill caller-typed vias across explicit copper-layer spans."""
     try:
         board = _board(path)
@@ -166,7 +167,7 @@ def add_vias(path: str, vias: list[NewVia]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_zones(path: str, zones: list[NewZone]) -> dict[str, Any]:
+def add_zones(path: str, zones: BatchItems[NewZone]) -> dict[str, Any]:
     """Add copper pours or keep-out polygons in order.
 
     A zone can use caller-supplied polygon *points*, or an explicit

@@ -11,6 +11,7 @@ from ...pcb.types import (
 )
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from ._track_angles import _angle_step, angle_findings
 from .copper import (
     _provider_via_refusal,
@@ -31,9 +32,9 @@ from .session import (
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
 def check_board(
     path: str,
-    tracks: list[NewTrack] | None = None,
-    vias: list[NewVia] | None = None,
-    zones: list[NewZone] | None = None,
+    tracks: BatchItems[NewTrack] | None = None,
+    vias: BatchItems[NewVia] | None = None,
+    zones: BatchItems[NewZone] | None = None,
     track_angle_step: float | None = None,
     schematic_parity: bool = False,
 ) -> dict[str, Any]:

@@ -175,6 +175,35 @@ Optional JLCPCB support uses a downloaded manufacturing-capability and parts
 snapshot. Verify current stock, pricing, and capabilities before ordering. See
 the [provider setup guide](src/kicad_flow/providers/jlcpcb/README.md).
 
+## Batch size
+
+MCP operation lists accept at most **5 items per call** by default. This covers
+schematic and PCB additions, moves, updates, removals and candidate checks, plus
+at most 5 operations in `batch`. Each enclosed operation keeps the same limit.
+Oversized lists are rejected before edits; `batch` checks every enclosed list
+before running its first operation, even with `stop_on_error=false`.
+
+Set `KICAD_FLOW_BATCH_LIMIT` to a positive integer **before starting the server**
+and restart it to experiment with another size. The advertised `maxItems`
+schemas and server instructions use that value. Invalid values stop startup.
+For example, in PowerShell:
+
+```powershell
+$env:KICAD_FLOW_BATCH_LIMIT = "10"
+python -m kicad_flow.server --http
+```
+
+Split additive edits into separate calls and inspect their replies. Whole-list
+replacement tools, such as `set_net_class_patterns`, still replace the entire
+collection: increase the configured limit for a larger replacement instead of
+splitting it. Polygon vertices, stackup layers, filter layers, file manifests
+and returned inventories are not operation batches. The underlying primitive
+contracts do not impose this MCP request-size policy.
+
+The existing large examples keep their original inputs. Run them with a larger
+explicit limit, for example `KICAD_FLOW_BATCH_LIMIT=1000`; use
+`python examples/scripts/batch_limits.py` to exercise the configured boundary.
+
 ## Tool discovery and monitoring
 
 Add `--tool-search` to either transport to expose a compact discovery surface

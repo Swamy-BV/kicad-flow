@@ -7,6 +7,7 @@ from typing import Any
 from ...pcb.api import Board
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     ArcGraphic,
     BoardTextUpdate,
@@ -26,7 +27,7 @@ from .session import (
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_graphics(path: str, graphics: list[GraphicSpec]) -> dict[str, Any]:
+def add_graphics(path: str, graphics: BatchItems[GraphicSpec]) -> dict[str, Any]:
     """Draw board outlines and front/back silkscreen art in order.
 
     Lines, arcs, circles, rectangles and polygons are geometric primitives,
@@ -85,7 +86,7 @@ def list_graphics(path: str, layer: str = "") -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def move_graphics(path: str, moves: list[GraphicMove]) -> dict[str, Any]:
+def move_graphics(path: str, moves: BatchItems[GraphicMove]) -> dict[str, Any]:
     """Shift graphical primitives by UUID; nothing else follows them."""
     try:
         board = _board(path)
@@ -100,7 +101,7 @@ def move_graphics(path: str, moves: list[GraphicMove]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_graphics(path: str, uuids: list[str]) -> dict[str, Any]:
+def remove_graphics(path: str, uuids: BatchItems[str]) -> dict[str, Any]:
     """Remove graphical primitives by UUID in order."""
     try:
         board = _board(path)
@@ -115,7 +116,7 @@ def remove_graphics(path: str, uuids: list[str]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def add_board_texts(path: str, texts: list[NewBoardText]) -> dict[str, Any]:
+def add_board_texts(path: str, texts: BatchItems[NewBoardText]) -> dict[str, Any]:
     """Put texts on board layers -- legends, fab notes, part markings.
 
     Back-side silkscreen wants ``mirror=true`` or it reads reversed.
@@ -167,7 +168,7 @@ def list_board_texts(path: str, layer: str = "") -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def update_board_texts(
-    path: str, updates: list[BoardTextUpdate]
+    path: str, updates: BatchItems[BoardTextUpdate]
 ) -> dict[str, Any]:
     """Update exact text UUIDs atomically; omitted properties are preserved."""
     try:
@@ -198,7 +199,7 @@ def update_board_texts(
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_board_texts(path: str, uuids: list[str]) -> dict[str, Any]:
+def remove_board_texts(path: str, uuids: BatchItems[str]) -> dict[str, Any]:
     """Remove literal board text by stable UUID, atomically and in order."""
     try:
         board = _board(path)

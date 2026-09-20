@@ -10,6 +10,7 @@ from ...pcb.types import (
 )
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     FootprintFieldShift,
     FootprintFieldValue,
@@ -82,8 +83,8 @@ def footprint_pads(fp_id: str, project_dir: str = "") -> dict[str, Any]:
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def move_footprints(
     path: str,
-    moves: list[FootprintMove] | None = None,
-    refs: list[str] | None = None,
+    moves: BatchItems[FootprintMove] | None = None,
+    refs: BatchItems[str] | None = None,
     dx: float = 0.0,
     dy: float = 0.0,
 ) -> dict[str, Any]:
@@ -125,7 +126,7 @@ def move_footprints(
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def rotate_footprints(path: str, turns: list[FootprintTurn]) -> dict[str, Any]:
+def rotate_footprints(path: str, turns: BatchItems[FootprintTurn]) -> dict[str, Any]:
     """Turn footprints to absolute rotations. Any angle is valid."""
     try:
         board = _board(path)
@@ -140,7 +141,7 @@ def rotate_footprints(path: str, turns: list[FootprintTurn]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def flip_footprints(path: str, flips: list[FootprintFlip]) -> dict[str, Any]:
+def flip_footprints(path: str, flips: BatchItems[FootprintFlip]) -> dict[str, Any]:
     """Put footprints on requested ``"F"`` or ``"B"`` sides.
 
     Flipping MIRRORS it: the pads run the other way. Anything you routed to
@@ -159,7 +160,7 @@ def flip_footprints(path: str, flips: list[FootprintFlip]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
-def remove_footprints(path: str, refs: list[str]) -> dict[str, Any]:
+def remove_footprints(path: str, refs: BatchItems[str]) -> dict[str, Any]:
     """Take footprints off the board in order."""
     try:
         board = _board(path)
@@ -207,7 +208,7 @@ def list_footprints(path: str, with_pads: bool = False) -> dict[str, Any]:
 @mcp.tool(tags=_meta.PCB_INSPECT, annotations=_meta.READ)
 def measure_placement(
     path: str,
-    placements: list[PlacementCandidate] | None = None,
+    placements: BatchItems[PlacementCandidate] | None = None,
     edge_clearance: float = 0.0,
     net_limit: int = 20,
     edge_exempt_refs: list[str] | None = None,
@@ -311,7 +312,7 @@ def get_footprint_fields(path: str, ref: str) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def set_footprint_fields(
-    path: str, fields: list[FootprintFieldValue]
+    path: str, fields: BatchItems[FootprintFieldValue]
 ) -> dict[str, Any]:
     """Set board-local fields; schematic-owned identity and value stay fixed."""
     try:
@@ -333,7 +334,7 @@ def set_footprint_fields(
 
 @mcp.tool(tags=_meta.PCB_PRIMARY, annotations=_meta.WRITE)
 def move_footprint_fields(
-    path: str, moves: list[FootprintFieldShift]
+    path: str, moves: BatchItems[FootprintFieldShift]
 ) -> dict[str, Any]:
     """Move footprint fields relative to their footprints.
 

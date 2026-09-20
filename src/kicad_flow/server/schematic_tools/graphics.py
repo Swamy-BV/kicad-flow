@@ -7,6 +7,7 @@ from typing import Any
 from ...schematic import Sheet
 from .. import _meta
 from .._app import mcp
+from ..limits import BatchItems
 from .models import (
     SchematicGraphicMove,
     SchematicGraphicSpec,
@@ -19,7 +20,7 @@ from .session import _atomic_items, _fail, _sheet
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
 def add_schematic_graphics(
-    path: str, graphics: list[SchematicGraphicSpec]
+    path: str, graphics: BatchItems[SchematicGraphicSpec]
 ) -> dict[str, Any]:
     """Draw non-electrical polylines and rectangles in order.
 
@@ -66,7 +67,7 @@ def list_schematic_graphics(path: str) -> dict[str, Any]:
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
 def move_schematic_graphics(
-    path: str, moves: list[SchematicGraphicMove]
+    path: str, moves: BatchItems[SchematicGraphicMove]
 ) -> dict[str, Any]:
     """Shift graphical primitives by UUID; page contents do not follow."""
     try:
@@ -84,7 +85,7 @@ def move_schematic_graphics(
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_schematic_graphics(path: str, uuids: list[str]) -> dict[str, Any]:
+def remove_schematic_graphics(path: str, uuids: BatchItems[str]) -> dict[str, Any]:
     """Remove graphical primitives by stable UUID, atomically and in order."""
     try:
         sheet = _sheet(path)
@@ -113,7 +114,7 @@ def list_texts(path: str) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.WRITE)
-def update_texts(path: str, updates: list[SheetTextUpdate]) -> dict[str, Any]:
+def update_texts(path: str, updates: BatchItems[SheetTextUpdate]) -> dict[str, Any]:
     """Update exact schematic note UUIDs; omitted properties are preserved."""
     try:
         sheet = _sheet(path)
@@ -137,7 +138,7 @@ def update_texts(path: str, updates: list[SheetTextUpdate]) -> dict[str, Any]:
 
 
 @mcp.tool(tags=_meta.SCH_PRIMARY, annotations=_meta.DESTRUCTIVE)
-def remove_texts(path: str, uuids: list[str]) -> dict[str, Any]:
+def remove_texts(path: str, uuids: BatchItems[str]) -> dict[str, Any]:
     """Remove literal schematic notes by stable UUID, atomically and in order."""
     try:
         sheet = _sheet(path)
