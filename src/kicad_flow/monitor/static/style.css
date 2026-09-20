@@ -393,3 +393,39 @@ select { background:var(--plane); color:var(--ink); border:1px solid var(--line)
  .detail dt { margin-top:4px; }
 }
 @media (prefers-reduced-motion:reduce) { * { transition:none !important; } }
+
+/* One compact toolbar; narrow windows scroll controls instead of stacking headers. */
+#app-header { flex-wrap:nowrap; gap:10px; padding:8px 12px; min-height:52px; overflow-x:auto; flex-shrink:0; user-select:none; caret-color:transparent; }
+#app-header > * { flex-shrink:0; }
+#app-header button, #app-header select, #app-header label, #app-header nav { user-select:none; cursor:pointer; }
+#app-header button:disabled { cursor:not-allowed; }
+#app-header nav { width:auto; order:0; padding:2px; }
+#app-header nav button { padding:6px 10px; white-space:nowrap; }
+.brand-icon { width:26px; height:26px; font-size:16px; border-radius:6px; }
+.brand strong { font-size:13px; }
+#document-row { padding:0; flex-wrap:nowrap; }
+#document { min-width:100px; max-width:180px; }
+#bar { padding:0; border:0; flex-wrap:nowrap; gap:4px; }
+#bar label { font-size:0; }
+#bar label select { font-size:12px; }
+#zoomctl { flex-wrap:nowrap; gap:4px; }
+#zoom-preset { max-width:112px; }
+.heading-actions { gap:4px; }
+#connection { font-size:10px; }
+#preview-footer { justify-content:flex-start; gap:10px; padding:6px 12px; }
+#view-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:240px; }
+#hint { margin-left:auto; }
+#head { padding:10px 12px; }
+#workspace { flex:1; min-height:0; }
+#main, body:not(.activity-hidden) #main { height:auto; min-height:0; flex:1; }
+@media (max-width:760px) {
+ body { overflow:hidden; }
+ #workspace { flex-direction:row; }
+ #side { flex:0 0 280px; height:auto; border-left:1px solid var(--line); border-top:0; }
+ #preview-footer { flex-wrap:wrap; }
+}
+@media (max-width:560px) {
+ #workspace { flex-direction:column; }
+ #side { flex:0 0 35%; width:100%; border-left:0; border-top:1px solid var(--line); min-height:120px; }
+ .brand strong { display:none; }
+}

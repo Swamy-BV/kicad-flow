@@ -9,31 +9,14 @@
 <body>
 <header id="app-header">
   <div class="brand"><span class="brand-icon" aria-hidden="true">K</span>
-    <div><strong>KiCadFlow</strong><small>Design workspace</small></div></div>
+    <div><strong>KiCadFlow</strong></div></div>
   <nav aria-label="Workspace">
     <button id="tab-live" class="active" aria-current="page"><span class="live-dot" aria-hidden="true"></span>Live activity</button>
     <button id="tab-sch">Schematic</button>
     <button id="tab-pcb">PCB</button>
   </nav>
-  <span id="connection" role="status">Connecting</span>
-  <button id="theme" title="Toggle light / dark" aria-label="Toggle light or dark theme">&#9789;</button>
-</header>
-<div id="workspace">
-<main id="main">
-  <section id="workspace-heading" aria-label="Preview information">
-    <div><span id="view-badge" class="eyebrow">LIVE PREVIEW</span>
-      <h1 id="view-title">Following current work</h1>
-      <p id="view-description">Preview follows the active file. Activity streams alongside it.</p></div>
-    <div class="heading-actions">
-      <button id="pause-live">Pause preview</button>
-      <button id="toggle-log" aria-expanded="true" aria-controls="side">Hide logs</button>
-      <button id="refresh-preview" class="primary" hidden>Refresh preview</button>
-    </div>
-  </section>
   <div id="document-row" hidden>
-    <label for="document">Document</label>
     <select id="document" aria-label="Project document"></select>
-    <span class="manual-note">Updates only when you request them</span>
   </div>
   <div id="bar">
     <button id="b2d" class="active">2D</button>
@@ -67,12 +50,22 @@
       <button id="fit" title="Fit to view (double-click)">Fit</button>
       <button id="zout" title="Zoom out" aria-label="Zoom out">&minus;</button>
       <button id="zin" title="Zoom in" aria-label="Zoom in">+</button>
-      <span id="zoom">100%</span>
+
     </span>
-    <span class="grow"></span>
 
   </div>
 
+  <div class="heading-actions">
+    <button id="pause-live" title="Pause automatic preview; logs continue">Pause</button>
+    <button id="toggle-log" aria-expanded="true" aria-controls="side">Hide logs</button>
+    <button id="clear" title="Clear live activity and preview; keep manual snapshots">Clear live</button>
+    <button id="refresh-preview" class="primary" hidden>Refresh</button>
+  </div>
+  <span id="connection" role="status">Connecting</span>
+  <button id="theme" title="Toggle light / dark" aria-label="Toggle light or dark theme">&#9789;</button>
+</header>
+<div id="workspace">
+<main id="main">
   <div id="view">
     <div id="stage"><img id="img" alt="Preview of the active design" draggable="false"><svg id="scene" hidden role="img" aria-label="Schematic objects and conservative occupied bounds"></svg></div>
     <div id="preview-empty"><span class="empty-icon" aria-hidden="true">&#9633;</span>
@@ -80,7 +73,7 @@
     <div id="spin" role="status">Updating preview&hellip;</div>
   </div>
   <div id="scene-info" hidden aria-live="polite"></div>
-  <footer id="preview-footer"><span id="capture-status" role="status">Waiting for a design</span>
+  <footer id="preview-footer"><span id="view-badge">LIVE</span><span id="view-title"></span><span id="zoom"></span><span id="capture-status" role="status">Waiting for a design</span>
     <span id="hint">Scroll to zoom &middot; drag to pan &middot; double-click to fit</span></footer>
 </main>
 
@@ -89,7 +82,6 @@
     <b>Activity stream</b>
     <small id="active"></small>
     <span class="grow"></span>
-    <button id="clear" title="Clear live activity and the live preview; keep manual snapshots">Clear live</button>
   </div>
   <details id="advanced">
     <summary>Interaction statistics</summary>

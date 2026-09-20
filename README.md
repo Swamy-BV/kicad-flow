@@ -211,16 +211,18 @@ instead of the full tool catalogue at startup. See the
 [execution guide](docs/mcp-execution.md) for behavior and measured context-size
 results.
 
-The dashboard separates three workspaces:
+The dashboard uses one compact top toolbar and separates three workspaces:
 
 - **Live activity** follows the active design with a collapsible tool log.
-  Pause the preview while logs continue streaming.
+  Pause the preview while logs continue streaming. **Clear live** resets the feed
+  and live preview across connected browsers, keeping manual snapshots and local
+  log files. New calls continue appearing after a clear.
 - **Schematic** captures a selected sheet for inspection, including geometry view.
 - **PCB** captures the board in 2D top/bottom or 3D top, bottom, and edge views.
 
 Schematic and PCB previews retain their own document, view, and zoom while you
 switch tabs. Background activity marks snapshots as changed; it does not replace
-them. Use **Refresh preview** to capture again, or select a document or camera to
+them. Use **Refresh** to capture again, or select a document or camera to
 request another view. Snapshots last until the page is reloaded. Fit full view is
 the default; zoom presets and activity-panel visibility are remembered in your
 browser.

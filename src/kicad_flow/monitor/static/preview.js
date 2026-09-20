@@ -34,15 +34,13 @@ export function previewWorkspace() {
     $("view-badge").textContent = live ? (paused ? "LIVE PREVIEW PAUSED" : "LIVE PREVIEW") : "MANUAL PREVIEW";
     $("view-title").textContent = s.name || (live ? "Following current work" :
       workspace === "board" ? "PCB preview" : "Schematic preview");
-    $("view-description").textContent = live
-      ? "Follows the active file. Logs keep streaming when the preview is paused."
-      : "A snapshot for inspection. Live activity will not replace this view.";
     $("pause-live").hidden = !live;
-    $("pause-live").textContent = paused ? "Resume preview" : "Pause preview";
+    $("pause-live").textContent = paused ? "Resume" : "Pause";
     $("toggle-log").hidden = !live;
     $("toggle-log").textContent = logs ? "Hide logs" : "Show logs";
     $("toggle-log").setAttribute("aria-expanded", String(logs && live));
     $("refresh-preview").hidden = live;
+    $("clear").hidden = !live;
     $("document-row").hidden = live;
     const options = s.docs.filter(d => d.kind === s.kind);
     $("document").replaceChildren(...options.map(d => {
@@ -110,7 +108,7 @@ export function previewWorkspace() {
     return response.json();
   }
   function select(s, doc) {
-    if (s.id !== (doc?.id || "")) discard(s);
+    if (!doc || s.id !== doc.id) discard(s);
     s.id = doc?.id || ""; s.name = doc?.name || "";
     if (doc) s.kind = doc.kind;
     if ((s.mode === "3d" && s.kind !== "board") || (s.mode === "scene" && s.kind !== "schematic")) s.mode = "2d";
@@ -169,10 +167,11 @@ export function previewWorkspace() {
     if (workspace !== "live" || paused) return;
     if (liveBusy) { liveQueued = true; return; }
     liveBusy = true;
+    let request = epoch;
     try {
       do {
         liveQueued = false;
-        const request = ++epoch;
+        request = ++epoch;
         const data = await catalogue();
         if (request !== epoch || workspace !== "live" || paused) break;
         const s = states.live;
@@ -181,7 +180,7 @@ export function previewWorkspace() {
         paint(); await renderFrame();
       } while (liveQueued && workspace === "live" && !paused);
     } catch (error) {
-      if (workspace === "live") { states.live.error = error.message; status(); }
+      if (request === epoch && workspace === "live") { states.live.error = error.message; paint(); }
     } finally {
       liveBusy = false;
       if (liveQueued && workspace === "live" && !paused) { liveQueued = false; updateLive(); }

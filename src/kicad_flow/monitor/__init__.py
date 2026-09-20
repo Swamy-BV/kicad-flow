@@ -271,6 +271,7 @@ class _State:
         self.png: Path | None = None
         self.png_ver = 0  # bumps every re-render (cache-buster for the <img>)
         self.events: list[dict[str, object]] = []  # recent tool calls
+        self.clear_version = 0
         self.seq = 0  # total events ever seen (a stable cursor for SSE readers)
         self.lock = threading.Lock()
         self.scene_lock = threading.Lock()
@@ -284,45 +285,47 @@ class _State:
         Run by a single background thread so the render + feed stay fresh
         regardless of how many browsers are connected.
         """
-        if self.log.is_file():
-            with self.log.open("r", encoding="utf-8") as f:
-                f.seek(self.offset)
-                lines = f.readlines()
-                self.offset = f.tell()
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                with self.lock:
+        with self.lock:
+            if self.log.is_file():
+                with self.log.open("r", encoding="utf-8") as f:
+                    f.seek(self.offset)
+                    lines = f.readlines()
+                    self.offset = f.tell()
+                for line in lines:
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
                     self.events.append(rec)
                     self.events[:] = self.events[-self._CAP :]
                     self.seq += 1
-                p = str(rec.get("path", ""))
-                if p and Path(p).suffix in (".kicad_sch", ".kicad_pcb"):
-                    self.active = Path(p)
-        documents = project_documents(self.active)
+                    p = str(rec.get("path", ""))
+                    if p and Path(p).suffix in (".kicad_sch", ".kicad_pcb"):
+                        self.active = Path(p)
+            active, revision = self.active, self.clear_version
+        documents = project_documents(active)
         signature = repr([(key, p.stat().st_mtime_ns) for key, p in documents.items()])
         with self.lock:
+            if revision != self.clear_version:
+                return
             self.documents = documents
             if signature != self.document_revision:
                 self.document_revision = signature
                 self.png_ver += 1
-        if self.active and self.active.is_file():
-            m = self.active.stat().st_mtime
+        if active and active.is_file():
+            m = active.stat().st_mtime
             if m != self.src_mtime:
-                png = _render(self.active)
+                png = _render(active)
                 with self.lock:
+                    if revision != self.clear_version:
+                        return
                     self.src_mtime = m
                     if png is not None:
                         self.png = png
                         self.png_ver += 1
 
     def clear(self) -> None:
-        """Reset the monitor: activity feed, log, and the rendered preview.
+        """Reset the visible activity feed and rendered preview, retaining logs.
 
         The preview goes too, because the feed is what *chooses* it: the active
         design is whatever the log last named. Clearing only the feed left the
@@ -330,20 +333,18 @@ class _State:
         -- a finished project's sheet stayed on screen until some other design
         was written.
 
-        ``seq`` is kept monotonic so live SSE cursors stay valid; the log file is
-        emptied so it won't replay. ``png_ver`` is bumped instead of reset for
-        the same reason -- it is the browser's cache-buster, so it has to change
-        for the ``<img>`` to drop back to the placeholder.
-
-        The next tool call re-populates all of it, so this is safe mid-build.
+        ``seq`` remains monotonic. Advancing the read cursor preserves the
+        append-only history; the reset event clears every connected browser.
+        In-flight renders cannot publish across a clear generation.
         """
-        with contextlib.suppress(OSError):
-            self.log.write_text("", encoding="utf-8")
         with self.lock:
+            # Keep the append-only activity/replay history. Clear the view by
+            # advancing its cursor, without racing a tool's log append.
+            self.offset = self.log.stat().st_size if self.log.is_file() else 0
+            self.clear_version += 1
             self.events.clear()
             self.documents.clear()
             self.document_revision = ""
-            self.offset = 0
             self.active = None
             self.src_mtime = 0.0
             self.png = None
@@ -508,12 +509,17 @@ class _Handler(BaseHTTPRequestHandler):
         with st.lock:
             cursor = max(0, st.seq - len(st.events))
         last_ver, last_active = -1, ""
+        last_clear = st.clear_version
         try:
             while True:
                 with st.lock:
                     seq, events = st.seq, list(st.events)
                     ver = st.png_ver
+                    clear_version = st.clear_version
                     active = str(st.active) if st.active else ""
+                if clear_version != last_clear:
+                    last_clear = clear_version
+                    self._emit("reset", str(clear_version))
                 if cursor < seq:
                     backlog = len(events)
                     for rec in events[max(0, backlog - (seq - cursor)) :]:

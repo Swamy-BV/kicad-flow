@@ -204,21 +204,29 @@ onlyBad.onclick = () => {
   scheduleRender();
 };
 
-$("clear").onclick = () =>
-  fetch("/clear", { method: "POST" }).then(() => {
-    // The server also drops the active design, so the "active" SSE event
-    // resets the title and swaps the image back to the placeholder. Clear
-    // the feed here rather than waiting a poll for it to come back empty.
-    preview.clearLive();
-    records = [];
-    expanded = null;
-    active.textContent = "";
-    render();
-  });
-
+function clearLiveView() {
+  preview.clearLive();
+  records = [];
+  expanded = null;
+  active.textContent = "";
+  render();
+}
+$("clear").onclick = async () => {
+  const button = $("clear");
+  button.disabled = true;
+  button.textContent = "Clearing…";
+  try {
+    const response = await fetch("/clear", { method: "POST" });
+    if (!response.ok) throw new Error("Clear failed. Try again.");
+    clearLiveView();
+  } catch {
+    $("capture-status").textContent = "Could not clear live activity. Check the connection and try again.";
+  } finally { button.disabled = false; button.textContent = "Clear live"; }
+};
 
 // --- live stream ---------------------------------------------------------
 const es = new EventSource("/events");
+es.addEventListener("reset", clearLiveView);
 es.addEventListener("open", () => { $("connection").textContent = "Connected"; });
 es.addEventListener("error", () => { $("connection").textContent = "Reconnecting"; });
 es.addEventListener("render", () => preview.changed());
