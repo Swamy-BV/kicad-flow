@@ -15,21 +15,91 @@ let requestVersion = 0;
 let scale = 1, tx = 0, ty = 0, mode = "2d", nat = { w: 0, h: 0 },
   fitNext = true, kind = "";
 
+const documentSelect = $("document"), zoomPreset = $("zoom-preset"), side2d = $("side2d");
+let documents = [], selectedDocument = "", chosenKind = "", documentRequest = 0;
+const remember = (key, value) => { try { localStorage.setItem(key, value); } catch { /* private mode */ } };
+const recalled = (key, fallback) => { try { return localStorage.getItem(key) || fallback; } catch { return fallback; } };
+selectedDocument = recalled("kf-document", "");
+chosenKind = recalled("kf-document-kind", "");
+zoomPreset.value = recalled("kf-zoom-preset", "1");
+if (!zoomPreset.value || zoomPreset.value === "custom") zoomPreset.value = "1";
+const selectionQuery = () => selectedDocument ? "&doc=" + encodeURIComponent(selectedDocument) : "";
+function documentControls() {
+  kind = documents.find(d => d.id === selectedDocument)?.kind || "";
+  b3d.hidden = b3d.disabled = kind !== "board";
+  bscene.hidden = bscene.disabled = kind !== "schematic";
+  $("side2d-ctl").hidden = kind !== "board" || mode !== "2d";
+  for (const [id, value] of [["tab-sch", "schematic"], ["tab-pcb", "board"]]) {
+    $(id).disabled = !documents.some(d => d.kind === value);
+    $(id).classList.toggle("active", kind === value);
+  }
+  documentSelect.replaceChildren(...documents.filter(d => d.kind === kind).map(d => {
+    const option = document.createElement("option");
+    option.value = d.id; option.textContent = d.name; return option;
+  }));
+  documentSelect.value = selectedDocument;
+  if ((mode === "3d" && kind !== "board") || (mode === "scene" && kind !== "schematic")) setMode("2d");
+}
+async function refreshDocuments() {
+  const request = ++documentRequest;
+  try {
+    const response = await fetch("/documents");
+    const data = await response.json();
+    if (request !== documentRequest) return;
+    documents = data.documents;
+    const previous = selectedDocument;
+    if (!documents.some(d => d.id === selectedDocument)) {
+      selectedDocument = (documents.find(d => d.kind === chosenKind) ||
+        documents.find(d => d.id === data.active) || documents[0])?.id || "";
+    }
+    documentControls();
+    if (previous !== selectedDocument) geometry.clear();
+    reload(previous !== selectedDocument);
+  } catch { active.textContent = "Project list unavailable"; }
+}
+function chooseDocument(id) {
+  selectedDocument = id;
+  chosenKind = documents.find(d => d.id === id)?.kind || "";
+  remember("kf-document", id); remember("kf-document-kind", chosenKind);
+  geometry.clear(); documentControls(); reload(true);
+}
+documentSelect.onchange = () => chooseDocument(documentSelect.value);
+function chooseKind(value) {
+  const current = documents.find(d => d.id === selectedDocument);
+  const stem = current?.name.replace(/\.kicad_(sch|pcb)$/, "");
+  const matching = documents.find(d => d.kind === value && d.name.replace(/\.kicad_(sch|pcb)$/, "") === stem);
+  const next = matching || documents.find(d => d.kind === value);
+  if (next) chooseDocument(next.id);
+}
+$("tab-sch").onclick = () => chooseKind("schematic");
+$("tab-pcb").onclick = () => chooseKind("board");
+side2d.onchange = () => reload(true);
+function logVisible(visible) {
+  $("side").hidden = !visible;
+  document.body.classList.toggle("activity-hidden", !visible);
+  $("toggle-log").textContent = visible ? "Hide activity" : "Show activity";
+  $("toggle-log").setAttribute("aria-expanded", String(visible));
+  remember("kf-log-visible", String(visible));
+}
+logVisible(recalled("kf-log-visible", "true") === "true");
+$("toggle-log").onclick = () => logVisible($("side").hidden);
+
 function apply() {
   stage.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
-  zlab.textContent = Math.round(scale * 100) + "%";
+  zlab.textContent = Math.round(scale / (Math.min(view.clientWidth / nat.w, view.clientHeight / nat.h) * 0.9 || 1) * 100) + "% fit";
 }
 
 function fit() {
   if (!nat.w) return;
   const vw = view.clientWidth, vh = view.clientHeight;
-  scale = Math.min(vw / nat.w, vh / nat.h) * 0.97;
+  scale = Math.min(vw / nat.w, vh / nat.h) * 0.9 * (Number(zoomPreset.value) || 1);
   tx = (vw - nat.w * scale) / 2;
   ty = (vh - nat.h * scale) / 2;
   apply();
 }
 
 function zoom(f, cx, cy) {
+  zoomPreset.value = "custom";
   cx = cx == null ? view.clientWidth / 2 : cx;
   cy = cy == null ? view.clientHeight / 2 : cy;
   const nx = (cx - tx) / scale, ny = (cy - ty) / scale;
@@ -44,8 +114,8 @@ const showSpin = () => { spinTimer = setTimeout(() => spin.classList.add("on"), 
 const hideSpin = () => { clearTimeout(spinTimer); spin.classList.remove("on"); };
 
 // Double-buffer: decode the new render off-screen, then swap it in one step so
-// the visible image never blanks (no flash on every re-render). Only the slow 3D
-// render shows a spinner.
+// the visible image never blanks (no flash on every re-render). Slow renders
+// show a delayed spinner.
 function reload(refit) {
   const request = ++requestVersion;
   hideSpin();
@@ -54,28 +124,28 @@ function reload(refit) {
   scene.toggleAttribute('hidden', mode !== 'scene');
   sceneInfo.hidden = mode !== 'scene';
   if (mode === 'scene') {
-    fetch('/scene.json?since=' + encodeURIComponent(geometry.revision))
+    fetch('/scene.json?since=' + encodeURIComponent(geometry.revision) + selectionQuery())
       .then(response => response.json()).then(data => {
         if (request !== requestVersion || mode !== 'scene') return;
         nat = geometry.update(data);
-        if (fitNext) { fit(); fitNext = false; }
+        if (fitNext || zoomPreset.value !== "custom") { fit(); fitNext = false; }
       }).catch(error => {
         if (request === requestVersion) { geometry.clear(); sceneInfo.textContent = error.message; }
       });
     return;
   }
-  if (mode === "3d") showSpin();
+  showSpin();
   const next = new Image();
   next.onload = () => {
     if (request !== requestVersion) return;
     img.src = next.src;
     nat = { w: next.naturalWidth, h: next.naturalHeight };
-    if (fitNext) { fit(); fitNext = false; }
+    if (fitNext || zoomPreset.value !== "custom") { fit(); fitNext = false; }
     hideSpin();
   };
-  next.onerror = hideSpin;
+  next.onerror = () => { if (request === requestVersion) hideSpin(); };
   const camera = mode === "3d" ? `&view=${encodeURIComponent(view3d.value)}` : "";
-  next.src = `/render.png?mode=${mode}${camera}&v=` + Date.now();
+  next.src = `/render.png?mode=${mode}${camera}&side=${side2d.value}${selectionQuery()}&v=` + Date.now();
 }
 
 // --- interaction ---------------------------------------------------------
@@ -109,9 +179,12 @@ view.addEventListener("pointermove", (e) => {
 });
 view.addEventListener("pointerup", endDrag);
 view.addEventListener("pointercancel", endDrag);
-view.addEventListener("dblclick", fit);
+function resetFit() { zoomPreset.value = "1"; remember("kf-zoom-preset", "1"); fit(); }
+view.addEventListener("dblclick", resetFit);
 
-$("fit").onclick = fit;
+$("fit").onclick = resetFit;
+zoomPreset.onchange = () => { remember("kf-zoom-preset", zoomPreset.value); fit(); };
+new ResizeObserver(() => { if (zoomPreset.value !== "custom") fit(); }).observe(view);
 $("zin").onclick = () => zoom(1.25);
 $("zout").onclick = () => zoom(0.8);
 
@@ -124,6 +197,7 @@ function setMode(m) {
     btn.classList.toggle("active", m === name);
   }
   view3dCtl.hidden = m !== "3d";
+  $("side2d-ctl").hidden = kind !== "board" || m !== "2d";
   reload(true);
 }
 b2d.onclick = () => setMode("2d");
@@ -240,6 +314,7 @@ function detailFor(r) {
   dl("result", r.result);
   dl("quality", r.quality);
   dl("retry", r.retry);
+  dl("structured payload", r.payload);
   if (r.path || r.project) {
     dl("where", { ...(r.path && { path: r.path }), ...(r.project && { project: r.project }) });
   }
@@ -273,6 +348,22 @@ function rowFor(r) {
 
 function render() {
   const keep = records.slice(-CAP);
+  const completed = keep.filter(r => r.phase !== "running" && !["batch", "call_tool"].includes(r.tool));
+  const measured = completed.filter(r => r.payload?.response_bytes != null);
+  const sum = key => measured.reduce((total, r) => total + (r.payload[key] || 0), 0);
+  const metrics = [
+    ["Completed calls", completed.length],
+    ["Failed calls", completed.filter(r => !r.ok).length],
+    ["Retry calls", completed.filter(r => r.retry?.attempt > 1).length],
+    ["Mean duration", completed.length ? Math.round(completed.reduce((n, r) => n + (r.ms || 0), 0) / completed.length) + " ms" : "—"],
+    ["Request JSON", sum("request_bytes").toLocaleString() + " bytes"],
+    ["Response JSON", sum("response_bytes").toLocaleString() + " bytes"],
+    ["Payload coverage", `${measured.length} / ${completed.length} calls`],
+    ["Model tokens", "Unavailable"],
+  ];
+  $("stats").replaceChildren(...metrics.map(([label, value]) => {
+    const metric = el("div", "metric"); metric.append(el("b", null, value), el("span", null, label)); return metric;
+  }));
   const shown = [];
   for (let i = keep.length - 1; i >= 0; i--) if (matches(keep[i])) shown.push(i);
 
@@ -339,16 +430,11 @@ $("clear").onclick = () =>
 
 // --- live stream ---------------------------------------------------------
 const es = new EventSource("/events");
-es.addEventListener("render", () => reload(false));
+es.addEventListener("render", refreshDocuments);
 es.addEventListener("active", (e) => {
   const a = JSON.parse(e.data);
   active.textContent = a.name;
-  kind = a.kind;
-  b3d.disabled = kind !== "board";
-  bscene.disabled = kind !== "schematic";
-  geometry.clear();
-  if ((kind !== "board" && mode === "3d") || (kind !== "schematic" && mode === "scene")) setMode("2d");
-  else reload(true);
+  refreshDocuments();
 });
 es.addEventListener("activity", (e) => {
   const rec = JSON.parse(e.data);
@@ -365,4 +451,4 @@ es.addEventListener("activity", (e) => {
 });
 
 render();
-reload(true);
+refreshDocuments();

@@ -399,6 +399,14 @@ class ActivityMiddleware(Middleware):
             "error": error,
             "result": digest,
             "ms": round(elapsed_ms, 1),
+            "payload": {
+                "request_bytes": len(json.dumps(arguments or {}, ensure_ascii=False,
+                                                 default=str).encode("utf-8")),
+                "response_bytes": (len(json.dumps(raw_result, ensure_ascii=False,
+                                                  default=str).encode("utf-8"))
+                                   if raw_result is not None else None),
+                "scope": "structured JSON only; excludes images and protocol",
+            },
         }
         if quality is not None:
             record["quality"] = quality

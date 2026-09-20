@@ -8,6 +8,15 @@
 </head>
 <body>
 <div id="main">
+  <div id="projectbar">
+    <strong>KiCadFlow</strong>
+    <div role="group" aria-label="Design view">
+      <button id="tab-sch">Schematic</button><button id="tab-pcb">PCB</button>
+    </div>
+    <select id="document" aria-label="Project document"></select>
+    <span class="grow"></span>
+    <button id="toggle-log" aria-expanded="true" aria-controls="side">Hide activity</button>
+  </div>
   <div id="bar">
     <button id="b2d" class="active">2D</button>
     <button id="b3d" disabled title="3D view (boards only)">3D</button>
@@ -22,8 +31,21 @@
         <option value="right">Right edge</option>
       </select>
     </label>
+    <label id="side2d-ctl" hidden>Side
+      <select id="side2d" aria-label="2D board side">
+        <option value="top">Top</option><option value="bottom">Bottom</option>
+      </select>
+    </label>
     <span class="sep"></span>
     <span id="zoomctl">
+      <select id="zoom-preset" aria-label="Zoom preset">
+        <option value="1">Fit full view</option>
+        <option value="0.5">50% of fit</option>
+        <option value="0.75">75% of fit</option>
+        <option value="1.5">150% of fit</option>
+        <option value="2">200% of fit</option>
+        <option value="custom" disabled>Custom zoom</option>
+      </select>
       <button id="fit" title="Fit to view (double-click)">Fit</button>
       <button id="zout" title="Zoom out" aria-label="Zoom out">&minus;</button>
       <button id="zin" title="Zoom in" aria-label="Zoom in">+</button>
@@ -48,6 +70,15 @@
     <span class="grow"></span>
     <button id="clear" title="Clear the activity feed and the preview">Clear</button>
   </div>
+  <details id="advanced">
+    <summary>Interaction statistics</summary>
+    <p>Recent 500 records &middot; tool observations only</p>
+    <div id="stats"></div>
+    <p>Model context, billed tokens and reasoning are unavailable to this MCP
+    server. Payload sizes measure structured JSON, excluding images and protocol
+    overhead. They are not token counts.</p>
+    <p>Local paths are hidden in this dashboard. Local replay logs retain original data.</p>
+  </details>
   <div class="filters">
     <input id="q" type="search" placeholder="Filter by tool, argument or result&hellip;"
            autocomplete="off" aria-label="Filter activity">

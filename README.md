@@ -182,9 +182,16 @@ instead of the full tool catalogue at startup. See the
 [execution guide](docs/mcp-execution.md) for behavior and measured context-size
 results.
 
-The live monitor includes top, bottom, and edge cameras for PCB review. Compact
-activity is shown in the browser; complete local replay records are written to
-`replay.jsonl`. Set `KICAD_FLOW_MONITOR=0` to disable the monitor or set it to a
+The live monitor has separate Schematic and PCB tabs, with a document selector
+for design files in the active project folder. PCB views include 2D top/bottom
+and 3D top, bottom, and edge cameras. Fit full view is the default; zoom presets
+and activity-panel visibility are remembered in your browser.
+
+Local path-like strings are masked in browser activity. Local activity and
+`replay.jsonl` files retain their original data. Expand **Interaction statistics**
+for completed calls, failures, retries, timings and structured JSON sizes across
+the latest 500 records. These sizes exclude images and protocol overhead; the
+MCP server cannot observe model context usage or billed tokens. Set `KICAD_FLOW_MONITOR=0` to disable the monitor or set it to a
 different port number.
 
 ## Windows release

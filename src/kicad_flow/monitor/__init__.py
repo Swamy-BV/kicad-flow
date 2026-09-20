@@ -29,14 +29,18 @@ import tempfile
 import threading
 import time
 import webbrowser
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from kicad_flow.backend.kicad import render
+from kicad_flow.backend.kicad.preview import schematic_snapshot
 from kicad_flow.server.activity import activity_log_path
 from kicad_flow.server.scene import SceneHistory
+
+from .presentation import document_id, project_documents, public_record
 
 DEFAULT_PORT = 8472
 _RENDER_DIR = Path(tempfile.gettempdir()) / "kicad-flow-monitor"
@@ -77,6 +81,29 @@ def _placeholder_png(message: str = "waiting for a design…") -> bytes:
     return data
 
 
+@contextlib.contextmanager
+def _board_snapshot(board: Path) -> Iterator[Path]:
+    """Keep KiCad CLI handles off the live board during Windows atomic saves.
+
+    A hidden sibling keeps relative 3D model paths rooted in the project folder.
+    Project settings and manufacturing colors travel with the snapshot.
+    """
+    snapshot = board.with_name(f".preview-{secrets.token_hex(16)}.kicad_pcb")
+    copied: list[Path] = []
+    try:
+        for suffix in (".kicad_pcb", ".kicad_pro", ".kicad-flow.json"):
+            source = board.with_suffix(suffix)
+            if source == board or source.is_file():
+                target = snapshot.with_suffix(suffix)
+                copied.append(target)
+                target.write_bytes(source.read_bytes())
+        yield snapshot
+    finally:
+        for target in copied:
+            with contextlib.suppress(OSError):
+                target.unlink()
+
+
 def _render_board_2d(board: Path, dpi: int = 300) -> Path | None:
     """Render a board's 2D layers cropped to the board (no title-block frame).
 
@@ -88,9 +115,10 @@ def _render_board_2d(board: Path, dpi: int = 300) -> Path | None:
     _RENDER_DIR.mkdir(parents=True, exist_ok=True)
     out = _RENDER_DIR / (board.stem + "-2d.png")
     try:
-        render.render_board_layout(board, out, side="top", dpi=dpi,
-                                   copper=True, silkscreen=True,
-                                   courtyard=True)
+        with _board_snapshot(board) as snapshot:
+            render.render_board_layout(snapshot, out, side="top", dpi=dpi,
+                                       copper=True, silkscreen=True,
+                                       courtyard=True)
     except Exception:
         return None
     return out if out.is_file() and out.stat().st_size > 0 else None
@@ -101,7 +129,8 @@ def _render(src: Path, dpi: int = 150) -> Path | None:
     _RENDER_DIR.mkdir(parents=True, exist_ok=True)
     try:
         if src.suffix == ".kicad_sch":
-            pngs = render.export_png(src, output_dir=_RENDER_DIR, dpi=dpi)
+            with schematic_snapshot(src) as snapshot:
+                pngs = render.export_png(snapshot, output_dir=_RENDER_DIR, dpi=dpi)
             return pngs[0] if pngs else None
         if src.suffix == ".kicad_pcb":
             return _render_board_2d(src)
@@ -131,12 +160,13 @@ def _render_3d(board: Path, view: str) -> bytes | None:
     # belongs in a filesystem path. A random name also isolates parallel jobs.
     out = _RENDER_DIR / f".render-{secrets.token_hex(16)}.png"
     try:
-        render.render_board(
-            board, out, width=1600, height=1100,
-            side=str(profile["side"]), rotate=str(profile.get("rotate", "")),
-            perspective=bool(profile.get("perspective", False)),
-            quality="basic", background="opaque", zoom=0.88,
-        )
+        with _board_snapshot(board) as snapshot:
+            render.render_board(
+                snapshot, out, width=1600, height=1100,
+                side=str(profile["side"]), rotate=str(profile.get("rotate", "")),
+                perspective=bool(profile.get("perspective", False)),
+                quality="basic", background="opaque", zoom=0.65,
+            )
         return out.read_bytes() if out.stat().st_size > 0 else None
     except Exception:
         return None
@@ -175,6 +205,48 @@ def _cached_3d(board: Path, view: str) -> bytes | None:
 
 
 
+_document_cache: dict[str, tuple[str, bytes]] = {}
+_document_lock = threading.Lock()
+
+
+def _document_frame(source: Path, side: str) -> bytes | None:
+    """Cache isolated 2D frames by full document identity and sibling revisions."""
+    if side not in ("top", "bottom"):
+        return None
+    key = f"{source.resolve()}:{side}"
+    # A root schematic also changes when a child sheet is saved.
+    try:
+        revision = repr([(k, p.stat().st_mtime_ns)
+                         for k, p in project_documents(source).items()])
+    except OSError:
+        return None
+    with _document_lock:
+        cached = _document_cache.get(key)
+        if cached and cached[0] == revision:
+            return cached[1]
+        try:
+            with tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                if source.suffix == ".kicad_pcb":
+                    output = root / "board.png"
+                    with _board_snapshot(source) as snapshot:
+                        render.render_board_layout(snapshot, output, side=side, dpi=200,
+                                                   copper=True, silkscreen=True,
+                                                   courtyard=False)
+                else:
+                    with schematic_snapshot(source) as snapshot:
+                        output = render.export_png(
+                            snapshot, output_dir=root, dpi=150
+                        )[0]
+                data = output.read_bytes()
+            if len(_document_cache) >= 32:
+                _document_cache.clear()
+            _document_cache[key] = (revision, data)
+            return data
+        except (OSError, RuntimeError, ValueError, IndexError):
+            return None
+
+
 class _State:
     """Shared state: the active design, its render, and the log read cursor."""
 
@@ -203,6 +275,8 @@ class _State:
         self.lock = threading.Lock()
         self.scene_lock = threading.Lock()
         self.scene_history = SceneHistory()
+        self.documents: dict[str, Path] = {}
+        self.document_revision = ""
 
     def poll(self) -> None:
         """Ingest new activity lines and re-render if the active design changed.
@@ -230,6 +304,13 @@ class _State:
                 p = str(rec.get("path", ""))
                 if p and Path(p).suffix in (".kicad_sch", ".kicad_pcb"):
                     self.active = Path(p)
+        documents = project_documents(self.active)
+        signature = repr([(key, p.stat().st_mtime_ns) for key, p in documents.items()])
+        with self.lock:
+            self.documents = documents
+            if signature != self.document_revision:
+                self.document_revision = signature
+                self.png_ver += 1
         if self.active and self.active.is_file():
             m = self.active.stat().st_mtime
             if m != self.src_mtime:
@@ -260,6 +341,8 @@ class _State:
             self.log.write_text("", encoding="utf-8")
         with self.lock:
             self.events.clear()
+            self.documents.clear()
+            self.document_revision = ""
             self.offset = 0
             self.active = None
             self.src_mtime = 0.0
@@ -301,6 +384,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_static(path.lstrip("/"))
         elif path == "/render.png":
             self._send_png()
+        elif path == "/documents":
+            with self.state.lock:
+                documents = dict(self.state.documents)
+                active = self.state.active
+            self._send(200, "application/json", json.dumps({
+                "active": document_id(active) if active else "",
+                "documents": [{"id": key, "name": p.name,
+                               "kind": "board" if p.suffix == ".kicad_pcb"
+                               else "schematic"} for key, p in documents.items()],
+            }).encode())
         elif path == "/scene.json":
             self._send_scene()
         elif path == "/events":
@@ -337,6 +430,20 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_png(self) -> None:
         qs = parse_qs(urlparse(self.path).query)
         mode = qs.get("mode", ["2d"])[0].lower()
+        with self.state.lock:
+            selected = self.state.documents.get(qs.get("doc", [""])[0])
+        if "doc" in qs:
+            if selected is None:
+                self._send(404, "text/plain", b"Unknown project document")
+                return
+            if mode == "3d" and selected.suffix == ".kicad_pcb":
+                data = _cached_3d(selected, qs.get("view", ["top-angle"])[0])
+            else:
+                data = _document_frame(selected, qs.get("side", ["top"])[0])
+            self._send(
+                200, "image/png", data or _placeholder_png("Preview unavailable")
+            )
+            return
         if mode == "3d":
             view = qs.get("view", ["top-angle"])[0].lower()
             with self.state.lock:
@@ -367,7 +474,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         qs = parse_qs(urlparse(self.path).query)
         with self.state.lock:
-            active = self.state.active
+            active = (self.state.documents.get(qs["doc"][0]) if "doc" in qs
+                      else self.state.active)
         if active is None or active.suffix != ".kicad_sch":
             self._send(200, "application/json", json.dumps({
                 "ok": False, "error": "Geometry view needs an active schematic."
@@ -380,6 +488,10 @@ class _Handler(BaseHTTPRequestHandler):
                     str(active.resolve()), scene, qs.get("since", [""])[0])
         except (OSError, ValueError, LookupError) as exc:
             result = {"ok": False, "error": str(exc)}
+        # Preserve schematic labels/IDs containing slashes; only metadata is private.
+        for key in ("path", "error"):
+            if key in result:
+                result[key] = public_record(result[key])
         self._send(200, "application/json", json.dumps(result).encode())
 
     def _stream(self) -> None:
@@ -404,7 +516,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if cursor < seq:
                     backlog = len(events)
                     for rec in events[max(0, backlog - (seq - cursor)) :]:
-                        self._emit("activity", json.dumps(rec))
+                        self._emit("activity", json.dumps(public_record(rec)))
                     cursor = seq
                 if ver != last_ver:
                     last_ver = ver

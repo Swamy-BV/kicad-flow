@@ -6,7 +6,6 @@ import contextlib
 import copy
 import hashlib
 import math
-import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -41,6 +40,7 @@ from kicad_flow.pcb.types import (
 )
 
 from .. import render as _render
+from .._fileio import replace_file
 from .._sexpr import Node, Sym, dumps, loads
 from . import connectivity as _connectivity
 from . import copper as _copper
@@ -174,7 +174,7 @@ class KiCadBoard(Board):
 
                 cli.drc(scratch)
             self.assert_current()
-            os.replace(scratch, self._path)  # atomic on the same volume
+            replace_file(scratch, self._path)  # atomic on the same volume
             self._accept_disk_revision()
         except Exception:
             scratch.unlink(missing_ok=True)

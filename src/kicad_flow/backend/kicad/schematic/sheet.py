@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import copy
-import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -29,6 +28,7 @@ from kicad_flow.schematic.types import (
 )
 
 from .. import _library as library
+from .._fileio import replace_file
 from .._sexpr import Node, dumps, loads
 from . import components as _components
 from . import connections as _connections
@@ -161,7 +161,7 @@ class KiCadSheet(Sheet):
                 from ..cli import cli
 
                 cli.erc(scratch)
-            os.replace(scratch, self._path)  # atomic on the same volume
+            replace_file(scratch, self._path)  # atomic on the same volume
         except Exception:
             scratch.unlink(missing_ok=True)
             raise
