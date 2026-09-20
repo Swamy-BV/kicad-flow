@@ -125,9 +125,9 @@ tool schemas and contracts exposed to an MCP client.
   </tr>
   <tr>
     <td width="50%" align="center">
-      <a href="examples/art_board/"><img src="examples/art_board/art_board-3d.png" alt="Art board with rounded outline and cutouts" width="100%"></a><br>
-      <strong><a href="examples/art_board/">Art board</a></strong><br>
-      Line-and-arc outline, cutouts, and front/back silkscreen primitives.
+      <a href="examples/art_board/"><img src="examples/art_board/art_board-3d.png" alt="Mooncat purple PCB art with a crescent and stars" width="100%"></a><br>
+      <strong><a href="examples/art_board/">Mooncat art board</a></strong><br>
+      Celestial cat artwork, purple solder mask, and an orbital fish on the reverse.
     </td>
     <td width="50%" align="center">
       <a href="examples/esc4in1/"><img src="examples/esc4in1/esc4in1-3d.png" alt="Four-in-one ESC PCB" width="100%"></a><br>

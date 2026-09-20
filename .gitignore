@@ -46,6 +46,7 @@ examples/led_digits/fixture_bundle.zip
 
 # The art-board source is generated; its renders are the reviewable artefacts.
 examples/art_board/*.kicad_pcb
+examples/art_board/*.kicad_pro
 
 # Batman is rebuilt from its MCP-only example script.
 examples/batman/*.kicad_pcb
