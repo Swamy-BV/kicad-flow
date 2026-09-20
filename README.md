@@ -24,8 +24,8 @@
 </p>
 
 <p align="center">
-  <a href="examples/led_digits/"><img src="examples/led_digits/led_digits-3d.png" alt="A four-digit LED display PCB generated through KiCadFlow" width="760"></a><br>
-  <sub>A routed four-digit display created and checked end to end through MCP.</sub>
+  <a href="#tool-discovery-and-monitoring"><img src="docs/assets/live-preview.jpg" alt="KiCadFlow dashboard showing the LED digits PCB, compact preview toolbar, and live MCP activity log" width="1100"></a><br>
+  <sub>Live PCB preview and MCP activity, with separate Schematic and PCB inspection tabs.</sub>
 </p>
 
 KiCadFlow is an MCP server for authoring KiCad 10 schematics and printed
