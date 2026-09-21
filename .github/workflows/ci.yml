@@ -43,6 +43,14 @@ jobs:
         env:
           KICAD_FLOW_BATCH_LIMIT: '7'
         run: python examples/scripts/batch_limits.py
+      - name: Workflow context delivery
+        env:
+          KICAD_FLOW_BATCH_LIMIT: '5'
+        run: python examples/scripts/workflow_context.py
+      - name: Staged board transfer
+        env:
+          KICAD_FLOW_BATCH_LIMIT: '5'
+        run: python examples/scripts/staged_board_transfer.py
       - name: Flight-controller example
         run: python examples/scripts/fc.py
       - name: Schematic and PCB example

@@ -156,6 +156,15 @@ async def build(client: Client) -> int:
     used_tools: set[str] = set()
     wrong: list[str] = []
 
+    # Workflows return text, while the CAD helpers below expect an ok/result map.
+    workflow = await client.call_tool("get_workflow", {"topic": "pcb"})
+    calls += 1
+    used_tools.add("get_workflow")
+    if (workflow.is_error or len(workflow.content) != 1
+            or workflow.content[0].type != "text"
+            or "update_board_from_schematic" not in workflow.content[0].text):
+        wrong.append("get_workflow did not return the PCB transfer workflow")
+
     async def call(tool: str, **kw: Any) -> dict[str, Any]:
         """One MCP call, failing loudly rather than continuing on sand."""
         nonlocal failures, calls
