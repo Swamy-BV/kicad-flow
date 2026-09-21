@@ -6,7 +6,8 @@ A 250 mA resettable fuse and series Schottky diode protect the 5 V input, while
 live on the front and the support circuitry lives on the back. A front GND pour
 and back +5V pour complete the power paths.
 
-Run it: ``python examples/scripts/batman.py``
+Run with ``KICAD_FLOW_BATCH_LIMIT=1000`` set in the environment:
+``python examples/scripts/batman.py``
 """
 
 from __future__ import annotations
@@ -38,19 +39,38 @@ DECOUPLING_FP = "Capacitor_SMD:C_0603_1608Metric"
 LED_AT = [
     (17.0, 21.0), (27.0, 21.0), (36.0, 26.0), (29.0, 29.0), (38.0, 32.0),
     (83.0, 21.0), (73.0, 21.0), (64.0, 26.0), (71.0, 29.0), (62.0, 32.0),
-    (46.0, 22.0), (54.0, 22.0), (43.0, 27.0), (57.0, 27.0),
+    (46.0, 24.5), (54.0, 24.5), (43.0, 27.0), (57.0, 27.0),
     (44.0, 35.0), (56.0, 35.0),
 ]
 
-# Clockwise bat silhouette. A polygon is one exact closed contour.
-BAT_OUTLINE = [
-    [50, 17], [54, 11], [55, 19], [61, 22], [70, 19], [82, 14],
-    [96, 10], [91, 25], [88, 31], [84, 28], [78, 29], [72, 35],
-    [66, 32], [60, 36], [56, 44], [52, 48], [50, 54], [48, 48],
-    [44, 44], [40, 36], [34, 32], [28, 35], [22, 29], [16, 28],
-    [12, 31], [9, 25], [4, 10], [18, 14], [30, 19], [39, 22],
-    [45, 19], [46, 11],
-]
+# Reference silhouette: swept wings and two concave scallops per side.
+# Keep the original circuit's placement relative to its centre, now x=60 mm.
+LED_AT = [(x + 10, y) for x, y in LED_AT]
+
+
+def outline_points() -> list[list[float]]:
+    """Sample caller-designed cubic curves into the polygon primitive."""
+    right = [[60.0, 17.5], [62.0, 17.5], [63.7, 13.8], [65.8, 22.2]]
+    curves = [
+        ((80.0, 21.0), (89.0, 15.0), (86.0, 10.0)),
+        ((100.0, 14.0), (111.0, 27.0), (116.0, 39.0)),
+        ((103.0, 27.0), (93.5, 28.0), (92.5, 37.5)),
+        ((74.0, 29.0), (62.0, 39.0), (60.0, 54.0)),
+    ]
+    for c1, c2, end in curves:
+        start = right[-1]
+        for step in range(1, 41):
+            t = step / 40
+            u = 1 - t
+            right.append([
+                round(u**3 * start[axis] + 3*u*u*t*c1[axis]
+                      + 3*u*t*t*c2[axis] + t**3*end[axis], 4)
+                for axis in (0, 1)
+            ])
+    return right + [[round(120-x, 4), y] for x, y in reversed(right[1:-1])]
+
+
+BAT_OUTLINE = outline_points()
 
 
 async def build(client: Client) -> int:
@@ -233,15 +253,15 @@ async def build(client: Client) -> int:
              "rotation": 90, "side": "B", "value": "330R"},
         ]
     footprints += [
-        {"fp_id": POWER_FP, "ref": "J1", "x": 51.27, "y": 39,
+        {"fp_id": POWER_FP, "ref": "J1", "x": 61.27, "y": 39,
          "rotation": 270, "side": "B", "value": "5V IN"},
-        {"fp_id": FUSE_FP, "ref": "F1", "x": 49.87, "y": 34,
+        {"fp_id": FUSE_FP, "ref": "F1", "x": 59.87, "y": 34,
          "side": "B", "value": "250mA PTC"},
-        {"fp_id": DIODE_FP, "ref": "D17", "x": 50.47, "y": 28,
+        {"fp_id": DIODE_FP, "ref": "D17", "x": 60.47, "y": 28,
          "side": "B", "value": "SS14"},
-        {"fp_id": BULK_FP, "ref": "C1", "x": 43, "y": 31,
+        {"fp_id": BULK_FP, "ref": "C1", "x": 53, "y": 31,
          "rotation": 90, "side": "B", "value": "10uF"},
-        {"fp_id": DECOUPLING_FP, "ref": "C2", "x": 57, "y": 31,
+        {"fp_id": DECOUPLING_FP, "ref": "C2", "x": 67, "y": 31,
          "rotation": 90, "side": "B", "value": "100nF"},
     ]
     exported = await call(
@@ -262,6 +282,11 @@ async def build(client: Client) -> int:
          "hide": True}
         for fp in board_parts.get("footprints", [])
     ])
+
+    placement = await call("measure_placement", path=board)
+    if not placement.get("valid"):
+        print(f"INVALID placement: {placement}")
+        return failures + 1
 
     # The schematic's exact net membership was applied by export.
     net_of: dict[str, str] = {}
@@ -333,12 +358,12 @@ async def build(client: Client) -> int:
 
     # Keep the silkscreen sparse so the LEDs and silhouette stay legible.
     await call("add_board_texts", path=board, texts=[
-        {"x": 50, "y": 31, "text": "GOTHAM // 16",
+        {"x": 60, "y": 31, "text": "GOTHAM // 16",
          "layer": "F.SilkS", "width": 0.9, "height": 0.9,
          "thickness": 0.135},
-        {"x": 55, "y": 39, "text": "+5V", "layer": "B.SilkS",
+        {"x": 65, "y": 39, "text": "+5V", "layer": "B.SilkS",
          "width": 0.8, "height": 0.8, "thickness": 0.12, "mirror": True},
-        {"x": 45, "y": 41.5, "text": "GND", "layer": "B.SilkS",
+        {"x": 55, "y": 39, "text": "GND", "layer": "B.SilkS",
          "width": 0.8, "height": 0.8, "thickness": 0.12, "mirror": True},
     ])
 
@@ -370,7 +395,7 @@ async def build(client: Client) -> int:
         failures += int(unrouted["count"])
     if errors:
         failures += len(errors)
-    if outline.get("size") != [92.0, 44.0]:
+    if outline.get("size") != [112.0, 44.0]:
         failures += 1
         print(f"WRONG board size: {outline.get('size')}")
 
@@ -381,6 +406,7 @@ async def build(client: Client) -> int:
           f"{graphics.get('count', 0)} graphics")
     print(f"unrouted: {unrouted.get('count', '?')}; "
           f"DRC errors: {len(errors)}")
+    print(f"DRC findings: {drc.get('findings', [])}")
     print(f"{calls} MCP calls in {took:.1f}s; failures: {failures}")
     return failures
 
