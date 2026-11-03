@@ -204,6 +204,9 @@ def footprint(value: dict[str, Any]) -> Footprint:
                 and not copper.get("offset"),
             )
         )
+    # Native rollback can reorder footprint children. Stable identities and
+    # numbers keep an unchanged observation deterministic across that restore.
+    pads.sort(key=lambda pad: (pad.number, pad.uuid))
     radians = math.radians(angle)
     c, s = math.cos(radians), math.sin(radians)
 

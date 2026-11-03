@@ -112,6 +112,13 @@ class Document:
                 raise
             else:
                 try:
+                    prepared = self.rpc.call("prepare")
+                    _verify_fields(prepared)
+                except Exception:
+                    self.save_pending = False
+                    self.rpc.call("end", commit=False)
+                    raise
+                try:
                     self.rpc.call("end", commit=True)
                 except Exception:
                     self.save_pending = False
@@ -169,6 +176,38 @@ class Document:
     def close(self) -> None:
         """Disconnect GUI sessions and close owned headless documents."""
         self.rpc.close()
+
+
+def _verify_fields(prepared: dict[str, Any]) -> None:
+    """Check real serialized text angles; affected nightlies echo false angles.
+
+    This is a read-only native snapshot observation. It never edits or feeds a
+    document string back to KiCad; rejection drops the active native commit.
+    """
+    if not prepared["fields"]:
+        return
+    from .._sexpr import loads
+    from ._nodes import _f, _text
+
+    tree = loads(prepared["snapshot"])
+    footprints = {_text(fp.get("uuid")): fp for fp in tree.get_all("footprint")}
+    for field in prepared["fields"]:
+        parent = footprints.get(field["parent"])
+        prop = next(
+            (p for p in parent.get_all("property") if _text(p) == field["name"]),
+            None,
+        ) if parent is not None else None
+        if prop is None or prop.get("at") is None:
+            raise IPCError("KiCad did not retain the edited footprint field")
+        actual = _f(prop.get("at"), 2) % 360
+        if abs((actual - field["angle"] + 180) % 360 - 180) > 1e-6:
+            error = IPCError(
+                f"KiCad IPC did not apply {field['name']}'s absolute text angle: "
+                f"requested {field['angle']:g}, native save reports {actual:g}; "
+                "the field batch was rolled back"
+            )
+            error.index = field["index"]
+            raise error
 
 
 def observed(function: F) -> F:

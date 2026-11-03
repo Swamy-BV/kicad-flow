@@ -10,6 +10,10 @@ Plural writes stage typed native objects, validate per-item IPC statuses, and
 push one native commit. A refusal drops that commit. The source board file is
 revision-checked; matching saves made by the attached GUI are accepted. Reload
 closes the previous native document before reopening it.
+Existing footprint fields are updated as native children, avoiding a geometry
+round trip of the whole footprint. Before committing, the adapter checks their
+angles against a native save snapshot; affected nightlies can echo the requested
+angle while saving a different one. A mismatch rolls back the whole batch.
 
 Library placement uses a private unsaved native board to obtain KiCad's actual
 front/back library geometry. It passes native objects directly to the actual
@@ -47,6 +51,10 @@ Current limitations:
   both cloning and a whole-footprint field update; initial native placement
   did not produce that warning. The existing transform audit remains failing
   for those cases. Quarter-turn front/back checks pass.
+- Native field updates can ignore absolute text angles. These requests are
+  refused when the native snapshot disagrees, including value-only changes
+  that would alter an existing field's angle. Moving a field at a supported
+  angle preserves footprint geometry.
 - The contour helper supports curve sampling and convex insets; concave
   insets are refused instead of returning an incorrect offset polygon.
 - Windows CI selects the tested KiCad 11 nightly and pinned development SDK;
@@ -66,6 +74,9 @@ to avoid the SDK's floating-point truncation drift.
 on a rounded board with a circular cutout. Malformed sessions, unresolved
 references and changed placements are refused without publishing an output.
 The valid import has zero unrouted connections, DRC errors and DRC warnings.
+`python examples/scripts/pcb_fields_ipc.py` verifies field edits on a recorded
+native 37-degree footprint, batch rollback, angle refusal and reload with zero
+library-mismatch findings.
 
 The full LED example is not yet passing: stackup and layer-filtered rule checks
 are unavailable, and its free-junction expectation conflicts with native

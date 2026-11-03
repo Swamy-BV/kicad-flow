@@ -42,11 +42,13 @@ class Worker:
         self.k: Any = None
         self.b: Any = None
         self.commit: Any = None
+        self.prepared = False
         self.gui = False
         self.borrowed = False
         self.pending: dict[str, Any] = {}
         self.created: dict[str, Any] = {}
         self.updated: dict[str, Any] = {}
+        self.field_updates: dict[str, dict[str, tuple[Any, int]]] = {}
         self.deleted: set[str] = set()
         self.footprint_cache: dict[str, Any] | None = None
         self.sources: dict[str, int] = {}
@@ -163,9 +165,11 @@ class Worker:
         if self.commit is not None:
             raise ValueError("A PCB transaction is already open")
         self.commit = self.b.begin_commit()
+        self.prepared = False
         self.pending = {}
         self.created = {}
         self.updated = {}
+        self.field_updates = {}
         self.deleted = set()
         self.footprint_cache = {f.id.value: f for f in self.b.get_footprints()}
         self.sources = {}
@@ -178,8 +182,9 @@ class Worker:
             commit = self.commit
             if args["commit"]:
                 try:
-                    self.flush(list(self.created.values()), create=True)
-                    self.flush(list(self.updated.values()), create=False)
+                    if not self.prepared:
+                        self.prepare({})
+                    self.assert_current()
                     self.b.push_commit(commit, "KiCadFlow PCB edit")
                 except Exception:
                     self.b.drop_commit(commit)
@@ -192,9 +197,29 @@ class Worker:
         self.pending = {}
         self.created = {}
         self.updated = {}
+        self.field_updates = {}
         self.deleted = set()
         self.footprint_cache = None
         return {}
+
+    def prepare(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Apply staged objects before the parent validates native save facts."""
+        if self.commit is None or self.prepared:
+            raise ValueError("No unprepared PCB transaction")
+        fields = [
+            {"parent": parent, "name": field.name, "index": index,
+             "angle": field.text.attributes.angle % 360}
+            for parent, items in self.field_updates.items()
+            if parent not in self.deleted
+            for field, index in items.values()
+        ]
+        self.flush(list(self.created.values()), create=True)
+        self.flush(list(self.updated.values()), create=False)
+        for parent in list(self.field_updates):
+            self.flush_fields(parent)
+        self.prepared = True
+        return {"fields": fields,
+                "snapshot": self.b.get_as_string() if fields else ""}
 
     def write(self, item: Any, *, create: bool, flush: bool = False) -> Any:
         """Validate every per-item native status, including successful envelopes."""
@@ -294,6 +319,43 @@ class Worker:
         self.expected = self.b.get_as_string()
         for identity in identities:
             self.pending.pop(identity, None)
+
+    def write_field(self, parent: Any, field: Any) -> None:
+        """Stage an existing child without round-tripping footprint geometry."""
+        identity = field.text.id.value
+        if not identity:
+            raise ValueError("existing footprint field has no native UUID")
+        self.pending[parent.id.value] = parent
+        self.field_updates.setdefault(parent.id.value, {})[identity] = (
+            field, self.ordinal
+        )
+
+    def flush_fields(self, parent: str) -> None:
+        """Validate individual child updates in the caller's native commit."""
+        fields = self.field_updates.pop(parent)
+        if parent in self.created or parent in self.updated or parent in self.deleted:
+            # The staged parent already includes these field changes.
+            return
+        self.assert_current()
+        command = self.cmd.UpdateItems()
+        command.header.document.CopyFrom(self.b.document)
+        command.header.container.value = parent
+        for field, _ in fields.values():
+            command.items.add().Pack(field.proto)
+        result = self.b.client.send(command, self.cmd.UpdateItemsResponse)
+        if result.status != self.ct.IRS_OK or len(result.updated_items) != len(fields):
+            raise ValueError("KiCad returned an incomplete field UpdateItems response")
+        for (identity, (_, index)), row in zip(
+            fields.items(), result.updated_items, strict=True
+        ):
+            if row.status.code != self.cmd.ISC_OK:
+                raise NativeWriteError(
+                    f"KiCad field UpdateItems: {row.status.error_message}", index
+                )
+            made = self.b._item_from_message(row.item)
+            if made.text.id.value != identity:
+                raise ValueError("KiCad changed a footprint field's identity")
+        self.expected = self.b.get_as_string()
 
     def item(self, identity: str, kind: type[Any]) -> Any:
         """Find exactly the requested native object, including staged updates."""
@@ -516,6 +578,8 @@ class Worker:
             raise ValueError("side must be F or B")
         item = self.footprint(v["ref"])
         if item.layer != self.layer(v["side"] + ".Cu"):
+            if item.id.value in self.field_updates:
+                self.flush_fields(item.id.value)
             self.assert_current()
             angle = item.orientation.degrees
             flipped = self.b.flip_items(item, self.bc.BFD_TOP_BOTTOM)
@@ -548,14 +612,21 @@ class Worker:
         return item.definition.items[-1]
 
     def set_field(self, v: dict[str, Any]) -> dict[str, Any]:
-        """Set one field through its native footprint object."""
+        """Update existing native fields independently of footprint geometry."""
         item = self.footprint(v["ref"])
+        existing = any(
+            isinstance(f, self.bt.Field) and f.name == v["name"]
+            for f in item.texts_and_fields
+        )
         self.field(item, v["name"], create=True).text.value = v["value"]
-        made = self.write(item, create=False)
+        if existing:
+            self.write_field(item, self.field(item, v["name"]))
+        else:
+            self.write(item, create=False)
         return {
             "fields": {
                 f.name: f.text.value
-                for f in made.texts_and_fields
+                for f in item.texts_and_fields
                 if isinstance(f, self.bt.Field)
             }
         }
@@ -573,7 +644,7 @@ class Worker:
         if v["hide"] is not None:
             field.text.attributes.visible = not v["hide"]
             field.visible = not v["hide"]
-        self.write(item, create=False)
+        self.write_field(item, field)
         return {"point": self.data(field.text)["text"]["position"]}
 
     def set_net(self, v: dict[str, Any]) -> dict[str, Any]:
@@ -1079,6 +1150,7 @@ def main() -> None:
                     "snapshot",
                     "begin",
                     "end",
+                    "prepare",
                     "edit",
                     "set_layers",
                     "refill",
