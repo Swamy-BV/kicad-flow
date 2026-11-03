@@ -1,6 +1,7 @@
 // Stream activity independently of the selected preview workspace.
 import { previewWorkspace } from './preview.js';
 const $ = (id) => document.getElementById(id);
+document.body.classList.toggle('embedded', new URLSearchParams(location.search).has('embedded'));
 const feed = $("feed"), active = $("active"), q = $("q"),
   onlyBad = $("only-bad"), count = $("count");
 const preview = previewWorkspace();

@@ -3,6 +3,9 @@
    colour never carries meaning alone -- every row pairs it with a glyph and
    the outcome text, which is the documented mitigation for red/green CVD. */
 
+body.embedded #app-header .brand { display:none; }
+body.embedded #side { flex-basis:300px; max-width:300px; }
+
 :root {
   color-scheme: dark;
   --plane: #0d0d0d;      /* page plane */

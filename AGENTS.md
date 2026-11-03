@@ -136,6 +136,8 @@ src/kicad_flow/
     tools_board.py     registration and compatibility exports
     tools_schematic.py registration and compatibility exports
   monitor/              the live view and the tool-call log; its own process
+  agent/                shared local agent session, auth transport and MCP bridge
+  gui/                  separate GUI launcher; uses the same session as the CLI
 examples/scripts/       fc and led_digits, both through MCP calls alone
 ```
 
@@ -147,3 +149,7 @@ state and transactions and delegate to feature modules. MCP request models
 belong in `models.py`, open-document state in `session.py`, and registration
 modules only register and re-export tools. Shared code must not import a
 registration module to reach models or state.
+
+Agent orchestration stays above the primitive contracts. GUI and CLI share a
+single local session through the monitor's loopback service; account credentials
+remain owned by the linked agent. CAD edits go through `Client(mcp)`.

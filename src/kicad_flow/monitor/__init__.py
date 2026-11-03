@@ -10,16 +10,14 @@ no build step, no extra web dependency (stdlib ``http.server``).
     python -m kicad_flow.monitor            # http://localhost:8472
     python -m kicad_flow.monitor --port 9000 --open
 
-Two things only: the VIEW and the LOG. Pan/zoom with auto-fit, 2D and selectable
-board cameras (rendered by ``kicad-cli pcb render``), the activity feed beside
-it with a filter and a Clear button, and a placeholder image when there is
-nothing to show yet (never a broken image). KiCad's own editor cannot show our
-writes live; this is the live view instead.
+The separate /workspace GUI links a local Codex account to existing MCP tools.
+The monitor retains its own preview and activity interface at /.
 """
 
 from __future__ import annotations
 
 import argparse
+import atexit
 import base64
 import contextlib
 import json
@@ -35,6 +33,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from kicad_flow.agent.http import AgentHTTP
 from kicad_flow.backend.kicad import render
 from kicad_flow.backend.kicad.preview import schematic_snapshot
 from kicad_flow.server.activity import activity_log_path
@@ -116,9 +115,15 @@ def _render_board_2d(board: Path, dpi: int = 300) -> Path | None:
     out = _RENDER_DIR / (board.stem + "-2d.png")
     try:
         with _board_snapshot(board) as snapshot:
-            render.render_board_layout(snapshot, out, side="top", dpi=dpi,
-                                       copper=True, silkscreen=True,
-                                       courtyard=True)
+            render.render_board_layout(
+                snapshot,
+                out,
+                side="top",
+                dpi=dpi,
+                copper=True,
+                silkscreen=True,
+                courtyard=True,
+            )
     except Exception:
         return None
     return out if out.is_file() and out.stat().st_size > 0 else None
@@ -162,10 +167,16 @@ def _render_3d(board: Path, view: str) -> bytes | None:
     try:
         with _board_snapshot(board) as snapshot:
             render.render_board(
-                snapshot, out, width=1600, height=1100,
-                side=str(profile["side"]), rotate=str(profile.get("rotate", "")),
+                snapshot,
+                out,
+                width=1600,
+                height=1100,
+                side=str(profile["side"]),
+                rotate=str(profile.get("rotate", "")),
                 perspective=bool(profile.get("perspective", False)),
-                quality="basic", background="opaque", zoom=0.65,
+                quality="basic",
+                background="opaque",
+                zoom=0.65,
             )
         return out.read_bytes() if out.stat().st_size > 0 else None
     except Exception:
@@ -203,8 +214,6 @@ def _cached_3d(board: Path, view: str) -> bytes | None:
         return png
 
 
-
-
 _document_cache: dict[str, tuple[str, bytes]] = {}
 _document_lock = threading.Lock()
 
@@ -216,8 +225,9 @@ def _document_frame(source: Path, side: str) -> bytes | None:
     key = f"{source.resolve()}:{side}"
     # A root schematic also changes when a child sheet is saved.
     try:
-        revision = repr([(k, p.stat().st_mtime_ns)
-                         for k, p in project_documents(source).items()])
+        revision = repr(
+            [(k, p.stat().st_mtime_ns) for k, p in project_documents(source).items()]
+        )
     except OSError:
         return None
     with _document_lock:
@@ -230,14 +240,20 @@ def _document_frame(source: Path, side: str) -> bytes | None:
                 if source.suffix == ".kicad_pcb":
                     output = root / "board.png"
                     with _board_snapshot(source) as snapshot:
-                        render.render_board_layout(snapshot, output, side=side, dpi=200,
-                                                   copper=True, silkscreen=True,
-                                                   courtyard=False)
+                        render.render_board_layout(
+                            snapshot,
+                            output,
+                            side=side,
+                            dpi=200,
+                            copper=True,
+                            silkscreen=True,
+                            courtyard=False,
+                        )
                 else:
                     with schematic_snapshot(source) as snapshot:
-                        output = render.export_png(
-                            snapshot, output_dir=root, dpi=150
-                        )[0]
+                        output = render.export_png(snapshot, output_dir=root, dpi=150)[
+                            0
+                        ]
                 data = output.read_bytes()
             if len(_document_cache) >= 32:
                 _document_cache.clear()
@@ -250,7 +266,7 @@ def _document_frame(source: Path, side: str) -> bytes | None:
 class _State:
     """Shared state: the active design, its render, and the log read cursor."""
 
-    _CAP = 500      # keep the most recent activity records
+    _CAP = 500  # keep the most recent activity records
     _TAIL = 512_000  # bytes of history to open with
 
     def __init__(self, log: Path) -> None:
@@ -266,14 +282,18 @@ class _State:
         size = log.stat().st_size if log.is_file() else 0
         self.offset = max(0, size - self._TAIL)
 
+        self.chat_http = AgentHTTP()
+        self.preview_root: Path | None = None
         self.active: Path | None = None  # design being rendered
         self.src_mtime = 0.0
         self.png: Path | None = None
         self.png_ver = 0  # bumps every re-render (cache-buster for the <img>)
         self.events: list[dict[str, object]] = []  # recent tool calls
         self.clear_version = 0
+        self.view_generation = 0
         self.seq = 0  # total events ever seen (a stable cursor for SSE readers)
         self.lock = threading.Lock()
+        self.closed = threading.Event()
         self.scene_lock = threading.Lock()
         self.scene_history = SceneHistory()
         self.documents: dict[str, Path] = {}
@@ -296,17 +316,27 @@ class _State:
                         rec = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    p = str(rec.get("path", ""))
+                    if (
+                        self.preview_root is not None
+                        and p
+                        and not Path(p).resolve().is_relative_to(self.preview_root)
+                    ):
+                        continue
                     self.events.append(rec)
                     self.events[:] = self.events[-self._CAP :]
                     self.seq += 1
-                    p = str(rec.get("path", ""))
                     if p and Path(p).suffix in (".kicad_sch", ".kicad_pcb"):
-                        self.active = Path(p)
-            active, revision = self.active, self.clear_version
+                        candidate = Path(p).resolve()
+                        if self.preview_root is None or candidate.is_relative_to(
+                            self.preview_root
+                        ):
+                            self.active = candidate
+            active, revision = self.active, self.view_generation
         documents = project_documents(active)
         signature = repr([(key, p.stat().st_mtime_ns) for key, p in documents.items()])
         with self.lock:
-            if revision != self.clear_version:
+            if revision != self.view_generation:
                 return
             self.documents = documents
             if signature != self.document_revision:
@@ -317,7 +347,7 @@ class _State:
             if m != self.src_mtime:
                 png = _render(active)
                 with self.lock:
-                    if revision != self.clear_version:
+                    if revision != self.view_generation:
                         return
                     self.src_mtime = m
                     if png is not None:
@@ -342,6 +372,7 @@ class _State:
             # advancing its cursor, without racing a tool's log append.
             self.offset = self.log.stat().st_size if self.log.is_file() else 0
             self.clear_version += 1
+            self.view_generation += 1
             self.events.clear()
             self.documents.clear()
             self.document_revision = ""
@@ -351,11 +382,11 @@ class _State:
             self.png_ver += 1
 
     def run(self) -> None:
-        """Poll forever (the monitor's background worker)."""
-        while True:
+        """Poll until the owning HTTP server closes."""
+        while not self.closed.is_set():
             with contextlib.suppress(Exception):  # a bad line must not kill it
                 self.poll()
-            time.sleep(0.6)
+            self.closed.wait(0.6)
 
 
 _STATIC = files("kicad_flow.monitor") / "static"
@@ -381,27 +412,50 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             self._serve_static("index.html")
-        elif path in ("/style.css", "/app.js", "/scene.js", "/preview.js"):
+        elif path in ("/workspace", "/workspace/"):
+            self._serve_static("workspace.html")
+        elif path in (
+            "/style.css",
+            "/app.js",
+            "/scene.js",
+            "/preview.js",
+            "/workspace.js",
+            "/workspace.css",
+        ):
             self._serve_static(path.lstrip("/"))
+        elif path == "/agent/state":
+            self.state.chat_http.get(self)
         elif path == "/render.png":
             self._send_png()
         elif path == "/documents":
             with self.state.lock:
                 documents = dict(self.state.documents)
                 active = self.state.active
-            self._send(200, "application/json", json.dumps({
-                "active": document_id(active) if active else "",
-                "documents": [{"id": key, "name": p.name,
-                               "kind": "board" if p.suffix == ".kicad_pcb"
-                               else "schematic"} for key, p in documents.items()],
-            }).encode())
+            self._send(
+                200,
+                "application/json",
+                json.dumps(
+                    {
+                        "active": document_id(active) if active else "",
+                        "documents": [
+                            {
+                                "id": key,
+                                "name": p.name,
+                                "kind": "board"
+                                if p.suffix == ".kicad_pcb"
+                                else "schematic",
+                            }
+                            for key, p in documents.items()
+                        ],
+                    }
+                ).encode(),
+            )
         elif path == "/scene.json":
             self._send_scene()
         elif path == "/events":
             self._stream()
         else:
             self._send(404, "text/plain", b"not found")
-
 
     def _serve_static(self, name: str) -> None:
         try:
@@ -413,7 +467,18 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, _STATIC_TYPES.get(ext, "application/octet-stream"), body)
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path == "/clear":
+        if urlparse(self.path).path.startswith("/agent/"):
+            selection = self.state.chat_http.post(self)
+            if selection is not None:
+                root, preview = selection
+                self.state.clear()
+                with self.state.lock:
+                    self.state.preview_root = root
+                    self.state.active = preview
+                    self.state.src_mtime = 0.0
+                    self.state.view_generation += 1
+                    self.state.png_ver += 1
+        elif urlparse(self.path).path == "/clear":
             self.state.clear()
             self._send(200, "application/json", b'{"ok":true}')
         else:
@@ -457,8 +522,10 @@ class _Handler(BaseHTTPRequestHandler):
             ):
                 frame = _cached_3d(active, view)
                 data = (
-                    frame if frame else _placeholder_png(
-                        "Unknown 3D view or render failed -- is KiCad 10 installed?"
+                    frame
+                    if frame
+                    else _placeholder_png(
+                        "Unknown 3D view or render failed -- check KiCad 11"
                     )
                 )
             else:
@@ -476,18 +543,26 @@ class _Handler(BaseHTTPRequestHandler):
 
         qs = parse_qs(urlparse(self.path).query)
         with self.state.lock:
-            active = (self.state.documents.get(qs["doc"][0]) if "doc" in qs
-                      else self.state.active)
+            active = (
+                self.state.documents.get(qs["doc"][0])
+                if "doc" in qs
+                else self.state.active
+            )
         if active is None or active.suffix != ".kicad_sch":
-            self._send(200, "application/json", json.dumps({
-                "ok": False, "error": "Geometry view needs an active schematic."
-            }).encode())
+            self._send(
+                200,
+                "application/json",
+                json.dumps(
+                    {"ok": False, "error": "Geometry view needs an active schematic."}
+                ).encode(),
+            )
             return
         try:
             with self.state.scene_lock:
                 scene = load(active).scene(max_objects=10000)
                 result = self.state.scene_history.observe(
-                    str(active.resolve()), scene, qs.get("since", [""])[0])
+                    str(active.resolve()), scene, qs.get("since", [""])[0]
+                )
         except (OSError, ValueError, LookupError) as exc:
             result = {"ok": False, "error": str(exc)}
         # Preserve schematic labels/IDs containing slashes; only metadata is private.
@@ -562,11 +637,26 @@ def _port_in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+class _HTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, port: int, handler: type[_Handler], state: _State) -> None:
+        self.state = state
+        super().__init__(("127.0.0.1", port), handler)
+
+    def server_close(self) -> None:
+        self.state.closed.set()
+        self.state.chat_http.chat.close()
+        super().server_close()
+
+
 def _make_httpd(port: int, log_path: Path | None) -> ThreadingHTTPServer:
     state = _State(log_path or activity_log_path())
-    threading.Thread(target=state.run, daemon=True).start()  # background poller
     handler = type("H", (_Handler,), {"state": state})
-    return ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server = _HTTPServer(port, handler, state)
+    threading.Thread(target=state.run, daemon=True).start()
+    atexit.register(server.server_close)
+    return server
 
 
 class _StartupState:
@@ -623,7 +713,9 @@ def serve(
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        httpd.shutdown()
+        pass
+    finally:
+        httpd.server_close()
 
 
 def main() -> None:

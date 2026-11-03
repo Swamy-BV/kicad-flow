@@ -22,6 +22,8 @@ release = [
 
 [project.scripts]
 kicad-flow = "kicad_flow.server:main"
+kicad-flow-gui = "kicad_flow.gui:main"
+kicad-flow-agent = "kicad_flow.agent.__main__:main"
 
 [tool.ruff]
 line-length = 88

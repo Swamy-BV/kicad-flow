@@ -96,6 +96,20 @@ Schematic and PCB tabs keep inspection snapshots until you refresh them.
 
 ![Live PCB preview with a compact toolbar and MCP activity log](assets/live-preview.jpg)
 
+The separate agent GUI connects your local Codex account to a selected project.
+GUI and CLI share the conversation, tool activity, and previews. Sign-in stays
+with Codex; KiCadFlow does not collect passwords. Requires Codex CLI on `PATH`.
+
+```powershell
+python -m kicad_flow.gui C:\Projects\MyBoard
+python -m kicad_flow.agent login
+python -m kicad_flow.agent run --project C:\Projects\MyBoard "Inspect the schematic" --ask
+```
+
+The GUI opens `/workspace` on the existing dashboard port, 8472. Restart an older
+dashboard process after switching branches. `status`, `connect`, `disconnect`,
+and `stop` are also available from `python -m kicad_flow.agent`.
+
 ## Development
 
 MCP startup instructions are compact; detailed workflows are loaded on demand

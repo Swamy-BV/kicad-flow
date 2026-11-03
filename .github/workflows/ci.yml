@@ -67,6 +67,8 @@ jobs:
         env:
           KICAD_FLOW_BATCH_LIMIT: '5'
         run: python examples/scripts/workflow_context.py
+      - name: Agent workspace and scoped MCP bridge (no model login needed)
+        run: python examples/scripts/dashboard_chat.py
       - name: Staged board transfer
         env:
           KICAD_FLOW_BATCH_LIMIT: '5'
