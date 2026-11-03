@@ -1,8 +1,9 @@
 """Install the pinned official KiCad 11 development bindings in an isolated venv.
 
 The released kicad-python 0.8 package predates schematic IPC. This bootstrap
-builds the upstream SDK without modifying its sources; remove it once a release
-includes the schematic protocol. It does not install or configure KiCad itself.
+builds the upstream SDK against the selected native protocol, adapting its
+renamed drill-chart enum import. Remove this bootstrap once a release supports
+the selected nightly. It does not install or configure KiCad itself.
 """
 
 from __future__ import annotations
@@ -20,14 +21,16 @@ import venv
 from pathlib import Path
 
 SDK = "87b945a0d56b26a78bf547db9771ff9bf3a057ea"
-PROTOCOL = "dcadf9baa30d43d7d1b3d0342345f05ec0da26e1"
+# Match the native build pinned by setup_kicad11_ci.ps1. Generating against an
+# older protocol can hide commands that the installed editor already supports.
+PROTOCOL = "ff9515f1e9607d7e68f0ebd568f4758318690e0e"
 SDK_URL = (
     f"https://gitlab.com/kicad/code/kicad-python/-/archive/{SDK}/"
     f"kicad-python-{SDK}.tar.gz"
 )
 PROTO_URL = (
-    f"https://gitlab.com/kicad/code/kicad/-/archive/{PROTOCOL}/"
-    f"kicad-{PROTOCOL}.tar.gz?path=api/proto"
+    "https://gitlab.com/api/v4/projects/kicad%2Fcode%2Fkicad/repository/"
+    f"archive.tar.gz?sha={PROTOCOL}&path=api%2Fproto"
 )
 
 
@@ -52,6 +55,26 @@ def download(url: str, digest: str, destination: Path) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with source, target.open("wb") as output:
                 shutil.copyfileobj(source, output)
+
+
+def adapt_sdk(source: Path) -> None:
+    """Port the pinned SDK's obsolete enum name to the native protocol.
+
+    KiCad replaced DrillChartAlign with the common HorizontalAlignment enum.
+    Keep the actual native schema intact; this build-time SDK source adaptation
+    changes only that wrapper's import and annotations, never a wire value.
+    """
+    path = source / "kipy" / "board_types.py"
+    content = path.read_text(encoding="utf-8")
+    old = "    DrillChartAlign,\n"
+    if content.count(old) != 1 or content.count("DrillChartAlign") != 3:
+        raise ValueError("Pinned SDK drill-chart wrapper changed; review adaptation")
+    content = content.replace(old, "").replace("DrillChartAlign", "HorizontalAlignment")
+    content = content.replace(
+        "from kipy.proto.common.types.enums_pb2 import Units",
+        "from kipy.proto.common.types.enums_pb2 import HorizontalAlignment, Units",
+    )
+    path.write_text(content, encoding="utf-8")
 
 
 def main() -> None:
@@ -109,9 +132,10 @@ def main() -> None:
         )
         download(
             PROTO_URL,
-            "bf9ffee0c2895bb6cdc26278c00b6aad0d50466fe7933e25392246f223acf78a",
+            "322452056751f2ca22f77d47eb8a5f6703a39ae97764579304025074ab8f25ad",
             source / "kicad",
         )
+        adapt_sdk(source)
         subprocess.run(
             [
                 str(python),

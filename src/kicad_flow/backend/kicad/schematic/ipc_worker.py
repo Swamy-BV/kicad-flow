@@ -58,6 +58,14 @@ class Worker:
     def probe(self, args: dict[str, Any]) -> dict[str, str]:
         """Report the bindings without opening or changing a KiCad document."""
         metadata = importlib.import_module("importlib.metadata")
+        board_commands = importlib.import_module(
+            "kipy.proto.board.board_commands_pb2"
+        )
+        if not hasattr(board_commands, "ImportSpecctraSession"):
+            raise ValueError(
+                "IPC bindings predate native Specctra session import; "
+                "rebuild them with scripts/install_kicad_ipc.py"
+            )
         return {"bindings": metadata.version("kicad-python")}
 
     def write_items(self, sch: Any, items: list[Any], *, create: bool) -> None:

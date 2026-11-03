@@ -29,13 +29,15 @@ custom rules use native IPC. Existing read-only geometry helpers still parse
 native document snapshots. Candidate checks and export snapshots use native
 SaveCopyOfDocument; CLI DRC, rendering and manufacturing export remain observations.
 Specctra design export uses the native CLI export command.
+Session import uses native `ImportSpecctraSession` in a private headless board,
+rejects skipped items, verifies outline, placements, nets and layers, then
+publishes a separate board with its manufacturing profile and project files.
+Snapshot observations understand KiCad 11's footprint `transform` blocks.
 
 Current limitations:
 
 - This nightly declares `UpdateBoardStackup` unimplemented. Physical stackup
   writes and creating a board with a non-default thickness are refused.
-- Specctra session import is unavailable through this IPC backend. It does not
-  invoke the old `pcbnew` script as a fallback.
 - Effective netclasses are observed natively, but per-field ownership is not
   exposed. Policy replies report unknown owners and an explicit warning.
 - Layer-filtered custom rules are refused: this nightly writes their layer
@@ -50,11 +52,20 @@ Current limitations:
 - Windows CI selects the tested KiCad 11 nightly and pinned development SDK;
   the full example checks still expose the native gaps above.
 
+The SDK bootstrap generates the protocol from the native build's exact commit.
+Its pinned Python wrapper needs one build-time adaptation: the removed
+`DrillChartAlign` enum is replaced with the native `HorizontalAlignment` import
+and annotations. No installed SDK or native process is patched at runtime.
+
 Run `python examples/scripts/pcb_ipc.py` for the MCP-only integration check.
 It covers SMD/THT footprints on both faces at four rotations, schematic-owned
 nets, rotate/flip round trips, text, graphics, copper, rollback, settings, native
 reload and top/bottom renders. Native quarter turns retain integer coordinates
 to avoid the SDK's floating-point truncation drift.
+`python examples/scripts/routing_ipc.py` imports a recorded FreeRouting session
+on a rounded board with a circular cutout. Malformed sessions, unresolved
+references and changed placements are refused without publishing an output.
+The valid import has zero unrouted connections, DRC errors and DRC warnings.
 
 The full LED example is not yet passing: stackup and layer-filtered rule checks
 are unavailable, and its free-junction expectation conflicts with native

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 from kicad_flow.pcb.types import (
     Footprint,
@@ -285,9 +286,22 @@ def footprint(self: BoardState, ref: str) -> Footprint:
 
 def _as_footprint(self: BoardState, node: Node, ref: str) -> Footprint:
     """Build a :class:`Footprint` from a placed ``(footprint ...)``."""
-    at_node = node.get("at")
-    at = Point(_f(at_node, 0), _f(at_node, 1))
-    stored_rotation = _f(at_node, 2)
+    transform = node.get("transform")
+    if transform is None:
+        at_node = node.get("at")
+        at = Point(_f(at_node, 0), _f(at_node, 1))
+        stored_rotation = _f(at_node, 2)
+    else:
+        # KiCad 11 persists the same rigid pose in a transform rather than at.
+        # Never turn a missing legacy node into a silent (0, 0) observation.
+        translate, rotate = transform.get("translate"), transform.get("rotate")
+        scale = transform.get("scale")
+        if scale is not None and (_f(scale, 0), _f(scale, 1)) != (1.0, 1.0):
+            raise ValueError("scaled footprint snapshot geometry is unsupported")
+        if translate is None or rotate is None:
+            raise ValueError("footprint transform lacks translation or rotation")
+        at = Point(_f(translate, 0), _f(translate, 1))
+        stored_rotation = _f(rotate, 0)
     side = "B" if _text(node.get("layer")).startswith("B.") else "F"
     rotation = (
         stored_rotation - (180.0 if side == "B" else 0.0)
@@ -296,6 +310,12 @@ def _as_footprint(self: BoardState, node: Node, ref: str) -> Footprint:
     pads = tuple(
         self._pad_of(p, at, stored_rotation) for p in node.get_all("pad")
     )
+    if transform is not None:
+        # With the new rigid transform, pad angles are local as well.
+        pads = tuple(
+            replace(pad, rotation=(pad.rotation + stored_rotation) % 360.0)
+            for pad in pads
+        )
     centre, offset, polygon, courtyard = _courtyard_geometry(
         node, at, stored_rotation
     )

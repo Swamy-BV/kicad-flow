@@ -6,66 +6,16 @@ import math
 import os
 import shutil
 import tempfile
+from itertools import zip_longest
 from pathlib import Path
 
 from kicad_flow.pcb.types import Point
 
-from .._sexpr import dumps
-from ._runner import run_pcbnew
+from .._sexpr import loads
+from . import outline
+from ._geometry import _point_in_polygon
 from ._state import BoardState
-
-_EXPORT = """
-import json
-import sys
-import pcbnew
-
-with open(sys.argv[1], encoding='utf-8') as source:
-    job = json.load(source)
-board = pcbnew.LoadBoard(job['board'])
-success = pcbnew.ExportSpecctraDSN(board, job['dsn'])
-print(json.dumps({'ok': bool(success)}))
-"""
-
-_IMPORT = """
-import json
-import sys
-import pcbnew
-
-with open(sys.argv[1], encoding='utf-8') as source:
-    job = json.load(source)
-board = pcbnew.LoadBoard(job['board'])
-success = pcbnew.ImportSpecctraSES(board, job['ses'])
-if success:
-    save_board(board, job['output'])
-print(json.dumps({'ok': bool(success)}))
-"""
-
-_RESOLVED_OUTLINE = r"""
-import json, sys
-import pcbnew
-
-job = json.load(open(sys.argv[1], encoding="utf-8"))
-board = pcbnew.LoadBoard(job["board"])
-board.GetDesignSettings().m_MaxError = pcbnew.FromMM(float(job["max_error"]))
-shape = pcbnew.SHAPE_POLY_SET()
-valid = board.GetBoardPolygonOutlines(shape, False, None, True, False)
-if not valid:
-    print(json.dumps({"ok": False, "error": "invalid closed Edge.Cuts outline"}))
-else:
-    contours = []
-    def add(kind, parent, chain):
-        contours.append({
-            "kind": kind,
-            "parent": parent,
-            "points": [[mm(chain.CPoint(i).x, 6), mm(chain.CPoint(i).y, 6)]
-                       for i in range(chain.PointCount())],
-        })
-    for outer in range(shape.OutlineCount()):
-        add("outline", outer, shape.COutline(outer))
-        for hole in range(shape.HoleCount(outer)):
-            add("hole", outer, shape.CHole(outer, hole))
-    print(json.dumps({"ok": True, "contours": contours}))
-"""
+from .ipc import Document
 
 _OUTLINE_MAX_ERROR_MM = 0.005
 _OUTLINE_TOLERANCE_MM = 0.02
@@ -75,10 +25,10 @@ def _snapshot(board: BoardState, directory: Path) -> Path:
     """Write the current in-memory board with its same-project rules."""
     target = directory / board._path.name
     document = getattr(board, "_ipc", None)
-    if document is not None:
-        document.copy_to(target)
-    else:
-        target.write_text(dumps(board._tree) + "\n", encoding="utf-8")
+    if document is None:
+        raise ValueError("routing exchange requires an open native IPC document")
+    document.assert_current()
+    document.copy_to(target)
     for suffix in (".kicad_pro", ".kicad_dru"):
         source = board._path.with_suffix(suffix)
         if source.is_file():
@@ -96,18 +46,10 @@ def export_design(board: BoardState, output_file: str | Path) -> Path:
     with tempfile.TemporaryDirectory(dir=board._path.parent) as name:
         snapshot = _snapshot(board, Path(name))
         scratch = Path(name) / target.name
-        if getattr(board, "_ipc", None) is not None:
-            from ..cli import cli
+        from ..cli import cli
 
-            cli.specctra(snapshot, scratch)
-            result = {"ok": True}
-        else:
-            result = run_pcbnew(
-                _EXPORT,
-                {"board": str(snapshot), "dsn": str(scratch)},
-                timeout=60,
-            )
-        if not result.get("ok") or not scratch.is_file():
+        cli.specctra(snapshot, scratch)
+        if not scratch.is_file():
             raise RuntimeError("KiCad could not export the routing design")
         os.replace(scratch, target)
     return target
@@ -140,23 +82,31 @@ def import_session(
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=board._path.parent) as name:
         snapshot = _snapshot(board, Path(name))
-        scratch = Path(name) / "routing-result.kicad_pcb"
-        result = run_pcbnew(
-            _IMPORT,
-            {"board": str(snapshot), "ses": str(session), "output": str(scratch)},
-            timeout=120,
-        )
-        if not result.get("ok") or not scratch.is_file():
-            raise RuntimeError("KiCad could not import the routing session")
+        candidate_dir = Path(name) / "routed"
+        candidate_dir.mkdir()
+        scratch = candidate_dir / snapshot.name
+        shutil.copyfile(snapshot, scratch)
+        for suffix in (".kicad_pro", ".kicad_dru"):
+            companion = snapshot.with_suffix(suffix)
+            if companion.is_file():
+                shutil.copyfile(companion, scratch.with_suffix(suffix))
+        document = Document(scratch, create=False, mode="headless")
+        try:
+            document.rpc.call("import_session", path=str(session))
+            document.save()
+        finally:
+            document.close()
         outline_difference = _outline_difference(snapshot, scratch)
         if outline_difference:
             raise RuntimeError(
                 f"routing import changed the board outline: {outline_difference}"
             )
         # Prove the candidate parses before publishing it as a board.
-        from .board import load
+        from .board import KiCadBoard
 
-        routed = load(scratch)
+        # A read-only candidate avoids opening another project or retaining a
+        # native file lock while the verified result is published.
+        routed = KiCadBoard(scratch, loads(scratch.read_text(encoding="utf-8")))
         source_parts = sorted(
             (part.ref, part.fp_id, part.value, part.at, part.rotation, part.side)
             for part in board.footprints()
@@ -166,7 +116,15 @@ def import_session(
             for part in routed.footprints()
         )
         if routed_parts != source_parts:
-            raise RuntimeError("routing import changed the footprint placement")
+            before, after = next(
+                (before, after)
+                for before, after in zip_longest(source_parts, routed_parts)
+                if before != after
+            )
+            raise RuntimeError(
+                f"routing import changed the footprint placement: "
+                f"expected {before!r}; received {after!r}"
+            )
         source_pads = sorted(
             (part.ref, part.fp_id, pad.number, pad.net)
             for part in board.footprints()
@@ -191,17 +149,21 @@ def import_session(
 
 
 def _resolved_contours(path: Path) -> list[tuple[str, tuple[Point, ...]]]:
-    """Resolve every outside and cutout contour through KiCad itself."""
-    result = run_pcbnew(
-        _RESOLVED_OUTLINE,
-        {"board": str(path), "max_error": _OUTLINE_MAX_ERROR_MM},
-    )
-    if not result.get("ok"):
-        raise RuntimeError(str(result.get("error") or "invalid Edge.Cuts outline"))
+    """Resolve native-saved graphics without a SWIG editing subprocess."""
+    from .board import KiCadBoard
+
+    board = KiCadBoard(path, loads(path.read_text(encoding="utf-8")))
+    rings = outline.contours(board.graphics("Edge.Cuts"), _OUTLINE_MAX_ERROR_MM)
     contours: list[tuple[str, tuple[Point, ...]]] = []
-    for raw in result.get("contours", []):
-        points = tuple(Point(float(x), float(y)) for x, y in raw["points"])
-        contours.append((str(raw["kind"]), points))
+    for index, ring in enumerate(rings):
+        depth = sum(
+            _point_in_polygon(
+                (ring[0].x, ring[0].y), [(p.x, p.y) for p in parent]
+            )
+            for parent_index, parent in enumerate(rings)
+            if parent_index != index
+        )
+        contours.append(("hole" if depth % 2 else "outline", tuple(ring)))
     return contours
 
 

@@ -38,7 +38,8 @@ in a KiCad editor with IPC enabled. The SDK also honors `KICAD_API_SOCKET` and
 `KICAD_FLOW_IPC_PYTHON`, or the MCP interpreter if unset. The bootstrap script
 builds a checksum-verified, pinned upstream development SDK in an isolated
 environment because the released 0.8 SDK predates schematic support. `doctor`
-checks both the selected KiCad version and that worker's SDK imports.
+checks the selected KiCad version, SDK imports and the routing-import protocol
+message. An older SDK with the same development version number is rejected.
 
 The worker closes its owned documents through native IPC before stopping its
 headless server, releasing KiCad's project locks. GUI connections only

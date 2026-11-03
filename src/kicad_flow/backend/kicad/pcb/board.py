@@ -955,8 +955,6 @@ class KiCadBoard(Board):
         self, session_file: str | Path, output_file: str | Path
     ) -> Path:
         """Import an external router's result to a separate board file."""
-        if self._ipc is not None:
-            unavailable("Specctra session import")
         return _routing_exchange.import_session(self, session_file, output_file)
 
     def _pad_copper_layers(self, pad: Pad) -> tuple[str, ...]:

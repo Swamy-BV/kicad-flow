@@ -9,17 +9,10 @@ from kicad_flow.pcb.types import Graphic, Point
 from ._geometry import _circle_through, _point_in_polygon, _signed_area
 
 
-def polygon(
-    graphics: list[Graphic], inset: float, max_error: float
-) -> tuple[Point, ...]:
-    """Resolve one outside contour with explicit curve tolerance and inset."""
-    if (
-        not math.isfinite(inset)
-        or inset < 0
-        or not math.isfinite(max_error)
-        or max_error <= 0
-    ):
-        raise ValueError("inset must be non-negative; max_error must be positive")
+def contours(graphics: list[Graphic], max_error: float) -> list[list[Point]]:
+    """Sample and join every closed outline, including interior cutouts."""
+    if not math.isfinite(max_error) or max_error <= 0:
+        raise ValueError("max_error must be finite and positive")
     chains: list[list[Point]] = []
     for shape in graphics:
         points = list(shape.points)
@@ -42,6 +35,8 @@ def polygon(
                 sweep = (end - start) % (2 * math.pi)
                 if (mid - start) % (2 * math.pi) > sweep:
                     sweep -= 2 * math.pi
+            if radius <= 0:
+                raise ValueError("outline circle or arc has zero radius")
             step = 2 * math.acos(max(-1.0, 1 - min(max_error / 2, radius) / radius))
             count = max(3, math.ceil(abs(sweep) / step))
             sampled = [
@@ -83,6 +78,16 @@ def polygon(
         rings.append(chain[:-1])
     if not rings:
         raise ValueError("board has no closed Edge.Cuts outline")
+    return rings
+
+
+def polygon(
+    graphics: list[Graphic], inset: float, max_error: float
+) -> tuple[Point, ...]:
+    """Resolve one outside contour with explicit curve tolerance and inset."""
+    if not math.isfinite(inset) or inset < 0:
+        raise ValueError("inset must be finite and non-negative")
+    rings = contours(graphics, max_error)
     rings.sort(key=lambda ring: abs(_signed_area(ring)), reverse=True)
     outside = rings[0]
     if any(

@@ -1,0 +1,51 @@
+(session pair
+  (base_design pair)
+  (placement
+    (resolution um 10)
+    (component "Resistor_SMD:R_0603_1608Metric"
+      (place R1 200000 -200000 front 0)
+      (place R2 350000 -200000 back 0)
+    )
+  )
+  (was_is
+  )
+  (routes
+    (resolution um 10)
+    (parser
+      (host_cad "KiCad's Pcbnew")
+      (host_version "10.99.0-6258-gff9515f1e9")
+    )
+    (library_out
+      (padstack "Via[0-1]_600:300_um"
+        (shape
+          (circle F.Cu 6000 0 0)
+        )
+        (shape
+          (circle B.Cu 6000 0 0)
+        )
+        (attach off)
+      )
+    )
+    (network_out
+      (net "Net-(R1-Pad2)"
+        (wire
+          (path B.Cu 2000
+            217338 -199997
+            225297 -207956
+            350294 -207956
+            358250 -200000
+          )
+        )
+        (wire
+          (path F.Cu 2000
+            217338 -199997
+            208253 -199997
+            208250 -200000
+          )
+        )
+        (via "Via[0-1]_600:300_um" 217338 -199997
+        )
+      )
+    )
+  )
+)

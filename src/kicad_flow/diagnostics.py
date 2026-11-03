@@ -46,11 +46,11 @@ def _check_schematic_ipc() -> Diagnostic:
             rpc.close()
     except (OSError, RuntimeError, ValueError) as exc:
         return Diagnostic(
-            "Schematic IPC",
+            "KiCad IPC bindings",
             "FAIL",
             f"{exc}. Run scripts/install_kicad_ipc.py and set KICAD_FLOW_IPC_PYTHON.",
         )
-    return Diagnostic("Schematic IPC", "PASS", str(result["bindings"]))
+    return Diagnostic("KiCad IPC bindings", "PASS", str(result["bindings"]))
 
 
 def _check_pymupdf() -> Diagnostic:

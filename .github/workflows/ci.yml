@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, kicad11]
   pull_request:
 
 permissions: read-all
@@ -47,6 +47,8 @@ jobs:
         run: python examples/scripts/schematic_native.py
       - name: Native PCB transforms, rollback and reload
         run: python examples/scripts/pcb_ipc.py
+      - name: Native routing import, rounded outlines and refusal isolation
+        run: python examples/scripts/routing_ipc.py
       - name: Default batch limit
         env:
           KICAD_FLOW_BATCH_LIMIT: '5'

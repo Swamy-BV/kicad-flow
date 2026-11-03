@@ -861,6 +861,25 @@ class Worker:
         self.b.refill_zones(max_poll_seconds=45)
         return {"count": len(self.b.get_zones())}
 
+    def import_session(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Apply a native Specctra import atomically in a private document."""
+        self.begin({})
+        try:
+            command = self.bc.ImportSpecctraSession(session_path=args["path"])
+            command.board.CopyFrom(self.b.document)
+            result = self.b.client.send(command, self.bc.ImportSpecctraSessionResponse)
+            if result.skipped_count:
+                raise ValueError(
+                    f"KiCad skipped {result.skipped_count} routing-session items: "
+                    + result.report
+                )
+            self.expected = self.b.get_as_string()
+            self.end({"commit": True})
+        except Exception:
+            self.end({"commit": False})
+            raise
+        return {"report": result.report}
+
     def clear_fills(self, args: dict[str, Any]) -> dict[str, Any]:
         """Discard cached fills in a native candidate before adding copper."""
         self.begin({})
@@ -1063,6 +1082,7 @@ def main() -> None:
                     "edit",
                     "set_layers",
                     "refill",
+                    "import_session",
                     "clear_fills",
                     "bounds",
                     "connectivity",
