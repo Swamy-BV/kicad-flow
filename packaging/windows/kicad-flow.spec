@@ -10,6 +10,7 @@ SRC = ROOT / "src"
 
 datas = [
     (str(SRC / "kicad_flow/backend/kicad/ipc_host.py"), "kicad_flow/backend/kicad"),
+    (str(SRC / "kicad_flow/backend/kicad/desktop_worker.py"), "kicad_flow/backend/kicad"),
     (
         str(SRC / "kicad_flow/backend/kicad/pcb/ipc_worker.py"),
         "kicad_flow/backend/kicad/pcb",
@@ -58,7 +59,7 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    excludes=["mypy", "pytest", "ruff", "tkinter"],
+    excludes=["mypy", "pytest", "ruff"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

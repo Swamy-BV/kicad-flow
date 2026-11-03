@@ -10,8 +10,8 @@ no build step, no extra web dependency (stdlib ``http.server``).
     python -m kicad_flow.monitor            # http://localhost:8472
     python -m kicad_flow.monitor --port 9000 --open
 
-The separate /workspace GUI links a local Codex account to existing MCP tools.
-The monitor retains its own preview and activity interface at /.
+The native chat companion runs separately beside the KiCad editors.
+This monitor retains its own preview and activity interface at /.
 """
 
 from __future__ import annotations
@@ -412,15 +412,11 @@ class _Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/":
             self._serve_static("index.html")
-        elif path in ("/workspace", "/workspace/"):
-            self._serve_static("workspace.html")
         elif path in (
             "/style.css",
             "/app.js",
             "/scene.js",
             "/preview.js",
-            "/workspace.js",
-            "/workspace.css",
         ):
             self._serve_static(path.lstrip("/"))
         elif path == "/agent/state":

@@ -23,6 +23,18 @@ class IPCError(ValueError, RuntimeError):
         self.index: int | None = None
 
 
+def gui_connection(path: Path) -> dict[str, str] | None:
+    """Use the companion's verified editor socket for this exact document."""
+    configured = os.environ.get("KICAD_FLOW_GUI_CONNECTIONS")
+    if configured is None:
+        return None
+    connections = json.loads(configured)
+    socket = connections.get(str(path.resolve()))
+    if not isinstance(socket, str):
+        raise IPCError("Open this document in the companion's KiCad project first")
+    return {"socket_path": socket}
+
+
 class RPC:
     """Serialize requests to one official-IPC worker, with no write retries."""
 

@@ -38,6 +38,7 @@ from kicad_flow.providers.api import ProjectLibrary
 from kicad_flow.schematic.api import Sheet
 
 from .kicad import PAPER, create, create_board, load, load_board
+from .kicad.desktop import DesktopProject
 
 
 def _library_board(project_dir: str | Path) -> Board:
@@ -71,4 +72,12 @@ def project_library(project_dir: str | Path) -> ProjectLibrary:
     return KiCadProjectLibrary(Path(project_dir))
 
 
-__all__ = ["PAPER", "create", "create_board", "load", "load_board", "project_library"]
+__all__ = [
+    "PAPER",
+    "DesktopProject",
+    "create",
+    "create_board",
+    "load",
+    "load_board",
+    "project_library",
+]

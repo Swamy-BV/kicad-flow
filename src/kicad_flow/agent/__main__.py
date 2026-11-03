@@ -11,7 +11,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from .client import DEFAULT_PORT, AgentClient
+from .client import AgentClient
 
 
 def _run(client: AgentClient, args: argparse.Namespace) -> int:
@@ -63,7 +63,7 @@ def main() -> int:
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="KiCadFlow project agent")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--port", type=int, help="explicit local service port")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="show account and selected project")
     commands.add_parser("connect", help="reuse the local Codex account")

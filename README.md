@@ -96,19 +96,18 @@ Schematic and PCB tabs keep inspection snapshots until you refresh them.
 
 ![Live PCB preview with a compact toolbar and MCP activity log](assets/live-preview.jpg)
 
-The separate agent GUI connects your local Codex account to a selected project.
-GUI and CLI share the conversation, tool activity, and previews. Sign-in stays
-with Codex; KiCadFlow does not collect passwords. Requires Codex CLI on `PATH`.
+The native chat companion opens beside your KiCad project. Edits appear live in
+the actual schematic and PCB editors through GUI IPC. It reuses your local Codex
+account or opens ChatGPT sign-in. Requires Codex CLI on `PATH` and KiCad IPC enabled.
 
 ```powershell
-python -m kicad_flow.gui C:\Projects\MyBoard
+python -m kicad_flow.gui C:\Projects\MyBoard\MyBoard.kicad_pro
 python -m kicad_flow.agent login
-python -m kicad_flow.agent run --project C:\Projects\MyBoard "Inspect the schematic" --ask
+python -m kicad_flow.agent run "Inspect the schematic" --ask
 ```
 
-The GUI opens `/workspace` on the existing dashboard port, 8472. Restart an older
-dashboard process after switching branches. `status`, `connect`, `disconnect`,
-and `stop` are also available from `python -m kicad_flow.agent`.
+The CLI automatically connects to an open companion and shares its conversation.
+Closing chat leaves KiCad open. The dashboard remains separate on port 8472.
 
 ## Development
 

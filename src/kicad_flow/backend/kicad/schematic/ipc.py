@@ -13,7 +13,7 @@ from kicad_flow.schematic.types import Net, NetPin, Point
 
 from .._sexpr import Node, dumps, loads
 from ..cli import cli
-from ..ipc import RPC, project_host
+from ..ipc import RPC, gui_connection, project_host
 from ..ipc import IPCError as SchematicIPCError
 from . import native_types as native
 from ._geometry import _field_style, _pin_on_sheet
@@ -47,7 +47,11 @@ class Project:
         if mode not in ("headless", "gui"):
             raise ValueError("KICAD_FLOW_SCHEMATIC_MODE must be headless or gui")
         executable = cli.require_ipc()
-        connection = project_host(self.path, executable) if mode == "headless" else None
+        connection = (
+            project_host(self.path, executable)
+            if mode == "headless"
+            else gui_connection(self.path)
+        )
         self.rpc = RPC(Path(__file__).with_name("ipc_worker.py"))
         try:
             self.rpc.call(

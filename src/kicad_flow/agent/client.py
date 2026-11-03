@@ -16,8 +16,10 @@ DEFAULT_PORT = 8472
 class AgentClient:
     """Small local HTTP client; it never stores account credentials."""
 
-    def __init__(self, port: int = DEFAULT_PORT) -> None:
+    def __init__(self, port: int | None = None) -> None:
         """Select the local dashboard port, retaining the established default."""
+        self.discover = port is None
+        port = DEFAULT_PORT if port is None else port
         if not 1 <= port <= 65535:
             raise ValueError("Port must be between 1 and 65535")
         self.port = port
@@ -27,7 +29,9 @@ class AgentClient:
     def _request(
         self, route: str, body: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=90)
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.port, timeout=2 if route == "state" else 90
+        )
         try:
             connection.request(
                 "GET" if body is None else "POST",
@@ -69,13 +73,37 @@ class AgentClient:
 
     def ensure_running(self) -> None:
         """Reuse the local server or launch it without opening a terminal window."""
+        if self.discover:
+            from .companion import endpoint
+
+            companion = endpoint()
+            if companion:
+                candidate = AgentClient(companion[0])
+                try:
+                    state = candidate.state()
+                    if state.get("instance") == companion[1] and state.get(
+                        "live_editor"
+                    ):
+                        self.port, self.url, self.token = (
+                            candidate.port,
+                            candidate.url,
+                            candidate.token,
+                        )
+                        return
+                except (OSError, RuntimeError):
+                    pass
         try:
             self.state()
             return
         except (ConnectionError, OSError):
             pass
+        command = (
+            [sys.executable, "monitor"]
+            if getattr(sys, "frozen", False)
+            else [sys.executable, "-m", "kicad_flow.monitor"]
+        )
         process = subprocess.Popen(
-            [sys.executable, "-m", "kicad_flow.monitor", "--port", str(self.port)],
+            [*command, "--port", str(self.port)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

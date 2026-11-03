@@ -151,5 +151,7 @@ modules only register and re-export tools. Shared code must not import a
 registration module to reach models or state.
 
 Agent orchestration stays above the primitive contracts. GUI and CLI share a
-single local session through the monitor's loopback service; account credentials
-remain owned by the linked agent. CAD edits go through `Client(mcp)`.
+single local session through the companion's local service; account credentials
+remain owned by the linked agent. CAD edits go through `Client(mcp)`. The native
+companion always uses GUI IPC; unavailable editors must never trigger headless
+fallback. The dashboard remains a separate inspection tool.

@@ -123,8 +123,9 @@ def main() -> None:
         code, state = request("GET", "/agent/state")
         assert code == 200 and not state["connected"]
         assert state["service"] == "kicad-flow-agent" and state["protocol"] == 1
-        for route in ("/", "/workspace", "/workspace.js", "/workspace.css"):
+        for route in ("/", "/app.js", "/style.css"):
             assert request("GET", route)[0] == 200, route
+        assert request("GET", "/workspace")[0] == 404
         headers = {
             "Content-Type": "application/json",
             "X-KiCadFlow-Chat": state["csrf"],

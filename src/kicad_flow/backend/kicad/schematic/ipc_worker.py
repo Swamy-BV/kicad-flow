@@ -58,9 +58,7 @@ class Worker:
     def probe(self, args: dict[str, Any]) -> dict[str, str]:
         """Report the bindings without opening or changing a KiCad document."""
         metadata = importlib.import_module("importlib.metadata")
-        board_commands = importlib.import_module(
-            "kipy.proto.board.board_commands_pb2"
-        )
+        board_commands = importlib.import_module("kipy.proto.board.board_commands_pb2")
         if not hasattr(board_commands, "ImportSpecctraSession"):
             raise ValueError(
                 "IPC bindings predate native Specctra session import; "
@@ -127,7 +125,11 @@ class Worker:
         self.cli = args["cli"]
         self.gui = args["mode"] == "gui"
         if self.gui:
-            self.k = self.api.KiCad(timeout_ms=10000, client_name="kicad-flow")
+            self.k = self.api.KiCad(
+                **(args.get("connection") or {}),
+                timeout_ms=10000,
+                client_name="kicad-flow",
+            )
             sch = self.k.get_schematic()
             project = sch._doc.project
             filename = sch.get_hierarchy().root.filename

@@ -8,6 +8,7 @@ import json
 import shutil
 import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,17 +22,23 @@ Load only the relevant get_workflow topic for substantial work. The caller
 chooses all placements and routing; use returned pin/pad coordinates. Respect
 advertised batch limits. Inspect net membership, ERC/DRC, connectivity and renders
 before claiming a design is complete; use kicad_view_image to see rendered files.
-Explain remaining findings. Keep replies concise, using plain text. Ask for
-missing electrical requirements instead of guessing them. Ask mode permits only
-inspection; it cannot save, render to files, or edit CAD. Ask the user to select
-Edit mode when a write is necessary.
+Explain remaining findings. Keep replies concise, using plain text.
+If KiCad reports that it is busy, stop CAD calls and ask the user to finish
+the active editor command or dialog before continuing. Do not retry edits.
+Ask for missing electrical requirements instead of guessing them. Ask mode
+permits only inspection; it cannot save, render to files, or edit CAD. Ask the
+user to select Edit mode when a write is necessary.
 """
 
 
 class AgentSession:
     """Own one local agent connection and independently saved project threads."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        project_opener: Callable[[Path], dict[str, Any]] | None = None,
+        project_status: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
         """Initialize private local state for this dashboard connection."""
         self.lock = threading.RLock()
         self._actions = threading.Lock()
@@ -57,6 +64,9 @@ class AgentSession:
         self._login_results: dict[str, dict[str, Any]] = {}
         self.activity: list[dict[str, Any]] = []
         self._tools = threading.Lock()
+        self.project_opener = project_opener
+        self.project_status = project_status
+        self.editor: dict[str, Any] = {}
 
     def _changed(self) -> None:
         self.revision += 1
@@ -74,7 +84,13 @@ class AgentSession:
                 "account": self.account,
                 "models": self.models,
                 "project": str(self.root) if self.root else "",
-                "project_name": self.root.name if self.root else "",
+                "project_name": (
+                    Path(self.editor["project_file"]).stem
+                    if self.editor.get("project_file")
+                    else self.root.name
+                    if self.root
+                    else ""
+                ),
                 "thread_id": self.thread_id,
                 "model": self.model,
                 "mode": self.mode,
@@ -89,6 +105,8 @@ class AgentSession:
                 ],
                 "login": dict(self.login_info),
                 "activity": list(self.activity),
+                "live_editor": self.project_opener is not None,
+                "editor": self.editor,
             }
 
     def _process(self) -> CodexProcess:
@@ -96,6 +114,37 @@ class AgentSession:
             self.process = CodexProcess(self._notify, self._request)
             self._loaded = False
         return self.process
+
+    @staticmethod
+    def _editor_error(status: dict[str, Any]) -> str:
+        documents = status.get("documents", [])
+        if documents and all(doc.get("connected") for doc in documents):
+            return "KiCad is busy; finish the active editor command or dialog first"
+        return "Reopen the selected KiCad project before continuing"
+
+    def refresh_editor(self) -> None:
+        """Observe editor availability without inference or design writes."""
+        with self._actions:
+            if self.project_status is None or self.root is None:
+                return
+            try:
+                status = self.project_status()
+            except (OSError, RuntimeError, ValueError) as exc:
+                status = {"ready": False, "error": str(exc)}
+            with self.lock:
+                changed = any(self.editor.get(k) != v for k, v in status.items())
+                self.editor.update(status)
+                if not self.busy:
+                    if not status.get("ready"):
+                        phase = self._editor_error(status)
+                    elif changed:
+                        phase = "Ready" if self.account else "Sign in with ChatGPT"
+                    else:
+                        phase = self.phase
+                    changed = changed or phase != self.phase
+                    self.phase = phase
+                if changed:
+                    self._changed()
 
     def connect(self) -> dict[str, Any]:
         """Connect without starting an inference turn or initiating sign-in."""
@@ -213,6 +262,7 @@ class AgentSession:
             if not path.is_absolute():
                 raise ValueError("Choose an absolute project folder or KiCad file")
             path = path.resolve(strict=True)
+            editor = self.project_opener(path) if self.project_opener else {}
             preview: Path | None = None
             if path.is_file():
                 if path.suffix not in (".kicad_pro", ".kicad_sch", ".kicad_pcb"):
@@ -244,6 +294,7 @@ class AgentSession:
                 )
             with self.lock:
                 self.root = path
+                self.editor = editor
                 self.thread_id = ""
                 self.turn_id = ""
                 self.messages = []
@@ -265,6 +316,10 @@ class AgentSession:
         if mode not in ("ask", "edit"):
             raise ValueError("Choose Ask or Edit mode")
         with self._actions:
+            if self.project_status and mode == "edit":
+                status = self.project_status()
+                if not status.get("ready"):
+                    raise ValueError(self._editor_error(status))
             with self.lock:
                 if self.root is None:
                     raise ValueError("Select a project first")
@@ -290,7 +345,15 @@ class AgentSession:
                         "model": model,
                         "sandbox": "read-only",
                         "approvalPolicy": "on-request",
-                        "developerInstructions": _INSTRUCTIONS,
+                        "developerInstructions": _INSTRUCTIONS
+                        + (
+                            "\nThis is a live KiCad companion. Changes must appear in "
+                            "the open native editors through GUI IPC. Do not render "
+                            "images as a substitute for the editor. Use native "
+                            "connectivity and validation tools to check changes.\n"
+                            if self.project_opener
+                            else ""
+                        ),
                         "config": process.project_config(str(self.root)),
                     }
                     if self.thread_id:
@@ -424,7 +487,25 @@ class AgentSession:
         # The primitive sessions hold native document state. Serialize CAD calls
         # even when a model issues several dynamic tool requests concurrently.
         with self._tools:
-            self._run_tool(key, params)
+            try:
+                self._run_tool(key, params)
+            except Exception as exc:
+                with self.lock:
+                    self.error = str(exc)
+                    if self.activity and self.activity[-1]["status"] == "running":
+                        self.activity[-1]["status"] = "failed"
+                    self._changed()
+                if self.process:
+                    with contextlib.suppress(RuntimeError):
+                        self.process.answer(
+                            key,
+                            {
+                                "success": False,
+                                "contentItems": [
+                                    {"type": "inputText", "text": str(exc)}
+                                ],
+                            },
+                        )
 
     def _run_tool(self, key: Any, params: dict[str, Any]) -> None:
         with self.lock:
@@ -467,7 +548,27 @@ class AgentSession:
             entry = {"id": uuid.uuid4().hex, "tool": self.phase, "status": "running"}
             self.activity.append(entry)
             self.activity = self.activity[-100:]
-        reply = invoke(tool, arguments, root, read_only=mode == "ask")
+        document_call = tool == "kicad_call" and any(
+            key in arguments.get("arguments", {})
+            for key in ("path", "schematic_path", "board_path")
+        )
+        status = (
+            self.project_status()
+            if self.project_status and document_call
+            else {"ready": True}
+        )
+        if not status.get("ready"):
+            reply = {
+                "success": False,
+                "contentItems": [
+                    {
+                        "type": "inputText",
+                        "text": self._editor_error(status),
+                    }
+                ],
+            }
+        else:
+            reply = invoke(tool, arguments, root, read_only=mode == "ask")
         with self.lock:
             entry["status"] = "completed" if reply.get("success") else "failed"
             self._changed()

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from ..cli import cli
-from ..ipc import RPC, IPCError, project_host
+from ..ipc import RPC, IPCError, gui_connection, project_host
 from . import native_types as native
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -48,7 +48,11 @@ class Document:
         if mode not in ("headless", "gui"):
             raise ValueError("KICAD_FLOW_PCB_MODE must be headless or gui")
         executable = cli.require_ipc()
-        connection = project_host(self.path, executable) if mode == "headless" else None
+        connection = (
+            project_host(self.path, executable)
+            if mode == "headless"
+            else gui_connection(self.path)
+        )
         self.rpc = RPC(Path(__file__).with_name("ipc_worker.py"))
         try:
             self.rpc.call(
@@ -193,10 +197,14 @@ def _verify_fields(prepared: dict[str, Any]) -> None:
     footprints = {_text(fp.get("uuid")): fp for fp in tree.get_all("footprint")}
     for field in prepared["fields"]:
         parent = footprints.get(field["parent"])
-        prop = next(
-            (p for p in parent.get_all("property") if _text(p) == field["name"]),
-            None,
-        ) if parent is not None else None
+        prop = (
+            next(
+                (p for p in parent.get_all("property") if _text(p) == field["name"]),
+                None,
+            )
+            if parent is not None
+            else None
+        )
         if prop is None or prop.get("at") is None:
             raise IPCError("KiCad did not retain the edited footprint field")
         actual = _f(prop.get("at"), 2) % 360

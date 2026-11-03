@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Callable
 from typing import Any, Protocol
 from urllib.parse import parse_qs, urlparse
 
@@ -25,10 +26,15 @@ class Request(Protocol):
 class AgentHTTP:
     """Serve one local chat with a per-process mutation token."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        session: AgentSession | None = None,
+        focus: Callable[[], None] | None = None,
+    ) -> None:
         """Initialize private local state for this dashboard connection."""
-        self.chat = AgentSession()
+        self.chat = session or AgentSession()
         self.token = secrets.token_urlsafe(32)
+        self.focus = focus
 
     def _local(self, request: Request) -> bool:
         port = request.server.server_port
@@ -51,6 +57,7 @@ class AgentHTTP:
         data["csrf"] = self.token
         data["service"] = "kicad-flow-agent"
         data["protocol"] = 1
+        data["instance"] = getattr(request.server, "instance", "")
         self._json(request, data)
 
     def post(self, request: Request) -> Any:
@@ -82,6 +89,8 @@ class AgentHTTP:
                 self.chat.cancel_login()
             elif action == "disconnect":
                 self.chat.disconnect()
+            elif action == "focus" and self.focus is not None:
+                self.focus()
             elif action == "project":
                 preview = self.chat.select(str(body.get("path", "")))
             elif action == "send":

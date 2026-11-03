@@ -88,11 +88,29 @@ def main() -> None:
     """Run the MCP server or inspect its packaged dependencies."""
     import argparse
     import asyncio
+    import sys
 
     from kicad_flow import __version__
 
+    if len(sys.argv) > 1 and sys.argv[1] in ("gui", "agent", "monitor"):
+        command = sys.argv.pop(1)
+        if command == "gui":
+            from kicad_flow.gui import main as run_gui
+
+            raise SystemExit(run_gui())
+        if command == "agent":
+            from kicad_flow.agent.__main__ import main as run_agent
+
+            raise SystemExit(run_agent())
+        from kicad_flow.monitor import main as run_monitor
+
+        run_monitor()
+        return
+
     ap = argparse.ArgumentParser(
-        prog="kicad-flow", description="KiCadFlow MCP server"
+        prog="kicad-flow",
+        description="KiCadFlow MCP server",
+        epilog="Also: kicad-flow gui PROJECT | agent COMMAND | monitor",
     )
     ap.add_argument(
         "command",
@@ -112,8 +130,11 @@ def main() -> None:
     )
     ap.add_argument("--host", default="127.0.0.1", help="HTTP bind host")
     ap.add_argument("--port", type=int, default=8471, help="HTTP port (with --http)")
-    ap.add_argument("--tool-search", action="store_true",
-                    help="expose tools through on-demand search (opt-in)")
+    ap.add_argument(
+        "--tool-search",
+        action="store_true",
+        help="expose tools through on-demand search (opt-in)",
+    )
     args = ap.parse_args()
 
     if args.command == "doctor":
