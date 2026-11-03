@@ -51,6 +51,8 @@ jobs:
         run: python examples/scripts/pcb_fields_ipc.py
       - name: Native scoped rules, preservation and atomic refusal
         run: python examples/scripts/pcb_rules_ipc.py
+      - name: Native netclass ownership, inheritance and persistence
+        run: python examples/scripts/net_policy_ipc.py
       - name: Native routing import, rounded outlines and refusal isolation
         run: python examples/scripts/routing_ipc.py
       - name: Default batch limit

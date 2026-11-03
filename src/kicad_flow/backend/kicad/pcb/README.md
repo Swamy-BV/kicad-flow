@@ -43,13 +43,16 @@ severities, check the file revision, and verify the saved selectors before
 accepting the write. Restoration also uses native IPC.
 Files with comments outside rule blocks are refused before a write because
 the native serializer cannot retain those comments.
+Netclass ownership uses KiCad's actual constituent order and explicit fields,
+and checks each source against the native effective value. Via diameter and
+drill remain independently optional; color readback retains alpha.
 
 Current limitations:
 
 - This nightly declares `UpdateBoardStackup` unimplemented. Physical stackup
   writes and creating a board with a non-default thickness are refused.
-- Effective netclasses are observed natively, but per-field ownership is not
-  exposed. Policy replies report unknown owners and an explicit warning.
+- This nightly ignores microvia netclass dimensions. Such writes are refused
+  before changing any class because their round trip cannot be verified.
 - Non-orthogonal footprint protobuf round trips can produce native
   `lib_footprint_mismatch` warnings. A direct SDK probe reproduced this after
   both cloning and a whole-footprint field update; initial native placement
@@ -83,6 +86,9 @@ native 37-degree footprint, batch rollback, angle refusal and reload with zero
 library-mismatch findings.
 `python examples/scripts/pcb_rules_ipc.py` verifies concrete, outer and inner
 layer rules with native DRC, untouched comments, reload and failed-list isolation.
+`python examples/scripts/net_policy_ipc.py` checks explicit, composite, pattern
+and default ownership, independently inherited via dimensions, alpha and a
+fresh-process reopen. The existing local-observation and color examples pass.
 
 The full LED example is not yet passing: stackup writes remain unavailable,
 and its free-junction expectation conflicts with native

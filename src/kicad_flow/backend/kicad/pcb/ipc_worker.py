@@ -1045,63 +1045,10 @@ class Worker:
         return result
 
     def net_policy(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Read native effective classes; leave unavailable field owners unknown."""
-        classes = self.b.get_netclass_for_nets(
-            [self.bt.Net(name=n) for n in args["nets"]]
-        )
-        rows = []
-        dimensions = {
-            "clearance": "clearance",
-            "track_width": "track_width",
-            "diff_pair_width": "diff_pair_track_width",
-            "diff_pair_gap": "diff_pair_gap",
-            "diff_pair_via_gap": "diff_pair_via_gap",
-        }
-        for net, item in classes.items():
-            values = {
-                name: getattr(item.proto.board, key).value_nm / 1e6
-                if item.proto.board.HasField(key)
-                else None
-                for name, key in dimensions.items()
-            }
-            stack = item.proto.board.via_stack
-            values["via_diameter"] = (
-                stack.copper_layers[0].size.x_nm / 1e6 if stack.copper_layers else None
-            )
-            values["via_drill"] = (
-                stack.drill.diameter.x_nm / 1e6 if stack.HasField("drill") else None
-            )
-            colors = {}
-            for key, holder in (
-                ("pcb_color", item.proto.board),
-                ("schematic_color", item.proto.schematic),
-            ):
-                c = holder.color
-                colors[key] = (
-                    ""
-                    if c.a == 0
-                    else "#" + "".join(f"{round(v * 255):02X}" for v in (c.r, c.g, c.b))
-                )
-            rows.append(
-                {
-                    "net": net,
-                    "effective_class": item.name,
-                    "dimensions": values,
-                    "sources": dict.fromkeys(values),
-                    "class_colors": colors,
-                }
-            )
-        return {
-            "nets": rows,
-            "units": "mm",
-            "scope": (
-                "netclass preferences; custom and per-object DRC rules may override"
-            ),
-            "custom_rule_count": len(self.b.get_custom_design_rules().rules),
-            "readback_warnings": [
-                "Native IPC does not expose per-field netclass ownership"
-            ],
-        }
+        """Observe effective netclasses and verified constituent ownership."""
+        module = importlib.import_module("ipc_policy")
+        result: dict[str, Any] = module.policy(self, args)
+        return result
 
     def save(self, args: dict[str, Any]) -> dict[str, Any]:
         """Save the actual board or a private copy through native IPC."""

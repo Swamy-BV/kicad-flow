@@ -98,7 +98,22 @@ def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
         if values is not None:
             if len({v["name"] for v in values}) != len(values):
                 raise ValueError("netclass names must be unique within one call")
+            if any(v.get(key) is not None for v in values
+                   for key in ("microvia_diameter", "microvia_drill")):
+                default = classes.get("Default")
+                if default is None or not default.proto.board.HasField(
+                    "microvia_stack"
+                ):
+                    raise ValueError(
+                        "This KiCad build cannot round-trip microvia netclass "
+                        "settings; no netclasses were changed"
+                    )
             for value in values:
+                diameter, drill = value.get("via_diameter"), value.get("via_drill")
+                if diameter is not None and drill is not None and drill > diameter:
+                    raise ValueError(
+                        f"netclass {value['name']!r} via drill exceeds diameter"
+                    )
                 for key, number in value.items():
                     if (
                         key != "name"
@@ -129,15 +144,18 @@ def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
                         value.get(prefix + "_" + key) is not None
                         for key in ("diameter", "drill")
                     ):
-                        via = self.bt.Via()
-                        existing = getattr(board, target)
-                        if existing.copper_layers:
-                            via.proto.pad_stack.CopyFrom(existing)
+                        stack = getattr(board, target)
                         if value.get(prefix + "_diameter") is not None:
-                            via.diameter = round(value[prefix + "_diameter"] * 1e6)
+                            copper = (stack.copper_layers[0] if stack.copper_layers
+                                      else stack.copper_layers.add())
+                            copper.layer = self.bt.BoardLayer.BL_F_Cu
+                            copper.shape = self.bt.PadStackShape.PSS_CIRCLE
+                            size = round(value[prefix + "_diameter"] * 1e6)
+                            copper.size.x_nm, copper.size.y_nm = size, size
                         if value.get(prefix + "_drill") is not None:
-                            via.drill_diameter = round(value[prefix + "_drill"] * 1e6)
-                        getattr(board, target).CopyFrom(via.proto.pad_stack)
+                            drill = round(value[prefix + "_drill"] * 1e6)
+                            stack.drill.diameter.x_nm = drill
+                            stack.drill.diameter.y_nm = drill
                 for key, holder in (
                     ("pcb_color", board),
                     ("schematic_color", item.proto.schematic),
@@ -172,6 +190,7 @@ def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
                 stack = getattr(board, target)
                 if stack.copper_layers:
                     row[prefix + "_diameter"] = stack.copper_layers[0].size.x_nm / 1e6
+                if stack.HasField("drill"):
                     row[prefix + "_drill"] = stack.drill.diameter.x_nm / 1e6
             for key, holder in (
                 ("pcb_color", board),

@@ -19,6 +19,10 @@ datas = [
         "kicad_flow/backend/kicad/pcb",
     ),
     (
+        str(SRC / "kicad_flow/backend/kicad/pcb/ipc_policy.py"),
+        "kicad_flow/backend/kicad/pcb",
+    ),
+    (
         str(SRC / "kicad_flow/backend/kicad/schematic/ipc_worker.py"),
         "kicad_flow/backend/kicad/schematic",
     ),
