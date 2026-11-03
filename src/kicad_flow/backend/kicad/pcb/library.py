@@ -1,9 +1,8 @@
 """Find and read KiCad footprint libraries.
 
 A ``.pretty`` library is a folder of ``.kicad_mod`` files, and a ``.kicad_mod``
-is the same S-expression dialect as everything else here -- so a footprint is
-read directly rather than through pcbnew, and placing one is a tree copy rather
-than a subprocess.
+is read directly for library observations. Actual board placements construct
+native footprint objects through IPC.
 
 Which folders exist is environment work: KiCad keeps a global ``fp-lib-table``
 mapping nicknames to paths, with variables to expand. That resolution lives
@@ -26,9 +25,13 @@ from ._runner import footprints_dir
 def _global_fp_tables() -> list[Path]:
     """Candidate global ``fp-lib-table`` files in KiCad's config dir."""
     out: list[Path] = []
-    appdata = os.environ.get("APPDATA")  # Windows
-    roots = [Path(appdata) / "kicad"] if appdata else []
-    roots.append(Path.home() / ".config" / "kicad")  # Linux/macOS
+    configured = os.environ.get("KICAD_CONFIG_HOME")
+    if configured:
+        roots = [Path(configured)]
+    else:
+        appdata = os.environ.get("APPDATA")  # Windows
+        roots = [Path(appdata) / "kicad"] if appdata else []
+        roots.append(Path.home() / ".config" / "kicad")  # Linux/macOS
     for root in roots:
         if root.is_dir():
             out.extend(sorted(root.glob("*/fp-lib-table")))
@@ -96,8 +99,7 @@ def _libraries(project_dir: Path | None = None) -> dict[str, Path]:
     return libraries
 
 
-def search(query: str, limit: int = 20,
-           project_dir: Path | None = None) -> list[str]:
+def search(query: str, limit: int = 20, project_dir: Path | None = None) -> list[str]:
     """``Library:Footprint`` ids containing *query*, case-insensitively.
 
     Matching is on the id alone. Reading every footprint's description would
@@ -125,8 +127,7 @@ def load(fp_id: str, project_dir: Path | None = None) -> Node:
         LookupError: If the library or the footprint is not on disk.
     """
     if ":" not in fp_id:
-        raise LookupError(f"footprint id must be 'Library:Footprint', "
-                          f"not {fp_id!r}")
+        raise LookupError(f"footprint id must be 'Library:Footprint', not {fp_id!r}")
     nickname, name = fp_id.split(":", 1)
     folder = _libraries(project_dir).get(nickname)
     if folder is None:
@@ -163,7 +164,7 @@ def _extent(shape: Node, kind: str) -> tuple[list[float], list[float]]:
             xs.append(float(str(node.items[1])))
             ys.append(float(str(node.items[2])))
     pts = shape.get("pts")
-    for xy in (pts.get_all("xy") if pts is not None else []):
+    for xy in pts.get_all("xy") if pts is not None else []:
         xs.append(float(str(xy.items[1])))
         ys.append(float(str(xy.items[2])))
     return xs, ys
@@ -198,9 +199,12 @@ def courtyard_box(tree: Node) -> tuple[float, float, float, float]:
             ys += [py - sh / 2, py + sh / 2]
     if not xs:
         return (0.0, 0.0, 0.0, 0.0)
-    return (round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3),
-            round((max(xs) + min(xs)) / 2, 3),
-            round((max(ys) + min(ys)) / 2, 3))
+    return (
+        round(max(xs) - min(xs), 3),
+        round(max(ys) - min(ys), 3),
+        round((max(xs) + min(xs)) / 2, 3),
+        round((max(ys) + min(ys)) / 2, 3),
+    )
 
 
 def courtyard(tree: Node) -> tuple[float, float]:

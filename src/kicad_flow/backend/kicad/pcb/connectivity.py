@@ -64,16 +64,20 @@ def connectivity(self: BoardState, nets: tuple[str, ...] = ()) -> list[NetConnec
     """Return KiCad's actual pad-bearing connected copper groups."""
     wanted = set(nets)
     footprints = self.footprints()
-    native = run_pcbnew(_CONNECTED_PADS_SCRIPT, {"path": str(self.path)})
+    document = getattr(self, "_ipc", None)
+    native = (
+        document.rpc.call("connectivity")
+        if document is not None
+        else run_pcbnew(_CONNECTED_PADS_SCRIPT, {"path": str(self.path)})
+    )
     pad_groups: dict[str, int] = native["pads"]
     native_groups: list[dict[str, object]] = native["groups"]
     layers_by_uuid: dict[str, tuple[str, ...]] = {
         pad.uuid: self._pad_copper_layers(pad)
-        for part in footprints for pad in part.pads
+        for part in footprints
+        for pad in part.pads
     }
-    layers_by_uuid.update(
-        {track.uuid: (track.layer,) for track in self.tracks()}
-    )
+    layers_by_uuid.update({track.uuid: (track.layer,) for track in self.tracks()})
     layers_by_uuid.update(
         {via.uuid: self._via_copper_layers(via) for via in self.vias()}
     )
@@ -88,16 +92,18 @@ def connectivity(self: BoardState, nets: tuple[str, ...] = ()) -> list[NetConnec
             if pad.uuid not in pad_groups:
                 raise ValueError(f"native connectivity omitted {part.ref}.{pad.number}")
             pads_by_group.setdefault(pad_groups[pad.uuid], []).append(
-                ConnectedPad(part.ref, pad.number, pad.at,
-                             self._pad_copper_layers(pad))
+                ConnectedPad(part.ref, pad.number, pad.at, self._pad_copper_layers(pad))
             )
     out: list[NetConnectivity] = []
     for net in self.nets():
         if wanted and net.name not in wanted:
             continue
         ordered = sorted(
-            ((index, pads) for index, pads in pads_by_group.items()
-             if native_groups[index]["net"] == net.name),
+            (
+                (index, pads)
+                for index, pads in pads_by_group.items()
+                if native_groups[index]["net"] == net.name
+            ),
             key=lambda item: min((pad.ref, pad.pad) for pad in item[1]),
         )
         groups: list[ConnectivityGroup] = []
@@ -108,8 +114,15 @@ def connectivity(self: BoardState, nets: tuple[str, ...] = ()) -> list[NetConnec
                 ConnectivityGroup(
                     index=public_index,
                     pads=tuple(sorted(pads, key=lambda pad: (pad.ref, pad.pad))),
-                    layers=tuple(sorted({layer for uuid in members
-                                         for layer in layers_by_uuid.get(uuid, ())})),
+                    layers=tuple(
+                        sorted(
+                            {
+                                layer
+                                for uuid in members
+                                for layer in layers_by_uuid.get(uuid, ())
+                            }
+                        )
+                    ),
                     copper_nodes=len(members),
                 )
             )

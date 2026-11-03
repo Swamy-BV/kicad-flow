@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ...backend import create_board, load_board
+from ...backend import _library_board, create_board, load_board
 from ...pcb.api import Board
 from .. import _meta
 from .._app import mcp
@@ -60,7 +60,13 @@ def _atomic_items(
                 out.append(each(board, item))
             board.assert_current()
     except (IndexError, *_ERRORS) as exc:
-        return {**_fail(exc), "index": _failed_index, "applied_count": 0, key: []}
+        index = getattr(exc, "index", None)
+        return {
+            **_fail(exc),
+            "index": _failed_index if index is None else index,
+            "applied_count": 0,
+            key: [],
+        }
     return {"ok": True, "count": len(out), key: out}
 
 
@@ -149,6 +155,6 @@ def close_board(path: str) -> dict[str, Any]:
 
 
 def _blank(project_dir: str = "") -> Board:
-    """A throwaway board, for library queries that need no file."""
+    """A library-only observation facade, independent of the editing mode."""
     directory = Path(project_dir).resolve() if project_dir else Path.cwd()
-    return create_board(directory / "_query.kicad_pcb")
+    return _library_board(directory)

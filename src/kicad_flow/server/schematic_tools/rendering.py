@@ -65,11 +65,8 @@ def render_schematic(
             syntax: kicad-cli refuses ``"2-4"`` with "No sheets to plot".
             Each PNG is named for the page it IS, not for its position in
             the selection.
-        save: Write the sheet before rendering, so the picture is of what you
-            have DRAWN rather than what was last saved. Leave it on unless you
-            deliberately want the file as it stands on disk. Note the same
-            caveat as `check_sheet`: a child sheet is read from disk, so save
-            every child before rendering the root.
+        save: Persist through native IPC before rendering. With False, render
+            the current unsaved hierarchy without writing the project files.
 
     Returns:
         ``{ok, path, count, images: [...]}``.

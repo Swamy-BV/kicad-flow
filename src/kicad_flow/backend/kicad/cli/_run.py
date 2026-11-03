@@ -7,6 +7,7 @@ install location) and runs it, raising a clear error on failure.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from functools import cache
@@ -30,6 +31,12 @@ def find_kicad_cli() -> str | None:
         The absolute path to the executable, or ``None`` if it cannot be found.
         When several KiCad versions are installed, the highest is chosen.
     """
+    configured = os.environ.get("KICAD_FLOW_KICAD_CLI")
+    if configured:
+        explicit = Path(configured).expanduser().resolve()
+        if not explicit.is_file():
+            raise KiCadCliError(f"KICAD_FLOW_KICAD_CLI does not exist: {explicit}")
+        return str(explicit)
     found = shutil.which("kicad-cli")
     if found:
         return found
@@ -52,7 +59,7 @@ def require_kicad_cli() -> str:
     cli = find_kicad_cli()
     if cli is None:
         raise KiCadCliError(
-            "kicad-cli not found. Install KiCad 10 or add kicad-cli to PATH."
+            "kicad-cli not found. Install KiCad 11 or set KICAD_FLOW_KICAD_CLI."
         )
     return cli
 

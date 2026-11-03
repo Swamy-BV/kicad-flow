@@ -143,8 +143,8 @@ def _sheet_ref(self: SheetState, node: Node) -> SheetRef:
         Pin(
             number=_text(p),
             name=_text(p),
-            orientation=180.0,
-            kind=_text(p.get("pin")) or "passive",
+            orientation=_f(p.get("at"), 2, 180.0),
+            kind=_text(p, 1) or "passive",
             length=0.0,
             at=Point(_f(p.get("at"), 0), _f(p.get("at"), 1)),
         )

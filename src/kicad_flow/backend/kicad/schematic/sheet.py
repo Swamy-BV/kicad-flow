@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import copy
-from collections.abc import Iterator
+import inspect
+import os
+import tempfile
+import threading
+from collections.abc import Callable, Iterator
+from functools import wraps
 from pathlib import Path
+from typing import Concatenate, ParamSpec, TypeVar, cast
 
 from kicad_flow.schematic.api import GRID, Sheet
 from kicad_flow.schematic.types import (
@@ -50,13 +56,69 @@ from ._nodes import (
     _uid_from,
     _walk,
 )
+from .ipc import Document, rebase_instances
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _observed(
+    function: Callable[Concatenate[KiCadSheet, _P], _T],
+) -> Callable[Concatenate[KiCadSheet, _P], _T]:
+    """Run a public observation against the current native document."""
+    signature = inspect.signature(function)
+
+    @wraps(function)
+    def call(self: KiCadSheet, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        with self._operation():
+            if self._ipc is not None and function.__name__ in (
+                "part",
+                "parts",
+                "fields",
+            ):
+                bound = signature.bind(self, *args, **kwargs)
+                bound.apply_defaults()
+                values = dict(bound.arguments)
+                values.pop("self")
+                return cast(_T, self._ipc.observe(function.__name__, values))
+            return function(self, *args, **kwargs)
+
+    return call
+
+
+def _edited(
+    function: Callable[Concatenate[KiCadSheet, _P], _T],
+) -> Callable[Concatenate[KiCadSheet, _P], _T]:
+    """Commit one primitive, or join the caller's atomic list transaction."""
+    signature = inspect.signature(function)
+
+    @wraps(function)
+    def call(self: KiCadSheet, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+        with self._operation(write=True):
+            if self._ipc is None:
+                return function(self, *args, **kwargs)
+            index = self._edit_count
+            self._edit_count += 1
+            bound = signature.bind(self, *args, **kwargs)
+            bound.apply_defaults()
+            values = dict(bound.arguments)
+            values.pop("self")
+            return cast(_T, self._ipc.edit(self, function.__name__, values, index))
+
+    return call
 
 
 class KiCadSheet(Sheet):
     """A ``.kicad_sch`` file, edited through the primitive API."""
 
     def __init__(
-        self, path: Path, tree: Node, paper: str, instance_path: str = ""
+        self,
+        path: Path,
+        tree: Node,
+        paper: str,
+        instance_path: str = "",
+        *,
+        ipc: Document | None = None,
     ) -> None:
         """Wrap an already-parsed sheet. Use :func:`create` or :func:`load`."""
         self._path = Path(path)
@@ -64,6 +126,10 @@ class KiCadSheet(Sheet):
         self._paper = paper
         self._instance_path = instance_path
         self._defs: dict[str, library.LibrarySymbol] = {}
+        self._ipc = ipc
+        self._depth = 0
+        self._edit_count = 0
+        self._lock = threading.RLock()
         # Every identifier already in the file. A derived uuid is checked
         # against it, so two identical things -- two wires between the same
         # pair of points -- cannot end up sharing one.
@@ -72,6 +138,72 @@ class KiCadSheet(Sheet):
             for node in _walk(tree)
             if node.get("uuid") is not None
         }
+
+    def _refresh(self, contents: str) -> None:
+        # Native serialization sorts drawables by UUID. Keep the observed
+        # document's stable order across refreshes, including caller list order;
+        # newly discovered GUI items follow the items already known here.
+        order = {
+            _text(node.get("uuid")): index
+            for index, node in enumerate(self._tree.items)
+            if isinstance(node, Node) and node.get("uuid") is not None
+        }
+        if self._ipc is not None:
+            for identity in self._ipc.created_ids:
+                if identity not in order:
+                    order[identity] = len(order)
+        tree = loads(contents)
+        drawables = [
+            node
+            for node in tree.items
+            if isinstance(node, Node) and node.get("uuid") is not None
+        ]
+        drawables.sort(key=lambda node: order.get(_text(node.get("uuid")), len(order)))
+        ordered = iter(drawables)
+        tree.items = [
+            next(ordered)
+            if isinstance(node, Node) and node.get("uuid") is not None
+            else node
+            for node in tree.items
+        ]
+        self._tree = tree
+        self._paper = _text(self._tree.get("paper"), 0, "A4")
+        self._uids = {
+            _text(node.get("uuid"))
+            for node in _walk(self._tree)
+            if node.get("uuid") is not None
+        }
+        if self._ipc is not None:
+            self._instance_path = self._ipc.instance
+
+    @contextlib.contextmanager
+    def _operation(self, *, write: bool = False) -> Iterator[None]:
+        if self._ipc is None:
+            yield
+            return
+        project = self._ipc.connect()
+        with project.lock, self._lock:
+            if self._depth:
+                yield
+                return
+            self._refresh(self._ipc.snapshot())
+            self._edit_count = 0
+            before = copy.deepcopy(self._tree)
+            uids = set(self._uids)
+            if write:
+                self._ipc.begin()
+            self._depth += 1
+            try:
+                yield
+                if write:
+                    self._refresh(self._ipc.end(commit=True))
+            except Exception:
+                if write:
+                    self._ipc.end(commit=False)
+                self._tree, self._uids = before, uids
+                raise
+            finally:
+                self._depth -= 1
 
     def _copy(self) -> KiCadSheet:
         """An isolated in-memory copy for placement measurements."""
@@ -83,11 +215,24 @@ class KiCadSheet(Sheet):
 
     def _open_child(self, path: Path) -> KiCadSheet:
         """Read a child sheet as the same concrete backend type."""
+        if self._ipc is not None:
+            document = Document(path)
+            tree = loads(document.snapshot())
+            return KiCadSheet(
+                path,
+                tree,
+                _text(tree.get("paper"), 0, "A4"),
+                document.instance,
+                ipc=document,
+            )
         tree = loads(path.read_text(encoding="utf-8"))
         return KiCadSheet(path, tree, _text(tree.get("paper"), 0, "A4"))
 
     def _uid_for(self, key: str) -> str:
         """A stable uuid for *key*, made unique if that key repeats."""
+        # Native IPC indexes UUIDs across the hierarchy, not just within one
+        # physical file. Include the physical sheet identity in the namespace.
+        key = _text(self._tree.get("uuid")) + ":" + key
         n = 1
         while True:
             candidate = _uid_from(key if n == 1 else f"{key}#{n}")
@@ -97,6 +242,7 @@ class KiCadSheet(Sheet):
             n += 1
 
     @property
+    @_observed
     def uuid(self) -> str:
         """This sheet's own identifier."""
         return _text(self._tree.get("uuid"))
@@ -119,11 +265,13 @@ class KiCadSheet(Sheet):
         return self._path
 
     @property
+    @_observed
     def size(self) -> tuple[float, float]:
         """The drawable ``(width, height)`` inside the title block."""
         w, h = PAPER.get(self._paper, PAPER["A4"])
         return (w - 2 * _MARGIN, h - 2 * _MARGIN)
 
+    @_edited
     def add_sheet(
         self,
         name: str,
@@ -143,16 +291,14 @@ class KiCadSheet(Sheet):
     def save(self, *, validate: bool = False) -> Path:
         """Write the sheet to disk and return its path.
 
-        Written to a neighbouring temp file and moved into place, so the sheet
-        is never half a file. That matters more than it used to: with autosave
-        on, this runs after every write rather than once at the end, and
-        something else may be reading -- the monitor renders the file the
-        moment it changes, and KiCad may have it open.
-
-        If *validate* is true, KiCad parses the complete temporary file before
-        it replaces the last known-good destination. ERC findings are allowed;
-        failure to load or parse is not.
+        Attached documents use native IPC SaveDocument. *validate* only applies
+        to detached snapshots, since attached documents are already parsed and
+        owned by the native editor.
         """
+        if self._ipc is not None:
+            with self._operation():
+                self._ipc.save()
+            return self._path
         self._path.parent.mkdir(parents=True, exist_ok=True)
         scratch = self._path.with_name(f".{self._path.stem}.writing{self._path.suffix}")
         try:
@@ -170,6 +316,10 @@ class KiCadSheet(Sheet):
     @contextlib.contextmanager
     def transaction(self) -> Iterator[None]:
         """Rollback the in-memory tree and UUID registry when a write fails."""
+        if self._ipc is not None:
+            with self._operation(write=True):
+                yield
+            return
         tree = copy.deepcopy(self._tree)
         uids = set(self._uids)
         try:
@@ -201,6 +351,7 @@ class KiCadSheet(Sheet):
             self._defs[lib_id] = library.load_symbol(lib_id, self._path.parent)
         return self._defs[lib_id]
 
+    @_edited
     def place(
         self,
         lib_id: str,
@@ -226,6 +377,7 @@ class KiCadSheet(Sheet):
             unit=unit,
         )
 
+    @_observed
     def measure_placement(
         self, placements: tuple[PartPlacement, ...]
     ) -> PlacementMeasurement:
@@ -295,6 +447,7 @@ class KiCadSheet(Sheet):
             raise LookupError(f"{ref} unit {unit} is not on the sheet")
         return node
 
+    @_observed
     def part(self, ref: str, *, unit: int = 1) -> Part:
         """One placed unit, with its pins at sheet positions."""
         return _components.part(self, ref, unit=unit)
@@ -303,6 +456,7 @@ class KiCadSheet(Sheet):
         """Build a :class:`Part` from a placed ``(symbol ...)`` node."""
         return _components._as_part(self, node, ref)
 
+    @_observed
     def bom_rows(self, part_number_field: str) -> list[dict[str, str]]:
         """Read native hierarchical BOM records from a schematic snapshot."""
         from .manufacturing import bom_rows
@@ -310,22 +464,27 @@ class KiCadSheet(Sheet):
         with self._scratch() as scratch:
             return bom_rows(scratch, part_number_field)
 
+    @_observed
     def parts(self) -> list[Part]:
         """Every placed part, in reference order."""
         return _components.parts(self)
 
+    @_edited
     def move(self, ref: str, x: float, y: float, *, unit: int = 1) -> Part:
         """Move a placed part. Its pins move with it."""
         return _components.move(self, ref, x, y, unit=unit)
 
+    @_edited
     def rotate(self, ref: str, rotation: float, *, unit: int = 1) -> Part:
         """Set a placed part's rotation in degrees."""
         return _components.rotate(self, ref, rotation, unit=unit)
 
+    @_edited
     def mirror(self, ref: str, axis: str, *, unit: int = 1) -> Part:
         """Mirror a placed part about ``"x"``, ``"y"`` or ``""`` for neither."""
         return _components.mirror(self, ref, axis, unit=unit)
 
+    @_edited
     def remove(self, ref: str, *, unit: int = 1) -> None:
         """Take one placed unit off the sheet."""
         return _components.remove(self, ref, unit=unit)
@@ -338,16 +497,19 @@ class KiCadSheet(Sheet):
         """Wire nodes joining these two snapped points, either way round."""
         return _connections._wires_between(self, x1, y1, x2, y2)
 
+    @_edited
     def remove_wire(self, x1: float, y1: float, x2: float, y2: float) -> int:
         """Delete wires running between these two points."""
         return _connections.remove_wire(self, x1, y1, x2, y2)
 
+    @_edited
     def move_wire(
         self, x1: float, y1: float, x2: float, y2: float, dx: float, dy: float
     ) -> int:
         """Shift wires between these points by ``(dx, dy)``."""
         return _connections.move_wire(self, x1, y1, x2, y2, dx, dy)
 
+    @_edited
     def remove_label(self, x: float, y: float) -> int:
         """Delete labels at this point, of any kind."""
         return _connections.remove_label(self, x, y)
@@ -360,30 +522,37 @@ class KiCadSheet(Sheet):
         """The label carrying *uuid*, or a useful refusal."""
         return _connections._label_node(self, uuid)
 
+    @_edited
     def remove_label_by_id(self, uuid: str) -> None:
         """Delete exactly one label by stable identity."""
         return _connections.remove_label_by_id(self, uuid)
 
+    @_edited
     def move_label(self, x: float, y: float, dx: float, dy: float) -> int:
         """Shift labels at this point by ``(dx, dy)``."""
         return _connections.move_label(self, x, y, dx, dy)
 
+    @_edited
     def move_label_by_id(self, uuid: str, dx: float, dy: float) -> Label:
         """Shift exactly one label by stable identity."""
         return _connections.move_label_by_id(self, uuid, dx, dy)
 
+    @_edited
     def rotate_label(self, x: float, y: float, rotation: float) -> int:
         """Turn labels at this point."""
         return _connections.rotate_label(self, x, y, rotation)
 
+    @_edited
     def rotate_label_by_id(self, uuid: str, rotation: float) -> Label:
         """Turn exactly one label by stable identity."""
         return _connections.rotate_label_by_id(self, uuid, rotation)
 
+    @_edited
     def remove_junction(self, x: float, y: float) -> int:
         """Delete junctions at this point."""
         return _connections.remove_junction(self, x, y)
 
+    @_edited
     def remove_no_connect(self, x: float, y: float) -> int:
         """Delete no-connect marks at this point."""
         return _connections.remove_no_connect(self, x, y)
@@ -396,22 +565,27 @@ class KiCadSheet(Sheet):
         """Describe a child-sheet box that is already on the sheet."""
         return _hierarchy._sheet_ref(self, node)
 
+    @_edited
     def move_sheet(self, name: str, x: float, y: float) -> SheetRef:
         """Move a child-sheet box, and say where its ports ended up."""
         return _hierarchy.move_sheet(self, name, x, y)
 
+    @_edited
     def remove_sheet(self, name: str) -> None:
         """Take a child-sheet box off this sheet. The child FILE is left."""
         return _hierarchy.remove_sheet(self, name)
 
+    @_edited
     def remove_field(self, ref: str, name: str, *, unit: int = 1) -> dict[str, str]:
         """Delete a field from a part and return the fields it has left."""
         return _fields.remove_field(self, ref, name, unit=unit)
 
+    @_edited
     def set_field(self, ref: str, name: str, value: str) -> dict[str, str]:
         """Set one of a part's fields and return all of them."""
         return _fields.set_field(self, ref, name, value)
 
+    @_edited
     def move_field(
         self,
         ref: str,
@@ -427,22 +601,27 @@ class KiCadSheet(Sheet):
             self, ref, name, dx, dy, rotation=rotation, justify=justify
         )
 
+    @_observed
     def fields(self, ref: str) -> dict[str, str]:
         """Every field on a part, by name."""
         return _fields.fields(self, ref)
 
+    @_observed
     def pin(self, ref: str, pin: str) -> Point:
         """Where *ref*'s *pin* is on the sheet -- the point to wire to."""
         return _components.pin(self, ref, pin)
 
+    @_edited
     def wire(self, x1: float, y1: float, x2: float, y2: float) -> list[Point]:
         """Draw one straight wire segment and return its ends."""
         return _connections.wire(self, x1, y1, x2, y2)
 
+    @_edited
     def junction(self, x: float, y: float) -> Point:
         """Mark a point where crossing wires connect."""
         return _connections.junction(self, x, y)
 
+    @_edited
     def label(
         self,
         x: float,
@@ -458,10 +637,12 @@ class KiCadSheet(Sheet):
             self, x, y, text, kind=kind, rotation=rotation, justify=justify
         )
 
+    @_edited
     def power(self, x: float, y: float, net: str, *, rotation: float = 0.0) -> Part:
         """Place a power symbol for *net* and return it."""
         return _components.power(self, x, y, net, rotation=rotation)
 
+    @_edited
     def power_flag(self, x: float, y: float, *, rotation: float = 0.0) -> Part:
         """Place a PWR_FLAG, which tells ERC a net is driven."""
         return _components.power_flag(self, x, y, rotation=rotation)
@@ -470,6 +651,7 @@ class KiCadSheet(Sheet):
         """The next free ``#PWR0001``-style reference."""
         return _components._next_hash_ref(self, prefix)
 
+    @_edited
     def text(
         self,
         x: float,
@@ -486,10 +668,12 @@ class KiCadSheet(Sheet):
             self, x, y, text, size=size, rotation=rotation, bold=bold, justify=justify
         )
 
+    @_observed
     def texts(self) -> list[SheetText]:
         """Every literal note on this sheet, in file order."""
         return _connections.texts(self)
 
+    @_edited
     def update_text(
         self,
         uuid: str,
@@ -515,10 +699,12 @@ class KiCadSheet(Sheet):
             justify=justify,
         )
 
+    @_edited
     def remove_text(self, uuid: str) -> None:
         """Remove one literal note by UUID."""
         _connections.remove_text(self, uuid)
 
+    @_edited
     def graphic(
         self,
         kind: str,
@@ -528,26 +714,29 @@ class KiCadSheet(Sheet):
         stroke: str = "default",
     ) -> SheetGraphic:
         """Draw one non-electrical polyline or rectangle."""
-        return _graphics.graphic(
-            self, kind, points, width=width, stroke=stroke
-        )
+        return _graphics.graphic(self, kind, points, width=width, stroke=stroke)
 
+    @_observed
     def graphics(self) -> list[SheetGraphic]:
         """Every root-level schematic graphic, in file order."""
         return _graphics.graphics(self)
 
+    @_edited
     def move_graphic(self, uuid: str, dx: float, dy: float) -> SheetGraphic:
         """Shift one graphical primitive by UUID."""
         return _graphics.move_graphic(self, uuid, dx, dy)
 
+    @_edited
     def remove_graphic(self, uuid: str) -> None:
         """Remove one graphical primitive by UUID."""
         _graphics.remove_graphic(self, uuid)
 
+    @_edited
     def no_connect(self, x: float, y: float) -> Point:
         """Mark a pin deliberately unconnected."""
         return _connections.no_connect(self, x, y)
 
+    @_observed
     def scene(
         self, region: SceneBounds | None = None, *, max_objects: int = 2000
     ) -> SceneSnapshot:
@@ -556,10 +745,12 @@ class KiCadSheet(Sheet):
 
         return snapshot(self, region, max_objects=max_objects)
 
+    @_observed
     def wires(self) -> list[tuple[Point, Point]]:
         """Every wire segment on the sheet."""
         return _connections.wires(self)
 
+    @_observed
     def labels(self) -> list[Label]:
         """Every label, including stable identity for later editing."""
         return _connections.labels(self)
@@ -568,13 +759,72 @@ class KiCadSheet(Sheet):
     def _scratch(self) -> Iterator[Path]:
         """The sheet as a file on disk, for a tool that needs a path.
 
-        Written BESIDE the real file, not in a temp directory. The sheet in
-        memory may be ahead of what is on disk, so a copy is needed -- but a
-        root sheet names its children by relative filename, and a copy off in
-        a temp directory cannot see them. That produced a design reporting
-        eight unmatched ports and no nets at all, which reads exactly like a
-        wiring mistake and was not one.
+        For IPC documents, snapshot the entire current native hierarchy and
+        remap child filenames inside a private directory. CLI observation then
+        includes unsaved child edits without touching any project file.
         """
+        if self._ipc is not None:
+            sheets = self._ipc.connect().sheets()
+            with tempfile.TemporaryDirectory(prefix="kicad-flow-observe-") as folder:
+                directory = Path(folder)
+                paths: dict[Path, Path] = {}
+                try:
+                    common = Path(
+                        os.path.commonpath(
+                            [
+                                str(Path(sheet["path"]).resolve().parent)
+                                for sheet in sheets
+                            ]
+                        )
+                    )
+                except ValueError:  # Physical sheets on different Windows drives.
+                    common = None
+                for index, sheet in enumerate(sheets):
+                    original = Path(sheet["path"]).resolve()
+                    paths[original] = (
+                        directory / original.relative_to(common)
+                        if common is not None
+                        else directory / str(index) / original.name
+                    )
+                for sheet in sheets:
+                    original = Path(sheet["path"]).resolve()
+                    tree = loads(Document.logical_contents(sheet))
+                    if self._path.resolve() != self._ipc.connect().path:
+                        rebase_instances(
+                            tree,
+                            self._where,
+                            _text(self._tree.get("uuid")),
+                            self._path.stem,
+                        )
+                        if original == self._path.resolve():
+                            table = tree.get("sheet_instances")
+                            if table is not None:
+                                tree.items.remove(table)
+                            tree.items.append(
+                                _node(
+                                    "sheet_instances",
+                                    [_node("path", ["/", _node("page", ["1"])])],
+                                )
+                            )
+                    for child in tree.get_all("sheet"):
+                        prop = self._prop_of(child, "Sheetfile")
+                        if prop is None:
+                            continue
+                        filename = _text(prop, 1)
+                        child_path = (original.parent / filename).resolve()
+                        if (
+                            child_path in paths
+                            and (paths[original].parent / filename).resolve()
+                            != paths[child_path]
+                        ):
+                            prop.items[2] = os.path.relpath(
+                                paths[child_path], paths[original].parent
+                            ).replace("\\", "/")
+                    output = paths[original]
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(dumps(tree) + "\n", encoding="utf-8")
+                yield paths[self._path.resolve()]
+            return
         scratch = self._path.parent / f".{self._path.stem}.scratch.kicad_sch"
         scratch.parent.mkdir(parents=True, exist_ok=True)
         scratch.write_text(dumps(self._tree) + "\n", encoding="utf-8")
@@ -583,14 +833,19 @@ class KiCadSheet(Sheet):
         finally:
             scratch.unlink(missing_ok=True)
 
+    @_observed
     def nets(self) -> list[Net]:
         """What this sheet actually connects, from KiCad's own netlist."""
+        if self._ipc is not None:
+            return self._ipc.nets()
         return _validation.nets(self)
 
+    @_observed
     def board_components(self) -> list[BoardComponent]:
         """Physical components and their footprint fields from the netlist."""
         return _validation.board_components(self)
 
+    @_observed
     def check(self) -> list[Finding]:
         """Every violation, mapped from a position back to a part and pin."""
         return _validation.check(self)
@@ -603,10 +858,12 @@ class KiCadSheet(Sheet):
         """Graphical findings for this page, without following child sheets."""
         return _validation._check_layout_page(self, page)
 
+    @_observed
     def check_layout(self) -> list[LayoutFinding]:
         """Return potential graphical collisions across this hierarchy."""
         return _validation.check_layout(self)
 
+    @_observed
     def render(
         self,
         *,
@@ -618,14 +875,16 @@ class KiCadSheet(Sheet):
         """Render the sheet to PNG, one per page, via kicad-cli."""
         from .. import render as _render
 
-        return _render.export_png(
-            self._path,
-            output_dir=output_dir,
-            dpi=dpi,
-            black_and_white=black_and_white,
-            pages=pages,
-        )
+        with self._scratch() as snapshot:
+            return _render.export_png(
+                snapshot,
+                output_dir=output_dir if output_dir is not None else self._path.parent,
+                dpi=dpi,
+                black_and_white=black_and_white,
+                pages=pages,
+            )
 
+    @_observed
     def next_ref(self, prefix: str) -> str:
         """The next unused reference with this prefix."""
         used = set()
@@ -639,6 +898,7 @@ class KiCadSheet(Sheet):
             n += 1
         return f"{prefix}{n}"
 
+    @_observed
     def at(self, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
         """What meets at a point: pins, wire ends and labels."""
 
@@ -678,34 +938,11 @@ def create(
             f"nothing larger: a page too big for A3 is one nobody reads. Put "
             f"the overflow on another sheet with add_sheets instead."
         )
-    tree = _node(
-        "kicad_sch",
-        [
-            _node("version", [20250114]),
-            _node("generator", ["kicad_flow"]),
-            _node("generator_version", ["10.0"]),
-            _node("uuid", [_uid_from(f"file:{Path(path).name}")]),
-            _node("paper", [paper]),
-            _node("lib_symbols", []),
-            _node(
-                "sheet_instances",
-                [
-                    _node("path", ["/", _node("page", ["1"])]),
-                ],
-            ),
-        ],
+    document = Document(
+        Path(path), create=True, paper=paper, title=title, instance=instance_path
     )
-    if title:
-        tree.items.insert(
-            5,
-            _node(
-                "title_block",
-                [
-                    _node("title", [title]),
-                ],
-            ),
-        )
-    return KiCadSheet(Path(path), tree, paper, instance_path)
+    tree = loads(document.snapshot())
+    return KiCadSheet(Path(path), tree, paper, document.instance, ipc=document)
 
 
 def load(path: str | Path, *, instance_path: str = "") -> Sheet:
@@ -715,8 +952,11 @@ def load(path: str | Path, *, instance_path: str = "") -> Sheet:
     :meth:`KiCadSheet._where`.
     """
     file = Path(path)
-    tree = loads(file.read_text(encoding="utf-8"))
-    return KiCadSheet(file, tree, _text(tree.get("paper"), 0, "A4"), instance_path)
+    document = Document(file, instance=instance_path)
+    tree = loads(document.snapshot())
+    return KiCadSheet(
+        file, tree, _text(tree.get("paper"), 0, "A4"), document.instance, ipc=document
+    )
 
 
 __all__ = ["GRID", "PAPER", "KiCadSheet", "create", "load"]

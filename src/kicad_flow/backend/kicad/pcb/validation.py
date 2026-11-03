@@ -211,7 +211,10 @@ def check_proposed(
         # copper lets pcbnew build connectivity before the filler runs and
         # can permanently reassign a proposed via to the plane net. Keep
         # the zone rules, but discard cached geometry before adding copper.
-        for zone_node in candidate._tree.get_all("zone"):
+        native = getattr(candidate, "_ipc", None)
+        if native is not None:
+            native.rpc.call("clear_fills")
+        for zone_node in candidate._tree.get_all("zone") if native is None else ():
             zone_node.items[:] = [
                 item
                 for item in zone_node.items
@@ -276,6 +279,9 @@ def check_proposed(
             )
         return attributed
     finally:
+        document = getattr(candidate, "_ipc", None)
+        if document is not None:
+            document.close()
         for artifact in (
             scratch,
             scratch.with_suffix(".kicad_pro"),

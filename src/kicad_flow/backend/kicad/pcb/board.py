@@ -6,6 +6,8 @@ import contextlib
 import copy
 import hashlib
 import math
+import tempfile
+import weakref
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from kicad_flow.pcb.types import (
     BoardRule,
     BoardText,
     Connection,
+    Constraint,
     Finding,
     Footprint,
     FootprintDef,
@@ -48,12 +51,12 @@ from . import footprints as _footprints
 from . import graphics as _graphics
 from . import grid as _grid
 from . import inspection as _inspection
+from . import native_types as _native
 from . import placement as _placement
 from . import routing_exchange as _routing_exchange
 from . import settings as _settings
 from . import validation as _validation
 from ._constants import (
-    _TEMPLATE,
     _copper_names,
 )
 from ._geometry import (
@@ -61,21 +64,29 @@ from ._geometry import (
 )
 from ._nodes import (
     _node,
-    _set,
     _text,
     _uid,
 )
+from .ipc import Document, edited, observed, unavailable
 
 
 class KiCadBoard(Board):
     """A ``.kicad_pcb`` file, edited through the primitive API."""
 
-    def __init__(self, path: Path, tree: Node) -> None:
+    def __init__(self, path: Path, tree: Node, ipc: Document | None = None) -> None:
         """Wrap an already-parsed board. Use :func:`create` or :func:`load`."""
         self._path = Path(path)
+        self._ipc = ipc
+        if ipc is not None:
+            self._finalizer = weakref.finalize(self, ipc.close)
         self._tree = tree
         self._defs: dict[str, Node] = {}
         self._disk_revision = self._file_revision()
+
+    def _refresh(self) -> None:
+        """Refresh the read-only model from the actual native document."""
+        if self._ipc is not None:
+            self._tree = loads(self._ipc.snapshot())
 
     def _file_revision(self) -> str | None:
         """Hash the exact board bytes, or report that no file exists."""
@@ -89,6 +100,10 @@ class KiCadBoard(Board):
 
     def _copy_to(self, path: Path) -> KiCadBoard:
         """An isolated in-memory copy for read-only candidate checks."""
+        if self._ipc is not None:
+            self._ipc.copy_to(path)
+            document = Document(path, create=False, mode="headless")
+            return KiCadBoard(path, loads(document.snapshot()), document)
         duplicate = KiCadBoard(path, copy.deepcopy(self._tree))
         duplicate._defs = self._defs
         return duplicate
@@ -99,6 +114,7 @@ class KiCadBoard(Board):
         return self._path
 
     @property
+    @observed
     def size(self) -> tuple[float, float]:
         """The outline's ``(width, height)``, or ``(0, 0)`` if undrawn."""
         points: list[Point] = []
@@ -123,6 +139,7 @@ class KiCadBoard(Board):
         return (round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3))
 
     @property
+    @observed
     def layers(self) -> tuple[str, ...]:
         """Every copper layer, front to back."""
         table = self._tree.get("layers")
@@ -135,6 +152,10 @@ class KiCadBoard(Board):
     def set_layers(self, count: int) -> tuple[str, ...]:
         """Set the copper layer count and return the new layers."""
         names = _copper_names(count)
+        if self._ipc is not None:
+            self._ipc.rpc.call("set_layers", count=count)
+            self._refresh()
+            return names
         table = self._tree.get("layers")
         if table is None:
             raise LookupError("board has no layer table")
@@ -164,6 +185,8 @@ class KiCadBoard(Board):
 
     def save(self, *, validate: bool = False) -> Path:
         """Atomically write the board and optionally prove KiCad can load it."""
+        if self._ipc is not None:
+            return self._ipc.save()
         self.assert_current()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         scratch = self._path.with_name(f".{self._path.stem}.writing{self._path.suffix}")
@@ -183,6 +206,9 @@ class KiCadBoard(Board):
 
     def assert_current(self) -> None:
         """Refuse to overwrite a board changed outside this open object."""
+        if self._ipc is not None:
+            self._ipc.assert_current()
+            return
         current = self._file_revision()
         if current != self._disk_revision:
             raise RuntimeError(
@@ -194,6 +220,11 @@ class KiCadBoard(Board):
     @contextlib.contextmanager
     def transaction(self) -> Iterator[None]:
         """Rollback the in-memory board if a composed primitive write fails."""
+        if self._ipc is not None:
+            with self._ipc.transaction():
+                yield
+            self._refresh()
+            return
         tree = copy.deepcopy(self._tree)
         definitions = copy.deepcopy(self._defs)
         try:
@@ -205,65 +236,133 @@ class KiCadBoard(Board):
 
     def set_stackup(self, stackup: Stackup) -> Stackup:
         """Replace only the board's stackup, preserving all other setup."""
+        if self._ipc is not None:
+            unavailable("set_stackup")
         return _settings.set_stackup(self, stackup)
 
+    @observed
     def stackup(self) -> Stackup:
         """Read the physical construction without interpreting its choices."""
         return _settings.stackup(self)
 
     @property
+    @observed
     def thickness(self) -> float:
         """The finished thickness recorded in the board general block."""
         return _settings.thickness(self)
 
     def set_limits(self, limits: BoardLimits) -> BoardLimits:
         """Update board-wide manufacturing limits without changing geometry."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call(
+                "settings", operation="limits", values=limits.as_dict()
+            )["values"]
+            return BoardLimits(**v)
         return _settings.set_limits(self, limits)
 
     def limits(self) -> BoardLimits:
         """Read project-wide limits and the mask bridge stored on the board."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call("settings", operation="limits", values=None)[
+                "values"
+            ]
+            return BoardLimits(**v)
         return _settings.limits(self)
 
     def set_net_classes(self, classes: tuple[NetClass, ...]) -> list[NetClass]:
         """Create or update netclasses in the sibling project."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call(
+                "settings",
+                operation="net_classes",
+                values=[c.as_dict() for c in classes],
+            )["values"]
+            return [NetClass(**item) for item in v]
         return _settings.set_net_classes(self, classes)
 
     def net_classes(self) -> list[NetClass]:
         """Read every project netclass."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call("settings", operation="net_classes", values=None)[
+                "values"
+            ]
+            return [NetClass(**item) for item in v]
         return _settings.net_classes(self)
 
     def set_net_class_patterns(
         self, patterns: tuple[NetClassPattern, ...]
     ) -> list[NetClassPattern]:
         """Replace persistent net-class assignment patterns in the project."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call(
+                "settings", operation="patterns", values=[p.as_dict() for p in patterns]
+            )["values"]
+            return [NetClassPattern(**item) for item in v]
         return _settings.set_net_class_patterns(self, patterns)
 
     def net_class_patterns(self) -> list[NetClassPattern]:
         """Read the project's net-class assignment patterns."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call("settings", operation="patterns", values=None)[
+                "values"
+            ]
+            return [NetClassPattern(**item) for item in v]
         return _settings.net_class_patterns(self)
 
     def assign_net_classes(
         self, assignments: tuple[NetClassAssignment, ...]
     ) -> list[NetClassAssignment]:
         """Replace memberships for the nets mentioned by the caller."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call(
+                "settings",
+                operation="assignments",
+                values=[a.as_dict() for a in assignments],
+            )["values"]
+            return [NetClassAssignment(**item) for item in v]
         return _settings.assign_net_classes(self, assignments)
 
     def net_policy(self, nets: tuple[str, ...]) -> dict[str, object]:
         """Read effective classes with KiCad's own inheritance resolver."""
+        if self._ipc is not None:
+            return self._ipc.rpc.call("net_policy", nets=nets)
         return _settings.net_policy(self, nets)
 
     def net_class_assignments(self) -> list[NetClassAssignment]:
         """Read explicit net-to-netclass memberships."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call("settings", operation="assignments", values=None)[
+                "values"
+            ]
+            return [NetClassAssignment(**item) for item in v]
         return _settings.net_class_assignments(self)
 
     def set_rules(self, rules: tuple[BoardRule, ...]) -> list[BoardRule]:
         """Create or update named custom design rules."""
+        if self._ipc is not None:
+            replacing = {rule.name for rule in rules}
+            if any(
+                rule.layer and rule.name not in replacing
+                for rule in _settings.rules(self)
+            ):
+                unavailable(
+                    "updating rules while native IPC omits an untouched "
+                    "rule's layer condition"
+                )
+            v = self._ipc.rpc.call(
+                "settings", operation="rules", values=[r.as_dict() for r in rules]
+            )["values"]
+            return self._native_rules(v)
         return _settings.set_rules(self, rules)
 
     def rules(self) -> list[BoardRule]:
         """Read numeric custom design rules."""
+        if self._ipc is not None:
+            v = self._ipc.rpc.call("settings", operation="rules", values=None)["values"]
+            return self._native_rules(v)
         return _settings.rules(self)
 
+    @edited
     def graphic(
         self,
         kind: str,
@@ -278,21 +377,44 @@ class KiCadBoard(Board):
             self, kind, points, layer=layer, width=width, fill=fill
         )
 
+    @observed
     def graphics(self, layer: str = "") -> list[Graphic]:
         """Every outline and silkscreen primitive, in file order."""
         return _graphics.graphics(self, layer)
 
     def outline_polygon(self, *, inset: float, max_error: float) -> tuple[Point, ...]:
         """Return KiCad's resolved outside contour as bounded-error points."""
+        if self._ipc is not None:
+            from .outline import polygon
+
+            return polygon(self.graphics("Edge.Cuts"), inset, max_error)
         return _graphics.outline_polygon(self, inset=inset, max_error=max_error)
 
+    @edited
     def move_graphic(self, uuid: str, dx: float, dy: float) -> Graphic:
         """Shift one graphic primitive by an offset."""
         return _graphics.move_graphic(self, uuid, dx, dy)
 
+    @edited
     def remove_graphic(self, uuid: str) -> None:
         """Remove one graphic primitive by UUID."""
         return _graphics.remove_graphic(self, uuid)
+
+    @staticmethod
+    def _native_rules(values: list[dict[str, Any]]) -> list[BoardRule]:
+        """Read the native numeric rules using the existing contract."""
+        return [
+            BoardRule(
+                item["name"],
+                item["condition"],
+                tuple(
+                    Constraint(c["kind"], c.get("min"), c.get("opt"), c.get("max"))
+                    for c in item["constraints"]
+                ),
+                item.get("layer", ""),
+            )
+            for item in values
+        ]
 
     def _graphic_node(self, uuid: str) -> Node:
         """The top-level graphic carrying *uuid*."""
@@ -322,6 +444,7 @@ class KiCadBoard(Board):
         """Load and cache a library footprint's tree."""
         return _footprints._load_def(self, fp_id)
 
+    @edited
     def place(
         self,
         fp_id: str,
@@ -380,32 +503,51 @@ class KiCadBoard(Board):
         """The node for *ref*, or a :class:`LookupError`."""
         return _footprints._require(self, ref)
 
+    @edited
     def move(
         self, ref: str, x: float, y: float, *, anchor: str = "origin"
     ) -> Footprint:
         """Move a footprint by origin or courtyard centre; copper stays."""
         return _footprints.move(self, ref, x, y, anchor=anchor)
 
+    @edited
     def rotate(self, ref: str, rotation: float) -> Footprint:
         """Set a placed footprint's rotation in degrees."""
         return _footprints.rotate(self, ref, rotation)
 
+    @edited
     def flip(self, ref: str, side: str) -> Footprint:
         """Put a footprint on ``"F"`` or ``"B"``."""
         return _footprints.flip(self, ref, side)
 
+    @edited
     def remove(self, ref: str) -> None:
         """Take a footprint off the board."""
         return _footprints.remove(self, ref)
 
+    @observed
     def footprints(self) -> list[Footprint]:
         """Every placed footprint, in reference order."""
+        if self._ipc is not None:
+            return sorted(
+                (
+                    _native.footprint(item)
+                    for item in self._ipc.rpc.call("footprints")["items"]
+                ),
+                key=lambda f: f.ref,
+            )
         return _footprints.footprints(self)
 
+    @observed
     def footprint(self, ref: str) -> Footprint:
         """One placed footprint, with its pads at board positions."""
+        if self._ipc is not None:
+            return _native.footprint(
+                self._ipc.rpc.call("footprints", ref=ref)["items"][0]
+            )
         return _footprints.footprint(self, ref)
 
+    @observed
     def measure_placement(
         self,
         proposals: tuple[PlacementProposal, ...] = (),
@@ -414,6 +556,24 @@ class KiCadBoard(Board):
         edge_exempt_refs: tuple[str, ...] = (),
     ) -> PlacementMeasurement:
         """Measure current or proposed poses without modifying this board."""
+        if self._ipc is not None and proposals:
+            with tempfile.TemporaryDirectory(dir=self._path.parent) as name:
+                candidate = self._copy_to(Path(name) / self._path.name)
+                try:
+                    for proposal in proposals:
+                        if proposal.side is not None:
+                            candidate.flip(proposal.ref, proposal.side)
+                        if proposal.rotation is not None:
+                            candidate.rotate(proposal.ref, proposal.rotation)
+                        candidate.move(
+                            proposal.ref, proposal.x, proposal.y, anchor=proposal.anchor
+                        )
+                    return candidate._measure_current_placement(
+                        edge_clearance, edge_exempt_refs
+                    )
+                finally:
+                    if candidate._ipc is not None:
+                        candidate._ipc.close()
         return _placement.measure_placement(
             self,
             proposals,
@@ -448,14 +608,17 @@ class KiCadBoard(Board):
         """Build a :class:`Pad` from a ``(pad ...)`` node."""
         return _footprints._pad_of(self, node, at, rotation)
 
+    @observed
     def fields(self, ref: str) -> dict[str, str]:
         """Every field on a footprint, by name."""
         return _footprints.fields(self, ref)
 
+    @edited
     def set_field(self, ref: str, name: str, value: str) -> dict[str, str]:
         """Set one of a footprint's fields and return all of them."""
         return _footprints.set_field(self, ref, name, value)
 
+    @edited
     def move_field(
         self,
         ref: str,
@@ -472,14 +635,22 @@ class KiCadBoard(Board):
             self, ref, name, dx, dy, rotation=rotation, layer=layer, hide=hide
         )
 
+    @edited
     def set_net(self, ref: str, pad: str, net: str) -> str:
         """Put EVERY pad of *ref* numbered *pad* on *net*, and return the net."""
         return _footprints.set_net(self, ref, pad, net)
 
+    @observed
     def pad(self, ref: str, pad: str) -> Point:
         """Where *ref*'s *pad* is on the board -- the point to route to."""
+        if self._ipc is not None:
+            found = self.footprint(ref).pad(pad)
+            if found is None:
+                raise LookupError(f"{ref} has no pad {pad}")
+            return found.at
         return _footprints.pad(self, ref, pad)
 
+    @edited
     def track(
         self,
         x1: float,
@@ -494,6 +665,7 @@ class KiCadBoard(Board):
         """Lay one straight copper segment and return it."""
         return _copper.track(self, x1, y1, x2, y2, layer=layer, width=width, net=net)
 
+    @edited
     def via(
         self,
         x: float,
@@ -517,6 +689,7 @@ class KiCadBoard(Board):
             kind=kind,
         )
 
+    @edited
     def zone(
         self,
         points: list[tuple[float, float]],
@@ -552,8 +725,13 @@ class KiCadBoard(Board):
 
     def refill(self) -> int:
         """Recompute every pour against the copper as it now stands."""
+        if self._ipc is not None:
+            count = int(self._ipc.rpc.call("refill")["count"])
+            self._refresh()
+            return count
         return _copper.refill(self)
 
+    @edited
     def text(
         self,
         x: float,
@@ -571,39 +749,73 @@ class KiCadBoard(Board):
     ) -> BoardText:
         """Put one identified literal text item on a board layer."""
         return _graphics.text(
-            self, x, y, text, layer=layer, width=width, height=height,
-            thickness=thickness, rotation=rotation, mirror=mirror,
-            justify=justify, vertical_justify=vertical_justify,
+            self,
+            x,
+            y,
+            text,
+            layer=layer,
+            width=width,
+            height=height,
+            thickness=thickness,
+            rotation=rotation,
+            mirror=mirror,
+            justify=justify,
+            vertical_justify=vertical_justify,
         )
 
     def texts(self, layer: str = "") -> list[BoardText]:
         """Every literal board text item, in file order."""
         return _graphics.texts(self, layer)
 
+    @edited
     def update_text(
-        self, uuid: str, *, x: float | None = None, y: float | None = None,
-        text: str | None = None, layer: str | None = None,
-        width: float | None = None, height: float | None = None,
-        thickness: float | None = None, rotation: float | None = None,
-        mirror: bool | None = None, justify: str | None = None,
+        self,
+        uuid: str,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+        text: str | None = None,
+        layer: str | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        thickness: float | None = None,
+        rotation: float | None = None,
+        mirror: bool | None = None,
+        justify: str | None = None,
         vertical_justify: str | None = None,
     ) -> BoardText:
         """Change only explicitly supplied properties of one text UUID."""
         return _graphics.update_text(
-            self, uuid, x=x, y=y, text=text, layer=layer, width=width,
-            height=height, thickness=thickness, rotation=rotation,
-            mirror=mirror, justify=justify,
+            self,
+            uuid,
+            x=x,
+            y=y,
+            text=text,
+            layer=layer,
+            width=width,
+            height=height,
+            thickness=thickness,
+            rotation=rotation,
+            mirror=mirror,
+            justify=justify,
             vertical_justify=vertical_justify,
         )
 
+    @edited
     def remove_text(self, uuid: str) -> None:
         """Remove one literal board text item by UUID."""
         _graphics.remove_text(self, uuid)
 
     def text_bounds(self, uuids: tuple[str, ...] = ()) -> list[TextBounds]:
         """Return KiCad-measured rendered bounds for board texts."""
+        if self._ipc is not None:
+            return [
+                TextBounds(**item)
+                for item in self._ipc.rpc.call("bounds", uuids=uuids)["bounds"]
+            ]
         return _graphics.text_bounds(self, uuids)
 
+    @edited
     def remove_copper(
         self,
         *,
@@ -634,58 +846,92 @@ class KiCadBoard(Board):
                 f"no layer {name!r} on this board; it has {list(self.layers)}"
             )
 
+    @observed
     def tracks(self) -> list[Track]:
         """Every copper segment on the board."""
         return _copper.tracks(self)
 
+    @observed
     def vias(self) -> list[Via]:
         """Every via on the board."""
         return _copper.vias(self)
 
+    @observed
     def zones(self) -> list[Zone]:
         """Every pour and keep-out."""
         return _copper.zones(self)
 
+    @observed
     def nets(self) -> list[Net]:
         """What the board is MEANT to connect, from its own pads."""
         return _connectivity.nets(self)
 
+    @observed
     def connectivity(self, nets: tuple[str, ...] = ()) -> list[NetConnectivity]:
         """Return pad-bearing connected copper groups without selecting routes."""
         return _connectivity.connectivity(self, nets)
 
+    @observed
     def route_metrics(self, nets: tuple[str, ...] = ()) -> list[RouteMetric]:
         """Measure authored copper on each intended net."""
         return _connectivity.route_metrics(self, nets)
 
-    def inspect_pair(self, first: RoutePath, second: RoutePath, *,
-                     gap_min: float, gap_max: float,
-                     max_uncoupled: float | None = None,
-                     max_skew: float | None = None) -> dict[str, object]:
+    @observed
+    def inspect_pair(
+        self,
+        first: RoutePath,
+        second: RoutePath,
+        *,
+        gap_min: float,
+        gap_max: float,
+        max_uncoupled: float | None = None,
+        max_skew: float | None = None,
+    ) -> dict[str, object]:
         """Inspect caller-selected paths without inferring pair membership."""
         from .differential import inspect_pair
 
-        return inspect_pair(self, first, second, gap_min=gap_min, gap_max=gap_max,
-                            max_uncoupled=max_uncoupled, max_skew=max_skew)
+        return inspect_pair(
+            self,
+            first,
+            second,
+            gap_min=gap_min,
+            gap_max=gap_max,
+            max_uncoupled=max_uncoupled,
+            max_skew=max_skew,
+        )
 
+    @observed
     def unrouted(self) -> list[Connection]:
         """A minimum set of pad-group separations, nearest endpoints first."""
         return _connectivity.unrouted(self)
 
+    @observed
     def fabrication_files(
-        self, output_dir: str | Path, kind: str, layers: tuple[str, ...] = (),
-        *, include_map: bool = True,
+        self,
+        output_dir: str | Path,
+        kind: str,
+        layers: tuple[str, ...] = (),
+        *,
+        include_map: bool = True,
     ) -> list[Path]:
         """Export native manufacturing data from an isolated snapshot."""
         from . import manufacturing
 
         self.assert_current()
         return manufacturing.fabrication_files(
-            self, output_dir, kind, layers, include_map,
+            self,
+            output_dir,
+            kind,
+            layers,
+            include_map,
         )
 
+    @observed
     def compare_fabrication_files(
-        self, files: tuple[Path, ...], kind: str, layers: tuple[str, ...],
+        self,
+        files: tuple[Path, ...],
+        kind: str,
+        layers: tuple[str, ...],
     ) -> list[tuple[str, str]]:
         """Compare native CAM records, ignoring native generation timestamps."""
         from .manufacturing import compare_files
@@ -693,6 +939,7 @@ class KiCadBoard(Board):
         self.assert_current()
         return compare_files(self, files, kind, layers)
 
+    @observed
     def placement_rows(self) -> list[dict[str, str]]:
         """Read actual assembly poses through the native position exporter."""
         from . import manufacturing
@@ -708,6 +955,8 @@ class KiCadBoard(Board):
         self, session_file: str | Path, output_file: str | Path
     ) -> Path:
         """Import an external router's result to a separate board file."""
+        if self._ipc is not None:
+            unavailable("Specctra session import")
         return _routing_exchange.import_session(self, session_file, output_file)
 
     def _pad_copper_layers(self, pad: Pad) -> tuple[str, ...]:
@@ -722,10 +971,12 @@ class KiCadBoard(Board):
         """Factual copper defects KiCad's DRC does not currently report."""
         return _validation._routing_findings(self)
 
+    @observed
     def check(self, *, schematic_parity: bool = False) -> list[Finding]:
         """Every violation, mapped from a position back to a part and pad."""
         return _validation.check(self, schematic_parity=schematic_parity)
 
+    @observed
     def check_proposed(
         self,
         tracks: tuple[Track, ...] = (),
@@ -735,10 +986,12 @@ class KiCadBoard(Board):
         """Check caller-supplied copper on a temporary board copy."""
         return _validation.check_proposed(self, tracks, vias, zones)
 
+    @observed
     def at(self, x: float, y: float, radius: float = 0.01) -> dict[str, object]:
         """What geometrically touches a point, including track interiors."""
         return _inspection.at(self, x, y, radius)
 
+    @observed
     def region(
         self,
         x1: float,
@@ -754,6 +1007,7 @@ class KiCadBoard(Board):
             self, x1, y1, x2, y2, layers=layers, include_fills=include_fills
         )
 
+    @observed
     def render(
         self,
         output_file: str | Path,
@@ -788,6 +1042,7 @@ class KiCadBoard(Board):
             pivot=pivot or None,
         )
 
+    @observed
     def render_layout(
         self,
         output_file: str | Path,
@@ -806,7 +1061,10 @@ class KiCadBoard(Board):
             f".{self._path.stem}.layout-{_uid()}{self._path.suffix}"
         )
         try:
-            snapshot.write_text(dumps(self._tree) + "\n", encoding="utf-8")
+            if self._ipc is not None:
+                self._ipc.copy_to(snapshot)
+            else:
+                snapshot.write_text(dumps(self._tree) + "\n", encoding="utf-8")
             return _render.render_board_layout(
                 snapshot,
                 output_file,
@@ -818,6 +1076,9 @@ class KiCadBoard(Board):
             )
         finally:
             snapshot.unlink(missing_ok=True)
+            if self._ipc is not None:
+                for suffix in (".kicad_pro", ".kicad_dru"):
+                    snapshot.with_suffix(suffix).unlink(missing_ok=True)
 
 
 def create(path: str | Path, *, layers: int = 2, thickness: float = 1.6) -> Board:
@@ -827,27 +1088,15 @@ def create(path: str | Path, *, layers: int = 2, thickness: float = 1.6) -> Boar
     concrete class, so a caller who takes their type from the return value
     binds to the interface rather than to this backend.
     """
-    tree = loads(_TEMPLATE)
-    board = KiCadBoard(Path(path), tree)
-    board.set_layers(layers)
-    general = tree.get("general")
-    if general is not None:
-        thick = general.get("thickness")
-        if thick is not None:
-            _set(thick, 0, thickness)
-    return board
+    _copper_names(layers)
+    document = Document(Path(path), create=True, layers=layers, thickness=thickness)
+    return KiCadBoard(Path(path).resolve(), loads(document.snapshot()), document)
 
 
 def load(path: str | Path) -> Board:
-    """Open an existing board."""
-    file = Path(path)
-    raw = file.read_bytes()
-    board = KiCadBoard(file, loads(raw.decode("utf-8")))
-    # Bind the parsed tree to the bytes that produced it. If the file changed
-    # during this load, the first access detects the new hash instead of
-    # treating an old tree as current.
-    board._disk_revision = hashlib.sha256(raw).hexdigest()
-    return board
+    """Open the selected board through native IPC."""
+    document = Document(Path(path), create=False)
+    return KiCadBoard(Path(path).resolve(), loads(document.snapshot()), document)
 
 
 __all__ = ["KiCadBoard", "create", "load"]

@@ -25,14 +25,32 @@ class Diagnostic:
 
 def _check_kicad() -> Diagnostic:
     """Report the KiCad CLI path and version."""
-    path = cli.path()
-    if path is None:
-        return Diagnostic("KiCad CLI", "FAIL", "kicad-cli was not found")
     try:
+        path = cli.require_ipc()
         version = cli.version()
     except KiCadCliError as exc:
         return Diagnostic("KiCad CLI", "FAIL", str(exc))
     return Diagnostic("KiCad CLI", "PASS", f"{version} at {path}")
+
+
+def _check_schematic_ipc() -> Diagnostic:
+    """Check the configured worker's SDK independently of the MCP interpreter."""
+    from kicad_flow.backend.kicad import schematic
+    from kicad_flow.backend.kicad.ipc import RPC
+
+    try:
+        rpc = RPC(Path(schematic.__file__).with_name("ipc_worker.py"))
+        try:
+            result = rpc.call("probe")
+        finally:
+            rpc.close()
+    except (OSError, RuntimeError, ValueError) as exc:
+        return Diagnostic(
+            "Schematic IPC",
+            "FAIL",
+            f"{exc}. Run scripts/install_kicad_ipc.py and set KICAD_FLOW_IPC_PYTHON.",
+        )
+    return Diagnostic("Schematic IPC", "PASS", str(result["bindings"]))
 
 
 def _check_pymupdf() -> Diagnostic:
@@ -78,9 +96,7 @@ def _check_parts_database() -> Diagnostic:
         detail = status.error or f"not found at {status.database_path}"
         return Diagnostic("JLCPCB parts database", "WARN", detail)
     count = (
-        "unknown count"
-        if status.part_count is None
-        else f"{status.part_count:,} parts"
+        "unknown count" if status.part_count is None else f"{status.part_count:,} parts"
     )
     return Diagnostic(
         "JLCPCB parts database", "PASS", f"{count} at {status.database_path}"
@@ -101,6 +117,7 @@ def run_diagnostics() -> list[Diagnostic]:
     return [
         Diagnostic("KiCadFlow", "PASS", f"{__version__} ({mode})"),
         _check_kicad(),
+        _check_schematic_ipc(),
         _check_pymupdf(),
         _check_dashboard(),
         _check_fabrication_data(),

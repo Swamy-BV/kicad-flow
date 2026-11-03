@@ -52,12 +52,14 @@ class _VisibleText:
     attaches: bool = False
 
 
-def _hidden(effects: Node | None) -> bool:
-    """Whether KiCad marks an item's effects hidden."""
-    if effects is None:
+def _hidden(node: Node | None) -> bool:
+    """Read visibility on the item or its effects in native snapshots."""
+    if node is None:
         return False
-    hide = effects.get("hide")
-    return hide is not None and _text(hide, 0, "yes") != "no"
+    hide = node.get("hide")
+    return (hide is not None and _text(hide, 0, "yes") != "no") or _hidden(
+        node.get("effects")
+    )
 
 
 def _text_width(text: str, size: float) -> float:
@@ -75,7 +77,11 @@ def _text_width(text: str, size: float) -> float:
 
 
 def _text_box(
-    node: Node, content: str | None = None, *, rotation_offset: float = 0.0
+    node: Node,
+    content: str | None = None,
+    *,
+    rotation_offset: float = 0.0,
+    mirror: str = "",
 ) -> _Box:
     """Visible text bounds from an item's ``at`` and ``effects`` nodes."""
     at = node.get("at")
@@ -111,7 +117,12 @@ def _text_box(
     corners = []
     for px, py in ((x0, y0), (x0, y1), (x1, y0), (x1, y1)):
         dx, dy = px - x, py - y
-        corners.append((x + dx * cos + dy * sin, y - dx * sin + dy * cos))
+        rx, ry = dx * cos + dy * sin, -dx * sin + dy * cos
+        if mirror == "x":
+            ry = -ry
+        elif mirror == "y":
+            rx = -rx
+        corners.append((x + rx, y + ry))
     return _Box(
         min(p[0] for p in corners),
         min(p[1] for p in corners),
@@ -223,3 +234,12 @@ def _field_angle(rotation: float) -> float:
     row of resistors at all four rotations, both ways, and looking at it.
     """
     return (-rotation) % 360.0 if rotation % 180 else 0.0
+
+
+def _field_style(rotation: float, mirror: str, justify: str) -> tuple[float, str]:
+    """Convert upright sheet text into its parent-relative field attributes."""
+    angle = _field_angle(rotation)
+    direction = _pin_on_sheet(1, 0, 0, Point(0, 0), rotation + angle, mirror)[0]
+    if direction.x < 0:
+        justify = {"left": "right", "right": "left"}.get(justify, justify)
+    return angle, justify

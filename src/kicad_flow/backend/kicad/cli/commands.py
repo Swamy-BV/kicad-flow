@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -70,6 +71,25 @@ class KiCadCLI:
         """Return the installed KiCad command-line version."""
         proc = self._run(["version"], timeout=15.0)
         return (proc.stdout or proc.stderr).strip()
+
+    def require_ipc(self) -> str:
+        """Require KiCad 11 (including its 10.99 development builds)."""
+        path = self.require_path()
+        version = self.version()
+        numbers = re.match(r"(\d+)\.(\d+)\.", version)
+        if numbers:
+            major, minor = map(int, numbers.groups())
+            if major >= 11 or (major == 10 and minor == 99):
+                return path
+        raise _run.KiCadCliError(
+            f"IPC editing requires KiCad 11; found {version} at {path}. "
+            "Set KICAD_FLOW_KICAD_CLI to the KiCad 11 executable."
+        )
+
+    def specctra(self, board: Path, output: Path) -> Path:
+        """Export an explicit native board snapshot for external routing."""
+        self._run(["pcb", "export", "specctra", "-o", str(output), str(board)])
+        return _require(output, "Specctra design")
 
 
     # -- schematic --------------------------------------------------------

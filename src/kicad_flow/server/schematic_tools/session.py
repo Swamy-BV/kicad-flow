@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from ...backend import create, load
+from ...backend import _library_sheet, create, load
 from ...schematic import Sheet
 from .. import _meta
 from .._app import mcp
@@ -44,8 +44,9 @@ def new_sheet(
 ) -> dict[str, Any]:
     """Start a new schematic sheet and open it for editing.
 
-    Nothing is written until `save_sheet`. The returned `size` is the drawable
-    area inside the title block -- place within it.
+    The sheet is created in the native editor. Successful writes autosave by
+    default; with autosave disabled, `save_sheet` persists it. The returned
+    `size` is the drawable area inside the title block -- place within it.
 
     Args:
         path: Where the sheet will be written.
@@ -64,14 +65,15 @@ def new_sheet(
     """
     try:
         sheet = create(path, paper=paper, title=title, instance_path=instance_path)
-    except (ValueError, OSError) as exc:
+        w, h = sheet.size
+        uuid = sheet.uuid
+    except (ValueError, OSError, RuntimeError) as exc:
         return _fail(exc)
     _OPEN[_key(path)] = sheet
-    w, h = sheet.size
     return {
         "ok": True,
         "path": str(sheet.path),
-        "uuid": sheet.uuid,
+        "uuid": uuid,
         "size": [w, h],
         "grid": 1.27,
     }
@@ -99,9 +101,9 @@ def save_sheet(path: str) -> dict[str, Any]:
 
 
 def _blank(project_dir: str = "") -> Sheet:
-    """A throwaway sheet, for library queries that need no file."""
+    """A library-only observation facade, independent of the editing mode."""
     directory = Path(project_dir).resolve() if project_dir else Path.cwd()
-    return create(directory / "_query.kicad_sch")
+    return _library_sheet(directory)
 
 
 def _atomic_items(
@@ -115,6 +117,9 @@ def _atomic_items(
             for _failed_index, item in enumerate(items):
                 out.append(each(sheet, item))
     except (LookupError, OSError, ValueError) as exc:
+        native_index = getattr(exc, "index", None)
+        if isinstance(native_index, int):
+            _failed_index = native_index
         return {
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",

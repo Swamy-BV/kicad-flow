@@ -9,6 +9,23 @@ ROOT = Path(SPECPATH).resolve().parents[1]
 SRC = ROOT / "src"
 
 datas = [
+    (str(SRC / "kicad_flow/backend/kicad/ipc_host.py"), "kicad_flow/backend/kicad"),
+    (
+        str(SRC / "kicad_flow/backend/kicad/pcb/ipc_worker.py"),
+        "kicad_flow/backend/kicad/pcb",
+    ),
+    (
+        str(SRC / "kicad_flow/backend/kicad/pcb/ipc_settings.py"),
+        "kicad_flow/backend/kicad/pcb",
+    ),
+    (
+        str(SRC / "kicad_flow/backend/kicad/schematic/ipc_worker.py"),
+        "kicad_flow/backend/kicad/schematic",
+    ),
+    (
+        str(SRC / "kicad_flow/backend/kicad/schematic/ipc_edits.py"),
+        "kicad_flow/backend/kicad/schematic",
+    ),
     (str(SRC / "kicad_flow" / "monitor" / "static"), "kicad_flow/monitor/static"),
     (
         str(SRC / "kicad_flow" / "providers" / "jlcpcb" / "capabilities.json"),

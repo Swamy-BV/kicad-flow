@@ -11,6 +11,7 @@ from kicad_flow.schematic.types import (
 from .._sexpr import Node, Sym
 from ._geometry import (
     _field_angle,
+    _field_style,
     _pin_on_sheet,
 )
 from ._nodes import (
@@ -121,7 +122,7 @@ def _layout_fields(
         _set(pat, 0, round(cx + dx, 3))
         _set(pat, 1, round(cy + dy, 3))
         _set(pat, 2, angle)
-        self._justify(prop, justify)
+        self._justify(prop, _field_style(rotation, mirror, justify)[1])
 
 
 def _justify(prop: Node, justify: str) -> None:

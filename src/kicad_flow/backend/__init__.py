@@ -33,9 +33,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from kicad_flow.pcb.api import Board
 from kicad_flow.providers.api import ProjectLibrary
+from kicad_flow.schematic.api import Sheet
 
 from .kicad import PAPER, create, create_board, load, load_board
+
+
+def _library_board(project_dir: str | Path) -> Board:
+    """Provide library observations without opening an editable document.
+
+    Library queries have no board path. In particular, they must not attempt
+    to attach a throwaway board to the user's selected live editor.
+    """
+    from .kicad._sexpr import Node, Sym
+    from .kicad.pcb.board import KiCadBoard
+
+    return KiCadBoard(
+        Path(project_dir).resolve() / "_query.kicad_pcb", Node([Sym("kicad_pcb")])
+    )
+
+
+def _library_sheet(project_dir: str | Path) -> Sheet:
+    """Provide symbol-library facts without creating or attaching a document."""
+    from .kicad._sexpr import Node, Sym
+    from .kicad.schematic.sheet import KiCadSheet
+
+    return KiCadSheet(
+        Path(project_dir).resolve() / "_query.kicad_sch", Node([Sym("kicad_sch")]), "A4"
+    )
 
 
 def project_library(project_dir: str | Path) -> ProjectLibrary:
@@ -44,6 +70,5 @@ def project_library(project_dir: str | Path) -> ProjectLibrary:
 
     return KiCadProjectLibrary(Path(project_dir))
 
-__all__ = [
-    "PAPER", "create", "create_board", "load", "load_board", "project_library"
-]
+
+__all__ = ["PAPER", "create", "create_board", "load", "load_board", "project_library"]

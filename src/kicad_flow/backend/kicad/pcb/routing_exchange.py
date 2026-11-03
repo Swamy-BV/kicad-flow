@@ -74,7 +74,11 @@ _OUTLINE_TOLERANCE_MM = 0.02
 def _snapshot(board: BoardState, directory: Path) -> Path:
     """Write the current in-memory board with its same-project rules."""
     target = directory / board._path.name
-    target.write_text(dumps(board._tree) + "\n", encoding="utf-8")
+    document = getattr(board, "_ipc", None)
+    if document is not None:
+        document.copy_to(target)
+    else:
+        target.write_text(dumps(board._tree) + "\n", encoding="utf-8")
     for suffix in (".kicad_pro", ".kicad_dru"):
         source = board._path.with_suffix(suffix)
         if source.is_file():
@@ -92,9 +96,17 @@ def export_design(board: BoardState, output_file: str | Path) -> Path:
     with tempfile.TemporaryDirectory(dir=board._path.parent) as name:
         snapshot = _snapshot(board, Path(name))
         scratch = Path(name) / target.name
-        result = run_pcbnew(
-            _EXPORT, {"board": str(snapshot), "dsn": str(scratch)}, timeout=60,
-        )
+        if getattr(board, "_ipc", None) is not None:
+            from ..cli import cli
+
+            cli.specctra(snapshot, scratch)
+            result = {"ok": True}
+        else:
+            result = run_pcbnew(
+                _EXPORT,
+                {"board": str(snapshot), "dsn": str(scratch)},
+                timeout=60,
+            )
         if not result.get("ok") or not scratch.is_file():
             raise RuntimeError("KiCad could not export the routing design")
         os.replace(scratch, target)
@@ -121,8 +133,9 @@ def import_session(
     for suffix in companions:
         source = board._path.with_suffix(suffix)
         destination = target.with_suffix(suffix)
-        if (destination.exists() and (not source.is_file()
-                or source.read_bytes() != destination.read_bytes())):
+        if destination.exists() and (
+            not source.is_file() or source.read_bytes() != destination.read_bytes()
+        ):
             raise ValueError(f"routing output companion already differs: {destination}")
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=board._path.parent) as name:
@@ -156,11 +169,13 @@ def import_session(
             raise RuntimeError("routing import changed the footprint placement")
         source_pads = sorted(
             (part.ref, part.fp_id, pad.number, pad.net)
-            for part in board.footprints() for pad in part.pads
+            for part in board.footprints()
+            for pad in part.pads
         )
         routed_pads = sorted(
             (part.ref, part.fp_id, pad.number, pad.net)
-            for part in routed.footprints() for pad in part.pads
+            for part in routed.footprints()
+            for pad in part.pads
         )
         if routed_pads != source_pads:
             raise RuntimeError("routing import changed footprint IDs or pad nets")
@@ -203,8 +218,10 @@ def _outline_difference(source: Path, routed: Path) -> str:
         for index, contour in enumerate(left):
             if not remaining:
                 return f"missing {kind} contour {index}"
-            choices = [(_ring_deviation(contour, candidate), offset)
-                       for offset, candidate in enumerate(remaining)]
+            choices = [
+                (_ring_deviation(contour, candidate), offset)
+                for offset, candidate in enumerate(remaining)
+            ]
             deviation, match = min(choices)
             if deviation > _OUTLINE_TOLERANCE_MM:
                 return (

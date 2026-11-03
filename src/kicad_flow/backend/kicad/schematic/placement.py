@@ -92,11 +92,10 @@ def _placement_bounds(self: SheetState) -> list[PlacementBounds]:
         )
         for prop in node.get_all("property"):
             value = _text(prop, 1)
-            effects = prop.get("effects")
-            if not value or _hidden(effects):
+            if not value or _hidden(prop):
                 continue
             field = _text(prop)
-            box = _text_box(prop, value, rotation_offset=rotation)
+            box = _text_box(prop, value, rotation_offset=rotation, mirror=mirror)
             found.append(
                 PlacementBounds(
                     name=f"{ref}.{unit}.{field}",

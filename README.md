@@ -13,14 +13,25 @@ file formats and geometry; the caller controls placement, wiring, and routing.
 
 ## Quick start
 
-Requires Windows, Python 3.10+, and KiCad 10.
+Requires Windows, Python 3.10+, and a KiCad 11 nightly (10.99).
+`main` tracks the IPC migration; the previous backend is on `kicad10`.
+Schematic and PCB primitives edit native objects directly through IPC.
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
+python scripts/install_kicad_ipc.py
+$env:KICAD_FLOW_IPC_PYTHON = (Resolve-Path out/kicad-ipc/venv/Scripts/python.exe).Path
 .\.venv\Scripts\python.exe -m kicad_flow.server doctor
 .\.venv\Scripts\python.exe -m kicad_flow.server
 ```
+
+Set `KICAD_FLOW_KICAD_CLI` to the nightly's `kicad-cli.exe` when several versions
+are installed. Editing defaults to an owned headless editor. Set
+`KICAD_FLOW_SCHEMATIC_MODE=gui` or `KICAD_FLOW_PCB_MODE=gui` to edit an
+already-open document live, with KiCad's IPC server enabled.
+See [schematic](src/kicad_flow/backend/kicad/schematic/README.md) and
+[PCB IPC notes](src/kicad_flow/backend/kicad/pcb/README.md) for current limitations.
 
 For an MCP client, use the virtual environment's Python executable with
 arguments `-m kicad_flow.server`. Add `--http` for
@@ -29,10 +40,10 @@ arguments `-m kicad_flow.server`. Add `--http` for
 ## Capabilities
 
 - **Schematics:** components, wiring, labels, hierarchy, footprint assignment, ERC.
-- **PCB:** schematic synchronization, placement, copper, outlines, stackups, DRC.
+- **PCB:** schematic synchronization, placement, copper, outlines, DRC.
 - **Review:** connectivity, geometry, proposed-change checks, 2D and 3D renders.
 - **Manufacturing:** JLCPCB profiles, Gerbers, drills, BOM/CPL, checked packages.
-- **Routing:** optional FreeRouting export, execution, and import.
+- **Routing:** FreeRouting design export; session import awaits native IPC support.
 
 Coordinates are in millimetres. Check connectivity, ERC, DRC, and renders before
 fabrication. See [JLCPCB setup](src/kicad_flow/providers/jlcpcb/README.md) for the

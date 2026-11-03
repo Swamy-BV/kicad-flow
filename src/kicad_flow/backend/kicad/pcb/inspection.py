@@ -115,9 +115,7 @@ def at(self: BoardState, x: float, y: float, radius: float = 0.01) -> dict[str, 
         for via in self.vias()
         if math.dist((x, y), (via.at.x, via.at.y)) <= via.diameter / 2 + radius
     ]
-    zone_nodes = {
-        _text(node.get("uuid")): node for node in self._tree.get_all("zone")
-    }
+    zone_nodes = {_text(node.get("uuid")): node for node in self._tree.get_all("zone")}
     zones = []
     for zone in self.zones():
         node = zone_nodes.get(zone.uuid)
@@ -127,23 +125,28 @@ def at(self: BoardState, x: float, y: float, radius: float = 0.01) -> dict[str, 
             _text(fill.get("layer")) == zone.layer
             and (pts := fill.get("pts")) is not None
             and _point_in_polygon(
-                (x, y), [(_f(point, 0), _f(point, 1))
-                         for point in pts.get_all("xy")]
+                (x, y), [(_f(point, 0), _f(point, 1)) for point in pts.get_all("xy")]
             )
             for fill in node.get_all("filled_polygon")
         ):
             zones.append(
-                {"uuid": zone.uuid, "net": zone.net,
-                 "layer": zone.layer, "filled": True}
+                {
+                    "uuid": zone.uuid,
+                    "net": zone.net,
+                    "layer": zone.layer,
+                    "filled": True,
+                }
             )
-    uuids = [
-        str(item["uuid"])
-        for item in [*pads, *tracks, *vias, *zones]
-    ]
+    uuids = [str(item["uuid"]) for item in [*pads, *tracks, *vias, *zones]]
+    document = getattr(self, "_ipc", None)
     native = (
-        run_pcbnew(_POINT_CONNECTIVITY_SCRIPT,
-                   {"path": str(self.path), "uuids": uuids})
-        if uuids else {"groups": [], "missing": []}
+        document.rpc.call("point_connectivity", uuids=uuids)
+        if document is not None
+        else run_pcbnew(
+            _POINT_CONNECTIVITY_SCRIPT, {"path": str(self.path), "uuids": uuids}
+        )
+        if uuids
+        else {"groups": [], "missing": []}
     )
     if native["missing"]:
         raise ValueError(f"point copper missing from native board: {native['missing']}")
@@ -152,11 +155,10 @@ def at(self: BoardState, x: float, y: float, radius: float = 0.01) -> dict[str, 
     for group in groups:
         if group["net"]:
             per_net.setdefault(str(group["net"]), []).append(group)
-    connected = (
-        any(sum(len(group["uuids"]) for group in net_groups) >= 2
-            for net_groups in per_net.values())
-        and all(len(net_groups) == 1 for net_groups in per_net.values())
-    )
+    connected = any(
+        sum(len(group["uuids"]) for group in net_groups) >= 2
+        for net_groups in per_net.values()
+    ) and all(len(net_groups) == 1 for net_groups in per_net.values())
     return {
         "x": round(x, 3),
         "y": round(y, 3),

@@ -67,11 +67,13 @@ def board_components(self: SheetState) -> list[BoardComponent]:
         ref = _text(item.get("ref"))
         if ref.startswith("#"):
             continue
-        found.append(BoardComponent(
-            ref=ref,
-            value=_text(item.get("value")),
-            footprint=_text(item.get("footprint")),
-        ))
+        found.append(
+            BoardComponent(
+                ref=ref,
+                value=_text(item.get("value")),
+                footprint=_text(item.get("footprint")),
+            )
+        )
     return sorted(found, key=lambda component: component.ref)
 
 
@@ -117,11 +119,11 @@ def check(self: SheetState) -> list[Finding]:
             items = violation.get("items") or [{}]
             for item in items:
                 pos = item.get("pos") or {}
-                # KiCad reports ERC positions in hundredths of a
-                # millimetre's worth of inches -- x100 puts them back in mm.
+                # The CLI request explicitly uses millimetres. KiCad 11's
+                # erc.v1 report records these directly in coordinate_units=mm.
                 at = Point(
-                    round(float(pos.get("x", 0.0)) * 100, 3),
-                    round(float(pos.get("y", 0.0)) * 100, 3),
+                    round(float(pos.get("x", 0.0)), 3),
+                    round(float(pos.get("y", 0.0)), 3),
                 )
                 ref, number = where_by_page.get(page, {}).get(
                     (round(at.x, 2), round(at.y, 2)), ("", "")
@@ -153,8 +155,7 @@ def _visible_text(self: SheetState) -> list[_VisibleText]:
         symbol_rotation = _f(symbol_at, 2)
         for prop in node.get_all("property"):
             value = _text(prop, 1)
-            effects = prop.get("effects")
-            if not value or _hidden(effects):
+            if not value or _hidden(prop):
                 continue
             field = _text(prop)
             at_node = prop.get("at")
@@ -162,15 +163,19 @@ def _visible_text(self: SheetState) -> list[_VisibleText]:
                 _VisibleText(
                     kind="field",
                     name=f"{ref}.{unit}.{field} {value!r}",
-                    box=_text_box(prop, value, rotation_offset=symbol_rotation),
+                    box=_text_box(
+                        prop,
+                        value,
+                        rotation_offset=symbol_rotation,
+                        mirror=_text(node.get("mirror")),
+                    ),
                     at=Point(_f(at_node, 0), _f(at_node, 1)),
                 )
             )
 
     for kind, node_name in _LABEL_NODE.items():
         for node in self._tree.get_all(node_name):
-            effects = node.get("effects")
-            if _hidden(effects):
+            if _hidden(node):
                 continue
             value = _text(node)
             at_node = node.get("at")
@@ -186,9 +191,8 @@ def _visible_text(self: SheetState) -> list[_VisibleText]:
             )
 
     for node in self._tree.get_all("text"):
-        effects = node.get("effects")
         value = _text(node)
-        if not value or _hidden(effects):
+        if not value or _hidden(node):
             continue
         at_node = node.get("at")
         shown = value.replace("\n", " ")

@@ -22,19 +22,31 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.10'
-      - name: Install KiCad 10
+      - name: Install KiCad 11 development build and libraries
         shell: pwsh
         run: |
-          choco install kicad --version=10.0.6 --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/setup_kicad11_ci.ps1
       - name: Install project and development tools
         run: python -m pip install -e ".[dev]"
+      - name: Install pinned official development IPC bindings
+        shell: pwsh
+        run: |
+          python scripts/install_kicad_ipc.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ipcPython = (Resolve-Path out/kicad-ipc/venv/Scripts/python.exe).Path
+          "KICAD_FLOW_IPC_PYTHON=$ipcPython" | Add-Content -LiteralPath $env:GITHUB_ENV
       - name: Check installation
         run: python -m kicad_flow.server doctor
       - name: Lint
         run: python -m ruff check .
       - name: Type check
         run: python -m mypy
+      - name: Native schematic hierarchy, rollback and relocation
+        run: python examples/scripts/schematic_ipc.py
+      - name: Native schematic transforms, multi-unit symbols and CRUD
+        run: python examples/scripts/schematic_native.py
+      - name: Native PCB transforms, rollback and reload
+        run: python examples/scripts/pcb_ipc.py
       - name: Default batch limit
         env:
           KICAD_FLOW_BATCH_LIMIT: '5'
