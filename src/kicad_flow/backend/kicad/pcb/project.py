@@ -378,10 +378,13 @@ def _forms(text: str) -> list[tuple[int, int, Node]]:
     quoted = False
     escaped = False
     comment = False
+    clean = list(text)
     for index, char in enumerate(text):
         if comment:
             if char in "\r\n":
                 comment = False
+            else:
+                clean[index] = " "
             continue
         if quoted:
             if escaped:
@@ -393,6 +396,7 @@ def _forms(text: str) -> list[tuple[int, int, Node]]:
             continue
         if char == "#":
             comment = True
+            clean[index] = " "
         elif char == '"':
             quoted = True
         elif char == "(":
@@ -405,11 +409,37 @@ def _forms(text: str) -> list[tuple[int, int, Node]]:
                 raise ValueError("unbalanced ')' in rules file")
             if depth == 0 and start >= 0:
                 end = index + 1
-                out.append((start, end, loads(text[start:end])))
+                out.append((start, end, loads("".join(clean[start:end]))))
                 start = -1
     if quoted or depth:
         raise ValueError("unterminated string or expression in rules file")
     return out
+
+
+def has_external_rule_comments(board: Path) -> bool:
+    """Observe comments the native per-rule serializer cannot represent."""
+    path = _rules_path(board)
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    spans = [(start, end) for start, end, node in _forms(text)
+             if node.name == "rule"]
+    quoted = escaped = comment = False
+    for index, char in enumerate(text):
+        if comment:
+            comment = char not in "\r\n"
+        elif quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char == "#":
+            if not any(start <= index < end for start, end in spans):
+                return True
+            comment = True
+    return False
 
 
 def _atom(node: Node | None, index: int = 0) -> str:

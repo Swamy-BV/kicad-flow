@@ -1,0 +1,9 @@
+(version 2)
+
+(rule "Preserved note"
+  # Preserve this rule and its comment (including an unmatched parenthesis.
+  (condition "A.NetName == 'UNUSED'")
+  (layer outer)
+  (severity warning)
+  (constraint track_width (min 0.1mm))
+)

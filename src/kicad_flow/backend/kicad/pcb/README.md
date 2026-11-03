@@ -37,6 +37,12 @@ Session import uses native `ImportSpecctraSession` in a private headless board,
 rejects skipped items, verifies outline, placements, nets and layers, then
 publishes a separate board with its manufacturing profile and project files.
 Snapshot observations understand KiCad 11's footprint `transform` blocks.
+Custom-rule layer scopes are observed from the rule file KiCad writes because
+the native reply omits them. Updates preserve untouched scopes, comments and
+severities, check the file revision, and verify the saved selectors before
+accepting the write. Restoration also uses native IPC.
+Files with comments outside rule blocks are refused before a write because
+the native serializer cannot retain those comments.
 
 Current limitations:
 
@@ -44,8 +50,6 @@ Current limitations:
   writes and creating a board with a non-default thickness are refused.
 - Effective netclasses are observed natively, but per-field ownership is not
   exposed. Policy replies report unknown owners and an explicit warning.
-- Layer-filtered custom rules are refused: this nightly writes their layer
-  condition but omits it from IPC readback, preventing verification.
 - Non-orthogonal footprint protobuf round trips can produce native
   `lib_footprint_mismatch` warnings. A direct SDK probe reproduced this after
   both cloning and a whole-footprint field update; initial native placement
@@ -77,8 +81,10 @@ The valid import has zero unrouted connections, DRC errors and DRC warnings.
 `python examples/scripts/pcb_fields_ipc.py` verifies field edits on a recorded
 native 37-degree footprint, batch rollback, angle refusal and reload with zero
 library-mismatch findings.
+`python examples/scripts/pcb_rules_ipc.py` verifies concrete, outer and inner
+layer rules with native DRC, untouched comments, reload and failed-list isolation.
 
-The full LED example is not yet passing: stackup and layer-filtered rule checks
-are unavailable, and its free-junction expectation conflicts with native
+The full LED example is not yet passing: stackup writes remain unavailable,
+and its free-junction expectation conflicts with native
 schematic cleanup. Unsupported free junctions are refused explicitly. Its routed
 PCB reached zero unrouted connections and zero DRC errors; warnings remain.

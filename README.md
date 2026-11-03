@@ -14,7 +14,7 @@ file formats and geometry; the caller controls placement, wiring, and routing.
 ## Quick start
 
 Requires Windows, Python 3.10+, and a KiCad 11 nightly (10.99).
-`main` tracks the IPC migration; the previous backend is on `kicad10`.
+`kicad11` tracks the IPC migration; the previous backend is on `kicad10`.
 Schematic and PCB primitives edit native objects directly through IPC.
 
 ```powershell
@@ -43,7 +43,7 @@ arguments `-m kicad_flow.server`. Add `--http` for
 - **PCB:** schematic synchronization, placement, copper, outlines, DRC.
 - **Review:** connectivity, geometry, proposed-change checks, 2D and 3D renders.
 - **Manufacturing:** JLCPCB profiles, Gerbers, drills, BOM/CPL, checked packages.
-- **Routing:** FreeRouting design export; session import awaits native IPC support.
+- **Routing:** FreeRouting design export and native session import into a checked copy.
 
 Coordinates are in millimetres. Check connectivity, ERC, DRC, and renders before
 fabrication. See [JLCPCB setup](src/kicad_flow/providers/jlcpcb/README.md) for the

@@ -1,0 +1,9 @@
+(version 2)
+
+# Preserve this rule and its comment when another named rule changes.
+(rule "Preserved note"
+  (condition "A.NetName == 'UNUSED'")
+  (layer outer)
+  (severity warning)
+  (constraint track_width (min 0.1mm))
+)

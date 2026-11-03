@@ -2,15 +2,45 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import math
 from typing import Any
+
+
+def _rules_revision(self: Any) -> str | None:
+    """Observe native-written rule bytes without editing the document."""
+    path = self.root.with_suffix(".kicad_dru")
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _rule_layer(self: Any, rule: Any, scope: str, source: Any) -> None:
+    """Translate an explicit saved or caller-supplied layer selector."""
+    rule.proto.ClearField("layer_condition")
+    if scope in ("outer", "inner"):
+        rule.layer_mode = getattr(source.CustomRuleLayerMode, "CRLM_" + scope.upper())
+    elif scope:
+        rule.single_layer = self.layer(scope)
 
 
 def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
     """Read and change supported native design settings without file writes."""
     operation = args["operation"]
     values = args.get("values")
+    if operation in ("rules_accept", "rules_rollback"):
+        if self.rules_checkpoint is None:
+            raise ValueError("No custom rule write awaits verification")
+        if _rules_revision(self) != self.rules_revision:
+            raise ValueError(
+                "custom rules changed externally during verification; "
+                "reload_board before further rule writes"
+            )
+        if operation == "rules_rollback":
+            result = self.b.set_custom_design_rules(self.rules_checkpoint)
+            if result.status not in (self.bc.CRS_VALID, self.bc.CRS_NONE):
+                raise ValueError("KiCad could not restore the previous custom rules")
+        self.rules_checkpoint = None
+        return {}
     if operation == "limits":
         rules = self.b.get_design_rules().rules
         names = {
@@ -219,11 +249,23 @@ def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
         }
     if operation == "rules":
         source = importlib.import_module("kipy.board_rules")
+        if values is not None and args["revision"] != _rules_revision(self):
+            raise ValueError("custom rules changed before the native write; retry")
         response = self.b.get_custom_design_rules()
+        if response.status == self.bc.CRS_INVALID:
+            raise ValueError(
+                "Existing custom rules are invalid: " + response.error_text
+            )
         rules = {r.name: r for r in response.rules}
         aliases = {"diff_pair_uncoupled": "max_uncoupled"}
         if values is not None:
-            original = list(response.rules)
+            if self.rules_checkpoint is not None:
+                raise ValueError("A previous native custom rule write is unverified")
+            if rules.keys() != args["scopes"].keys():
+                raise ValueError("native custom rules differ from the saved snapshot")
+            for name, rule in rules.items():
+                _rule_layer(self, rule, args["scopes"][name], source)
+            original = [source.CustomRule(rule.proto) for rule in rules.values()]
             if len({r["name"] for r in values}) != len(values):
                 raise ValueError("rule names must be unique within one call")
             for value in values:
@@ -235,14 +277,15 @@ def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
                     raise ValueError(
                         "rule name, condition and constraints cannot be empty"
                     )
-                rule = source.CustomRule()
+                existing = rules.get(value["name"])
+                rule = source.CustomRule(
+                    existing.proto if existing is not None else None
+                )
+                rule.proto.ClearField("constraints")
                 rule.name, rule.condition = value["name"], value["condition"]
-                rule.severity = self.ct.RS_ERROR
-                if value.get("layer"):
-                    raise ValueError(
-                        "This KiCad nightly omits rule layer conditions from IPC "
-                        "readback; a layer-filtered rule cannot be verified"
-                    )
+                if existing is None:
+                    rule.severity = self.ct.RS_ERROR
+                _rule_layer(self, rule, value.get("layer", ""), source)
                 for constraint in value["constraints"]:
                     bounds = [
                         constraint[k]
@@ -266,10 +309,15 @@ def settings(self: Any, args: dict[str, Any]) -> dict[str, Any]:
                         if constraint.get(key) is not None:
                             setattr(native.numeric, key, round(constraint[key] * 1e6))
                 rules[rule.name] = rule
+            if args["revision"] != _rules_revision(self):
+                raise ValueError("custom rules changed before the native write; retry")
             response = self.b.set_custom_design_rules(list(rules.values()))
             if response.status != self.bc.CRS_VALID:
-                self.b.set_custom_design_rules(original)
+                if _rules_revision(self) != args["revision"]:
+                    self.b.set_custom_design_rules(original)
                 raise ValueError(response.error_text)
+            self.rules_checkpoint = original
+            self.rules_revision = _rules_revision(self)
         rows = []
         for rule in response.rules:
             row = {

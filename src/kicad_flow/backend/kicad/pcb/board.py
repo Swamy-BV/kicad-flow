@@ -19,7 +19,6 @@ from kicad_flow.pcb.types import (
     BoardRule,
     BoardText,
     Connection,
-    Constraint,
     Finding,
     Footprint,
     FootprintDef,
@@ -340,26 +339,17 @@ class KiCadBoard(Board):
     def set_rules(self, rules: tuple[BoardRule, ...]) -> list[BoardRule]:
         """Create or update named custom design rules."""
         if self._ipc is not None:
-            replacing = {rule.name for rule in rules}
-            if any(
-                rule.layer and rule.name not in replacing
-                for rule in _settings.rules(self)
-            ):
-                unavailable(
-                    "updating rules while native IPC omits an untouched "
-                    "rule's layer condition"
-                )
-            v = self._ipc.rpc.call(
-                "settings", operation="rules", values=[r.as_dict() for r in rules]
-            )["values"]
-            return self._native_rules(v)
+            from .ipc_rules import write
+
+            return write(self._ipc, rules)
         return _settings.set_rules(self, rules)
 
     def rules(self) -> list[BoardRule]:
         """Read numeric custom design rules."""
         if self._ipc is not None:
-            v = self._ipc.rpc.call("settings", operation="rules", values=None)["values"]
-            return self._native_rules(v)
+            from .ipc_rules import read
+
+            return read(self._ipc)
         return _settings.rules(self)
 
     @edited
@@ -399,22 +389,6 @@ class KiCadBoard(Board):
     def remove_graphic(self, uuid: str) -> None:
         """Remove one graphic primitive by UUID."""
         return _graphics.remove_graphic(self, uuid)
-
-    @staticmethod
-    def _native_rules(values: list[dict[str, Any]]) -> list[BoardRule]:
-        """Read the native numeric rules using the existing contract."""
-        return [
-            BoardRule(
-                item["name"],
-                item["condition"],
-                tuple(
-                    Constraint(c["kind"], c.get("min"), c.get("opt"), c.get("max"))
-                    for c in item["constraints"]
-                ),
-                item.get("layer", ""),
-            )
-            for item in values
-        ]
 
     def _graphic_node(self, uuid: str) -> Node:
         """The top-level graphic carrying *uuid*."""

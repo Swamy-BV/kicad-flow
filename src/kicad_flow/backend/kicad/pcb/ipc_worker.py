@@ -58,6 +58,8 @@ class Worker:
         self.templates: dict[tuple[str, str, float], Any] = {}
         self.root = Path()
         self.cli = ""
+        self.rules_checkpoint: list[Any] | None = None
+        self.rules_revision: str | None = None
 
     def point(self, x: float, y: float) -> Any:
         """Convert explicit millimetres to native integer units."""
