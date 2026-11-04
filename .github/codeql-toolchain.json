@@ -1,0 +1,10 @@
+{
+  "version": "2.27.4",
+  "python_queries": "1.9.0",
+  "sha256": {
+    "win64": "39f7f53a2136e773d11e636172e48caa714aabc84062a1a972dfc68cc37e396e",
+    "linux64": "da3e952c7fe978a0b6b93e75d9cbabbdf8535667ca0810bd4b2ae37bc840ffee",
+    "linux-arm64": "1c015b411c6e1c7f7e767eb8c9408fc6a2012d24d78b177cf22f29edc5772d10",
+    "osx64": "d5940b767427f113705aca401c7c09cf7af8cedb82fdad8a170c9d964b3a699b"
+  }
+}

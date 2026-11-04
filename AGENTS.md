@@ -8,6 +8,7 @@ shape of it.
 ```
 python -m ruff check .                      # lint; --fix to apply
 python -m mypy                              # strict, src/ only
+python scripts/codeql.py                    # local CI-equivalent CodeQL scan
 python examples/scripts/fc.py       # build an example, end to end
 python -m kicad_flow.server --http          # the server on a real socket
 ```

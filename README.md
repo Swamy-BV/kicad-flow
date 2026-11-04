@@ -117,11 +117,14 @@ through resources or `get_workflow`. See [context delivery](docs/mcp-context.md)
 ```powershell
 python -m ruff check .
 python -m mypy
+python scripts/codeql.py
 $env:KICAD_FLOW_BATCH_LIMIT = "1000"
 python examples/scripts/fc.py
 python examples/scripts/led_digits.py
 ```
 
 Examples are the integration checks. Contributor guidance is in [AGENTS.md](AGENTS.md).
+The CodeQL command installs the pinned official bundle and writes SARIF and a
+summary under `out/codeql/`; findings return a nonzero exit code.
 For a Windows bundle, run `packaging/windows/build.ps1`; distribute the entire
 `dist/kicad-flow` directory. KiCad remains required.

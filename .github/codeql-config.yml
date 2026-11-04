@@ -1,0 +1,10 @@
+name: KiCadFlow
+queries:
+  - uses: security-and-quality
+paths-ignore:
+  - .venv/**
+  - .venv-release/**
+  - out/**
+  - build/**
+  - dist/**
+  - '**/__pycache__/**'

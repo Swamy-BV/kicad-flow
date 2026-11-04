@@ -19,9 +19,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read shared CodeQL version
+        id: codeql-version
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open(".github/codeql-toolchain.json"))["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         with:
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v${{ steps.codeql-version.outputs.version }}/codeql-bundle-linux64.tar.zst
           languages: python
           build-mode: none
-          queries: security-and-quality
+          config-file: .github/codeql-config.yml
       - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
